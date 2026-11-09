@@ -205,9 +205,9 @@ The maintainer generates it locally with `NKeeper.PluginTool keygen --release`. 
 ### 7.2 Frontend
 
 - Plugin frontend files are served from the verified in-memory copy, never from disk, at `/plugins/<id>/<version>/<first 12 hex digits of the package SHA-256>/<path inside frontend/>`:
-  - only for a **loaded** plugin, and only files under `frontend/` in its package;
+  - only to a signed-in user ([architecture.md §6.4](architecture.md#64-request-policies)), only for a **loaded** plugin, and only files under `frontend/` in its package;
   - only file types on an allow-list: `.js`, `.mjs`, `.css`, `.json`, `.map`, `.svg`, `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.ico`, `.woff`, `.woff2`. Anything else is 404;
-  - with an explicit content type, `X-Content-Type-Options: nosniff` and `Cache-Control: public, max-age=31536000, immutable`. The hash prefix in the URL means a new package never reuses a cached URL.
+  - with an explicit content type, `X-Content-Type-Options: nosniff` and `Cache-Control: private, max-age=31536000, immutable`: `private` because they need a sign-in, so no shared cache may keep them. The hash prefix in the URL means a new package never reuses a cached URL.
 - The shell provides React and `@nkeeper/sdk` through an import map, so plugins share one copy and can't bring their own. The shared modules are `react`, `react/jsx-runtime`, `react-dom`, `react-dom/client` and `@nkeeper/sdk`. They are built once, by `@nkeeper/runtime`, as hashed ES modules that the shell's own build also imports by the same names, so there is exactly one React in the page.
 - Integrity: browsers can't attach Subresource Integrity to `import()`, and an import map can't gain entries after the first module loads. Serving only verified bytes is the control, and `GET /api/plugins` publishes each entry module's SHA-256 so it can be checked if browser support arrives.
 - **The import map is the one inline script,** and the Content Security Policy allows it by hash only:

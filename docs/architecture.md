@@ -13,6 +13,8 @@ How NKeeper is put together today: the parts of core, how plugins plug in, and t
 | **Packaging** | `core/backend/NKeeper.Plugins.Packaging` | The `.nkp` format, trust and signature verification: bytes in, a result out. No I/O of its own. |
 | **Plugin host** | `core/backend/NKeeper.Plugins.Host` | Directory and trust checks, pinning, dependency resolution, one load context per plugin, enable state. |
 | **Persistence** | `core/backend/NKeeper.Core.Persistence` | `CoreDbContext` (schema `core`), its migrations, and the stores the host writes plugin records and audit events to. |
+| **Kernel** | `core/backend/NKeeper.Core` | Core services every feature uses. Today: the audit log. |
+| **Identity** | `core/backend/NKeeper.Identity` | Accounts, sign-in, server-side sessions, the key ring and the request policies (§6). |
 | **Server** | `core/backend/NKeeper.Server` | The composition root: startup order, `GET /api/plugins`, plugin frontend files, and the shell with its security policy. |
 | **Shared runtime** | `core/frontend/runtime` (`@nkeeper/runtime`) | Builds the modules the shell shares with plugins, and the import map that names them. |
 | **Shell** | `core/frontend/app` | The single-page app. Loads each plugin's frontend module. |
@@ -38,7 +40,7 @@ Each rule is enforced by a test in `core/backend/tests/NKeeper.Architecture.Test
 
 1. Refuse to run as root, outside Development.
 2. If it serves the shell (`Frontend:Root`), read `index.html` and check it: no inline script except at most one import map. Derive the Content Security Policy from the import map's hash.
-3. Migrate the core schema.
+3. Migrate the core schema. Then bring the key ring in line with its certificate (§6.3), and create the bootstrap administrator if one is configured (§6.1).
 4. Plugin host: check the plugin and trust directories, verify every package, check pins and dependencies, and load the enabled plugins from their verified bytes, each into its own `AssemblyLoadContext`.
 5. Call each loaded plugin's `ConfigureServices`. If one throws, its registrations are rolled back, and it and the plugins that depend on it are refused (`load_failed`); the others carry on. With `Plugins:RequireAllEnabledLoaded`, any enabled plugin that didn't load stops startup instead.
 6. Build the application, then map core endpoints, each plugin's endpoints (`MapEndpoints`), and the shell's fallback route. A plugin that fails in `MapEndpoints` stops startup, because endpoints can't be unmapped.
@@ -61,7 +63,7 @@ public sealed class WakeOnLanPlugin : IPlugin
 ```
 
 - `PluginContext` holds the plugin's ID and version, from the verified manifest rather than the plugin's own code, and its configuration section, `Plugins:Settings:<id>`.
-- `endpoints` is a route group core created at `/api/p/<id>/`. As core gains authentication, antiforgery and rate limits (Phase 1), it applies them to the group, so a plugin can't forget them ([v2-plan.md §4.4](v2-plan.md#44-guardrails-built-into-the-sdk)).
+- `endpoints` is a route group core created at `/api/p/<id>/`, inside core's `/api` group. Every policy in §6.4 applies to it, so a plugin can't forget one ([v2-plan.md §4.4](v2-plan.md#44-guardrails-built-into-the-sdk)).
 - More contracts (`ServiceType`, `SessionType`, `HostAction`, `HealthProbe`, settings, audit actions) arrive with their first real users ([v2-plan.md §4.2](v2-plan.md#42-contribution-catalogue)). The SDK may change until it is frozen as v1 at the end of Phase 3. A manifest declares the SDK range it supports, and a package outside the server's `SdkVersion` is refused.
 
 ## 5. Frontend extension point
@@ -89,7 +91,51 @@ export default definePlugin({
 
 The server serves plugin files from the verified in-memory copy of the package, not from disk, and only allow-listed file types under `frontend/`. The page's policy allows scripts only from the server itself, plus the import map by its hash ([plugin-security.md §7.2, §7.3](plugin-security.md#72-frontend)).
 
-## 6. Where to read more
+## 6. Identity and request policies
+
+Ported from 1.x, with ASP.NET Core Identity. Users, roles and sessions are tables in the core schema.
+
+### 6.1 Accounts and sign-in
+
+- A user signs in with their user name or email address and a password of at least 12 characters.
+- Five wrong passwords lock the account for 15 minutes.
+- Every failure looks the same to the caller: an unknown account, a wrong password, a disabled or locked account all give `401` with `invalid_credentials`, after comparable time.
+- The `Administrator` role is the only system role. Access to hosts comes from grants, in Phase 1 step 3.
+- **Bootstrap administrator.** `BootstrapAdmin:Enabled` with a user name, email and password creates the first administrator at startup, once. An account that already exists is left alone. Outside Development it also needs `BootstrapAdmin:AllowOutsideDevelopment`, which the installer sets for the first start.
+
+### 6.2 Sessions
+
+- Sessions are server-side. The cookie (`NKeeper.Session`) carries only an encrypted reference to a row in `core.auth_sessions`. Signing out deletes the row, so a copied cookie stops working at once.
+- The cookie is `HttpOnly`, `SameSite=Strict`, and `Secure` unless `Authentication:RequireSecureCookies` is turned off for local development.
+- A session lasts 8 hours, or 14 days with "remember me", and slides while in use.
+- The account is checked again on every request:
+  - a disabled or deleted account gets `401`, and its session ends;
+  - an account that must change its password gets `403` with `password_change_required`, except on the few endpoints that let it do that.
+
+### 6.3 The key ring
+
+- ASP.NET Core Data Protection encrypts the auth tickets and antiforgery tokens, and from step 4 the stored credentials.
+- Its keys are kept in `core.data_protection_keys`.
+- With `DataProtection:CertificatePath` (an RSA certificate and its private key, in PEM), the keys are encrypted with that certificate, so a copy of the database alone can't decrypt them.
+- At startup, keys stored before the certificate was set are encrypted with it.
+- The server refuses to start if the stored keys need a certificate that isn't configured, or a different one. Otherwise Data Protection would quietly make new keys, and everything already encrypted would become unreadable.
+
+### 6.4 Request policies
+
+These apply to everything under `/api`, plugin routes included. They are middleware, not endpoint filters, so they cover every kind of endpoint a plugin can map.
+
+| Policy | Rule | Refusal |
+| --- | --- | --- |
+| Signed in | Required, except on `/api/auth/antiforgery`, `/api/auth/login` and `/api/auth/logout` | `401` |
+| Antiforgery | Every request other than `GET`, `HEAD`, `OPTIONS` or `TRACE` carries the token from `GET /api/auth/antiforgery` in the header it names (`X-XSRF-TOKEN`). The token is bound to the user, so the client fetches a new one after signing in or out | `400` with `csrf_token_invalid` |
+| Account status | §6.2 | `401`, or `403` with `password_change_required` |
+| Sign-in rate | 10 attempts a minute per client address | `429` with `rate_limited` and `Retry-After` |
+
+Outside `/api`, the shell's files and pages, `/runtime/`, and `/health/live` need no sign-in. Plugin frontend files under `/plugins/` do.
+
+Sign-ins, failed sign-ins (with the name as typed, never the password) and sign-outs are written to `core.audit_events`.
+
+## 7. Where to read more
 
 - [v2-plan.md](v2-plan.md): the audit of 1.x, the core/plugin boundary, the contribution catalogue, phases and decisions.
 - [plugin-security.md](plugin-security.md): package format, signing, trust, directory checks, verification order and reason codes, loading and states.
