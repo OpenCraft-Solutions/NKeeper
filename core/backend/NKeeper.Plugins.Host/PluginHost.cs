@@ -108,7 +108,7 @@ public sealed class PluginHost(
         }
 
         var context = new VerificationContext(trust!, environment.IsDevelopment, environment.SdkVersion, environment.SharedAssemblies, time);
-        var verified = await VerifyPackagesAsync(result, packages, context, cancellationToken);
+        var verified = await VerifyPackagesAsync(result, packages, context, records, cancellationToken);
         var candidates = await ReconcileAsync(result, verified, records, trust!, cancellationToken);
         var order = await ResolveDependenciesAsync(result, candidates, cancellationToken);
         await LoadCodeAsync(result, order, candidates, cancellationToken);
@@ -227,7 +227,7 @@ public sealed class PluginHost(
             result.Add(new PluginStatus(record.Id, record.Version, PluginState.Refused, code, message, record.PackageSha256, record.KeyId, record.BuiltIn, null));
         }
 
-        foreach (var package in packages.Select(Path.GetFileName).OfType<string>())
+        foreach (var package in packages.Select(Path.GetFileName).OfType<string>().Where(p => !recorded.Any(r => AttributeId(p, [r]) == r.Id)))
         {
             result.Add(new PluginStatus(package, null, PluginState.Refused, code, message, null, null, false, package));
         }
@@ -238,7 +238,7 @@ public sealed class PluginHost(
         }
     }
 
-    private async Task<List<PackageVerification>> VerifyPackagesAsync(PluginHostResult result, List<string> packages, VerificationContext context, CancellationToken cancellationToken)
+    private async Task<List<PackageVerification>> VerifyPackagesAsync(PluginHostResult result, List<string> packages, VerificationContext context, Dictionary<string, PluginRecord> records, CancellationToken cancellationToken)
     {
         var verified = new List<PackageVerification>();
         foreach (var path in packages)
@@ -248,14 +248,14 @@ public sealed class PluginHost(
             if (new FileInfo(path).Length > context.Limits.MaxPackageBytes)
             {
                 // Refused before reading it into memory.
-                await RefuseAsync(result, fileName, null, ReasonCodes.TooLarge, "The package is larger than the limit.", null, null, fileName, cancellationToken);
+                await RefuseAsync(result, AttributeId(fileName, records), null, ReasonCodes.TooLarge, "The package is larger than the limit.", null, null, fileName, cancellationToken);
                 continue;
             }
 
             verification = PackageVerifier.Verify(await File.ReadAllBytesAsync(path, cancellationToken), fileName, context);
             if (!verification.IsVerified)
             {
-                await RefuseAsync(result, fileName, null, verification.ReasonCode!, verification.Message, verification.PackageSha256, null, fileName, cancellationToken);
+                await RefuseAsync(result, AttributeId(fileName, records), null, verification.ReasonCode!, verification.Message, verification.PackageSha256, null, fileName, cancellationToken);
                 continue;
             }
 
@@ -490,6 +490,30 @@ public sealed class PluginHost(
             throw new PluginHostException($"Plugins:RequireAllEnabledLoaded is set and enabled plugins didn't load: {string.Join(", ", notLoaded)}.");
         }
     }
+
+    /// <summary>
+    /// The plugin a refused file belongs to, for display only: a recorded plugin when the file is named
+    /// exactly <c>&lt;id&gt;-&lt;version&gt;.nkp</c> for its ID, otherwise the file name. A refused package's own
+    /// contents can't be trusted to say which plugin it is, but showing an enabled plugin as refused
+    /// rather than missing is what an administrator needs to see.
+    /// </summary>
+    private static string AttributeId(string fileName, IEnumerable<PluginRecord> records)
+    {
+        foreach (var record in records.OrderByDescending(r => r.Id.Length))
+        {
+            var prefix = record.Id + "-";
+            if (fileName.StartsWith(prefix, StringComparison.Ordinal)
+                && fileName.EndsWith(PackageFormat.Extension, StringComparison.Ordinal)
+                && SemanticVersion.TryParse(fileName[prefix.Length..^PackageFormat.Extension.Length], out _))
+            {
+                return record.Id;
+            }
+        }
+
+        return fileName;
+    }
+
+    private static string AttributeId(string fileName, Dictionary<string, PluginRecord> records) => AttributeId(fileName, records.Values);
 
     private async Task SaveAsync(Dictionary<string, PluginRecord> records, PluginRecord record, CancellationToken cancellationToken)
     {

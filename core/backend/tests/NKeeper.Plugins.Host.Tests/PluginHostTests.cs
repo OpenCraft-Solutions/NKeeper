@@ -202,6 +202,21 @@ public sealed class PluginHostTests : IDisposable
     }
 
     [Fact]
+    public async Task A_tampered_enabled_plugin_shows_as_refused_not_missing()
+    {
+        var path = _scenario.Install(TestPlugins.Package(_scenario.OfficialKey));
+        await _scenario.LoadAsync();
+        var bytes = File.ReadAllBytes(path);
+        bytes[^30] ^= 0xFF;
+        File.WriteAllBytes(path, bytes);
+
+        var result = await _scenario.LoadAsync();
+
+        var status = Assert.Single(result.Statuses);
+        Assert.Equal(("hello", PluginState.Refused, "hello-1.0.0.nkp"), (status.Id, status.State, status.FileName));
+    }
+
+    [Fact]
     public async Task No_plugin_loads_outside_Development_on_other_systems()
     {
         _scenario.IsLinux = false;
