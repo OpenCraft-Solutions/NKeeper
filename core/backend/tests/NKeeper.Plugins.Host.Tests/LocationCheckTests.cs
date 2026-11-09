@@ -78,12 +78,16 @@ public sealed class LocationCheckTests : IDisposable
             if (OperatingSystem.IsLinux())
             {
                 File.SetUnixFileMode(safe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+
+                // While still empty, the private directory passes only if its ancestors do. If this
+                // machine's build directory sits under a group- or world-writable path, the rest can't run.
+                var ancestors = LocationChecks.Check(safe, me, fs);
+                Assert.SkipUnless(ancestors is null, $"The build directory's ancestors aren't safe on this machine: {ancestors}");
+
                 var package = Path.Combine(safe, "a.nkp");
                 File.WriteAllText(package, "x");
                 File.SetUnixFileMode(package, UnixFileMode.UserRead | UnixFileMode.UserWrite);
 
-                var ancestorsSafe = LocationChecks.Check(AppContext.BaseDirectory, me, fs) is null;
-                Assert.SkipUnless(ancestorsSafe, $"The build directory's ancestors aren't safe on this machine: {LocationChecks.Check(AppContext.BaseDirectory, me, fs)}");
                 Assert.Null(LocationChecks.Check(safe, me, fs));
                 Assert.NotNull(LocationChecks.Check(safe, 0, fs)); // owned by this user, not root
 
