@@ -242,7 +242,7 @@ Removing a package from the directory keeps the plugin's data. The plugin shows 
 
 `tools/NKeeper.PluginTool` is a thin command line over `NKeeper.Plugins.Packaging`, the library that also holds the server's verifier, so the tool and the server can't disagree:
 - `keygen`: a development key by default, or `--release` for the official key (D12). The private key is written with owner-only permissions;
-- `pack`: builds the canonical `files.json` and the deterministic archive, and signs it in the same step;
+- `pack`: builds the canonical `files.json` and the archive, and signs it in the same step. Everything but the signature is deterministic: ECDSA signatures are randomized, so two builds of the same plugin differ only in `files.json.sig`;
 - `verify`: runs the same checks as the server and prints the reason code.
 
 The repository's build packs and signs the built-in plugins with a development key, so the development loop never needs an unsigned mode.
