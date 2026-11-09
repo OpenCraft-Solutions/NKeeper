@@ -319,8 +319,9 @@ NKeeper_2/
 │  │  ├─ NKeeper.Core/               kernel services: inventory, access, vault, audit, sessions,
 │  │  │                              trust store, pinned HttpClient, health scheduler, jobs,
 │  │  │                              settings, transfer
-│  │  ├─ NKeeper.Plugins.Host/       package verification (shared with the packaging tool),
-│  │  │                              filesystem checks, load contexts, pinning, enable state
+│  │  ├─ NKeeper.Plugins.Packaging/  package format, trust, signing and verification: bytes in,
+│  │  │                              result out; shared by the server and the packaging tool
+│  │  ├─ NKeeper.Plugins.Host/       filesystem checks, load contexts, pinning, enable state
 │  │  ├─ NKeeper.Connectivity.Ssh/   IConnectivity over SSH.NET: connections, scripts, port forwards,
 │  │  │                              jump tunnels (infrastructure: no UI, no service type)
 │  │  ├─ NKeeper.Core.Persistence/   CoreDbContext, entity configs, migrations, plugin DbContext base

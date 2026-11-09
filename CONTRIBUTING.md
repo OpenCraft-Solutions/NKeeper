@@ -77,6 +77,12 @@ npm run build
 npm run dev --workspace @nkeeper/app            # http://localhost:5173, proxies /api to :5080
 ```
 
+**Plugin packages** are built and checked with the `nkeeper-plugin` tool (see [plugin-security.md §10](docs/plugin-security.md#10-tooling)):
+
+```bash
+dotnet run --project tools/NKeeper.PluginTool -- --help
+```
+
 CI runs all of the above on every pull request, along with CodeQL and a dependency review.
 
 Plugins are always signed, even in development. The build creates a local development key and signs the built-in plugins with it, so there is no unsigned mode to switch on.
