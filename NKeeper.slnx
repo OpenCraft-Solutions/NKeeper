@@ -7,9 +7,15 @@
     <Project Path="core/backend/NKeeper.Server/NKeeper.Server.csproj" />
   </Folder>
   <Folder Name="/core/tests/">
+    <Project Path="core/backend/tests/NKeeper.Plugins.Host.Tests/NKeeper.Plugins.Host.Tests.csproj" />
     <Project Path="core/backend/tests/NKeeper.Plugins.Packaging.Tests/NKeeper.Plugins.Packaging.Tests.csproj" />
     <Project Path="core/backend/tests/NKeeper.Server.Tests/NKeeper.Server.Tests.csproj" />
   </Folder>
+  <Folder Name="/testing/">
+    <Project Path="testing/NKeeper.Testing/NKeeper.Testing.csproj" />
+    <Project Path="testing/plugins/NKeeper.TestPlugins.Hello/NKeeper.TestPlugins.Hello.csproj" />
+  </Folder>
+  <Folder Name="/testing/plugins/" />
   <Folder Name="/tools/">
     <Project Path="tools/NKeeper.PluginTool/NKeeper.PluginTool.csproj" />
   </Folder>

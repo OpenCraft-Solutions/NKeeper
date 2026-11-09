@@ -76,7 +76,7 @@ public static class LocationChecks
     {
         var full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory));
         var current = Path.GetPathRoot(full) ?? "/";
-        foreach (var part in full[current.Length..].Split('/', StringSplitOptions.RemoveEmptyEntries).Prepend(string.Empty))
+        foreach (var part in full[current.Length..].Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries).Prepend(string.Empty))
         {
             current = part.Length == 0 ? current : Path.Combine(current, part);
             var problem = Problem(current, fileSystem.Stat(current), expectedOwner, mustBeDirectory: true);

@@ -10,6 +10,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\NKeeper.Abstractions\NKeeper.Abstractions.csproj" />
+    <ProjectReference Include="..\NKeeper.Core.Persistence\NKeeper.Core.Persistence.csproj" />
+    <ProjectReference Include="..\NKeeper.Plugins.Host\NKeeper.Plugins.Host.csproj" />
+    <ProjectReference Include="..\NKeeper.Plugins.Packaging\NKeeper.Plugins.Packaging.csproj" />
   </ItemGroup>
 
   <ItemGroup>
