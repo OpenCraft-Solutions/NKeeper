@@ -81,9 +81,24 @@ npm install
 npm run lint            # oxlint; warnings fail the build
 npm run typecheck
 npm test
-npm run build
-npm run dev --workspace @nkeeper/app            # http://localhost:5173, proxies /api to :5080
+npm run build           # @nkeeper/runtime (the shared modules and import map), then the app
 ```
+
+The frontend packages are:
+- `core/frontend/sdk`: `@nkeeper/sdk`, what plugin frontends build against;
+- `core/frontend/runtime`: `@nkeeper/runtime`, which builds the modules the shell shares with plugins (React, ReactDOM, the JSX runtime, the SDK) and the import map naming them;
+- `core/frontend/app`: the shell.
+
+**Running the shell with plugins.** Plugins load only through the NKeeper server, under the real Content Security Policy ([plugin-security.md §7.3](docs/plugin-security.md#73-who-serves-the-shell)). Build the frontend, then point the server at it. `watch` rebuilds the shell as you edit:
+
+```bash
+npm run build
+npm run watch --workspace @nkeeper/app &
+dotnet user-secrets --project core/backend/NKeeper.Server set "Frontend:Root" "$(pwd)/core/frontend/app/dist"
+dotnet run --project core/backend/NKeeper.Server   # http://localhost:5080
+```
+
+`npm run dev --workspace @nkeeper/app` (Vite on :5173, proxying `/api`) is still there for work on the shell alone, but plugins don't load in it.
 
 **Plugin packages** are built and checked with the `nkeeper-plugin` tool (see [plugin-security.md §10](docs/plugin-security.md#10-tooling)):
 
