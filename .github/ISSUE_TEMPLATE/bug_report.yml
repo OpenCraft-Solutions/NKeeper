@@ -1,0 +1,54 @@
+name: Bug report
+description: Something in NKeeper 2.0 doesn't work as it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Don't include passwords, keys, real hostnames or IP addresses; this issue is public.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. …
+        2. …
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: e.g. 2.0.0-alpha.1 or a commit SHA
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: Install mode
+      options:
+        - Docker Compose
+        - Single container image
+        - Native Linux
+        - From source
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: area
+    attributes:
+      label: Area or plugin
+      description: e.g. inventory, ssh, desktop, db-mssql, zabbix
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Redact anything sensitive before pasting.
+      render: text

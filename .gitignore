@@ -1,0 +1,47 @@
+# --- Secrets / local configuration ---
+.env
+.env.*
+!.env.example
+*.local.json
+appsettings.*.local.json
+secrets/
+*.pfx
+*.pem
+*.key
+*.crt
+!**/fixtures/**/*.crt
+
+# --- .NET ---
+bin/
+obj/
+*.user
+*.suo
+.vs/
+TestResults/
+*.trx
+coverage/
+*.coverage
+publish/
+artifacts/
+
+# --- Node / Vite ---
+node_modules/
+dist/
+dist-ssr/
+*.tsbuildinfo
+.vite/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# --- Editors / OS ---
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+
+# --- Docker ---
+docker-compose.override.yml
