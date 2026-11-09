@@ -47,12 +47,37 @@ Use `example.com`/`*.example` names and the documentation address ranges (`192.0
 
 ## Development setup
 
-The tooling is being set up in Phase 0 of the [plan](docs/v2-plan.md#8-gameplan). This section will describe building, running and testing once there is code. Expect:
+You need:
 
-- the .NET 10 SDK;
-- Node.js 22 or 24 LTS;
-- PostgreSQL, to run the server locally;
-- Docker, for the test suite only.
+- the .NET 10 SDK (the exact version is pinned in [`global.json`](global.json));
+- Node.js 24 LTS, 24.15 or later (see [`.nvmrc`](.nvmrc)); Node 22.22.2+ and 26+ also work. These follow the strictest requirement among the locked dependencies (currently `jsdom`);
+- Docker, for the test suite only;
+- PostgreSQL, to run the server locally, once it has a database (Phase 0, PR 3).
+
+**Backend** (from the repository root):
+
+```bash
+dotnet restore NKeeper.slnx
+dotnet build NKeeper.slnx
+dotnet test NKeeper.slnx
+dotnet format NKeeper.slnx                      # fix formatting; CI runs it with --verify-no-changes
+dotnet run --project core/backend/NKeeper.Server   # http://localhost:5080
+```
+
+NuGet versions are managed centrally in [`Directory.Packages.props`](Directory.Packages.props), and every project has a `packages.lock.json`. CI restores in locked mode, so commit the lock files whenever a dependency changes.
+
+**Frontend** (from the repository root, which is an npm workspace):
+
+```bash
+npm install
+npm run lint            # oxlint; warnings fail the build
+npm run typecheck
+npm test
+npm run build
+npm run dev --workspace @nkeeper/app            # http://localhost:5173, proxies /api to :5080
+```
+
+CI runs all of the above on every pull request, along with CodeQL and a dependency review.
 
 Plugins are always signed, even in development. The build creates a local development key and signs the built-in plugins with it, so there is no unsigned mode to switch on.
 
