@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/OpenCraft-Solutions/NKeeper/security/advisories/new
+    about: Please report vulnerabilities privately, not in a public issue.
+  - name: NKeeper 1.x
+    url: https://github.com/DHemken97/NKeeper/issues
+    about: Problems with the current 1.x release belong in its own repository.
