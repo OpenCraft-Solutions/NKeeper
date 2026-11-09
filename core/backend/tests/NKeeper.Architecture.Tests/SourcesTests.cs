@@ -13,21 +13,35 @@ public sealed class SourcesTests
             var b = $"web{x}";
             var c = @"vnc ""quoted""";
             var d = '"';
-            var e = "http://example.com/ssh"; // "//" inside a string is not a comment
+            var e = "http://example.com/x"; // "//" inside a string is not a comment
             var f = "esc\"aped";
+            var g = """
+                kvm
+                """;
+            var h = "ase"u8;
             """";
 
         var literals = Sources.CSharpLiterals(source).ToList();
 
-        Assert.Equal(["telnet", "web{x}", "vnc \"quoted\"", "http://example.com/ssh", "esc\"aped"], literals);
+        Assert.Equal(["telnet", "web", "vnc \"quoted\"", "http://example.com/x", "esc\"aped", "kvm", "ase"], literals);
     }
 
     [Fact]
-    public void Csharp_raw_string_literals_are_found()
+    public void Csharp_escapes_are_decoded_and_literals_inside_interpolations_found()
     {
-        var source = "var a = \"\"\"\n    kvm\n    \"\"\";";
+        const string source = """
+            var a = "ssh";
+            var b = "\nrdp";
+            var c = $"{Lookup("telnet")} and {(x ? "vnc" : $"{"kvm"}")}";
+            """;
 
-        Assert.Equal("kvm", Assert.Single(Sources.CSharpLiterals(source)).Trim());
+        var literals = Sources.CSharpLiterals(source).Select(l => l.Trim()).ToList();
+
+        Assert.Contains("ssh", literals);
+        Assert.Contains("rdp", literals);
+        Assert.Contains("telnet", literals);
+        Assert.Contains("vnc", literals);
+        Assert.Contains("kvm", literals);
     }
 
     [Fact]
@@ -47,6 +61,28 @@ public sealed class SourcesTests
     }
 
     [Fact]
+    public void Script_escapes_are_decoded_and_literals_inside_substitutions_found()
+    {
+        const string source = """
+            const a = 'ssh'
+            const b = "\nrdp"
+            const c = '\x74elnet'
+            const d = `\u{76}nc`
+            const e = `before ${lookup('kvm')} middle ${x ? `${"ase"}` : {}.y} after`
+            """;
+
+        var literals = Sources.ScriptLiterals(source).Select(l => l.Trim()).ToList();
+
+        Assert.Contains("ssh", literals);
+        Assert.Contains("rdp", literals);
+        Assert.Contains("telnet", literals);
+        Assert.Contains("vnc", literals);
+        Assert.Contains("kvm", literals);
+        Assert.Contains("ase", literals);
+        Assert.Contains("after", literals);
+    }
+
+    [Fact]
     public void Relative_imports_of_every_form_are_found()
     {
         const string source = """
@@ -56,11 +92,14 @@ public sealed class SourcesTests
             export * from '../../c'
             const d = await import('./d')
             const e = require("../e")
-            import f from 'react'
-            const g = './not-an-import'
-            // import h from '../commented'
+            const f = await import(/* @vite-ignore */ '../f')
+            import g from /* why */ '../g'
+            const h = `${await import('../h')}`
+            import i from 'react'
+            const j = './not-an-import'
+            // import k from '../commented'
             """;
 
-        Assert.Equal(["./a", "../b", "./side-effect.css", "../../c", "./d", "../e"], Sources.RelativeImports(source).ToList());
+        Assert.Equal(["./a", "../b", "./side-effect.css", "../../c", "./d", "../e", "../f", "../g", "../h"], Sources.RelativeImports(source).ToList());
     }
 }

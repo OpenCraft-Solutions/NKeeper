@@ -25,9 +25,13 @@ public sealed class DependencyTests
     [Fact]
     public void Every_project_is_in_the_solution()
     {
-        var solution = File.ReadAllText(Path.Combine(Repository.Root, "NKeeper.slnx"));
+        // The real <Project Path> entries: a commented-out entry doesn't count.
+        var inSolution = System.Xml.Linq.XDocument.Load(Path.Combine(Repository.Root, "NKeeper.slnx"))
+            .Descendants("Project")
+            .Select(p => ((string?)p.Attribute("Path") ?? string.Empty).Replace('\\', '/'))
+            .ToHashSet(StringComparer.Ordinal);
 
-        var missing = Repository.Projects.Where(p => !solution.Contains($"\"{p.RelativePath}\"", StringComparison.Ordinal)).ToList();
+        var missing = Repository.Projects.Where(p => !inSolution.Contains(p.RelativePath)).ToList();
 
         Assert.True(missing.Count == 0, $"Not in NKeeper.slnx, so CI wouldn't build or test them: {string.Join(", ", missing)}");
     }

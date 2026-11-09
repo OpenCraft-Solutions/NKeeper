@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
 
 namespace NKeeper.Architecture.Tests;
@@ -9,10 +10,10 @@ public enum ProjectKind
     /// <summary><c>core/backend/*</c> (not its tests) and <c>tools/*</c>.</summary>
     Core,
 
-    /// <summary><c>plugins/*</c> and <c>testing/plugins/*</c>.</summary>
+    /// <summary>A plugin's backend: <c>plugins/*/backend/*</c>, and <c>testing/plugins/*</c>.</summary>
     Plugin,
 
-    /// <summary>Everything else: tests and test helpers.</summary>
+    /// <summary>Everything else: tests (including <c>plugins/*/tests/</c>) and test helpers.</summary>
     Test,
 }
 
@@ -31,7 +32,7 @@ public sealed record Project(string FullPath, string RelativePath, ProjectKind K
 }
 
 /// <summary>The repository these tests were built from.</summary>
-public static class Repository
+public static partial class Repository
 {
     private static readonly string[] SkippedFolders = ["bin", "obj", "node_modules", "dist", ".git", "generated"];
 
@@ -104,11 +105,16 @@ public static class Repository
         return new Project(Path.GetFullPath(path), relative, KindOf(relative), assemblyName, references);
     }
 
+    // A plugin's backend is plugins/<id>/backend/; its tests (plugins/<id>/tests/) are test projects,
+    // which may reference the plugin and the test helpers.
     private static ProjectKind KindOf(string relative) =>
-        relative.StartsWith("plugins/", StringComparison.Ordinal) || relative.StartsWith("testing/plugins/", StringComparison.Ordinal) ? ProjectKind.Plugin
-        : relative.StartsWith("core/backend/tests/", StringComparison.Ordinal) ? ProjectKind.Test
+        PluginBackend().IsMatch(relative) || relative.StartsWith("testing/plugins/", StringComparison.Ordinal) ? ProjectKind.Plugin
+        : relative.StartsWith("plugins/", StringComparison.Ordinal) || relative.StartsWith("core/backend/tests/", StringComparison.Ordinal) ? ProjectKind.Test
         : relative.StartsWith("core/", StringComparison.Ordinal) || relative.StartsWith("tools/", StringComparison.Ordinal) ? ProjectKind.Core
         : ProjectKind.Test;
+
+    [GeneratedRegex("^plugins/[^/]+/backend/", RegexOptions.CultureInvariant)]
+    private static partial Regex PluginBackend();
 
     private static string Metadata(string key) =>
         typeof(Repository).Assembly.GetCustomAttributes<AssemblyMetadataAttribute>().Single(a => a.Key == key).Value!;
