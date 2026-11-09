@@ -134,7 +134,7 @@ Nothing is decompressed until the whole ZIP structure passes, including the sign
 
 16. The manifest parses, its `formatVersion` is supported, its `id` follows the ID rules (§6.2), and its entry assembly is in the package (`bad_manifest`). Its `id` and `version` match `files.json` (`identity_mismatch`).
 17. Its `sdkVersion` range includes this server's SDK version (`sdk_incompatible`).
-18. It contains no native code (§3) (`native_library`), and no copy of an assembly that core shares with plugins (§7.1), judged by each assembly's metadata name, not its file name (`shared_assembly`).
+18. It contains no native code (§3) (`native_library`): every assembly must be IL-only, with no native entry point or precompiled native code, and no copy of an assembly that core shares with plugins (§7.1), judged by each assembly's metadata name, not its file name (`shared_assembly`).
 19. The revocation lists don't name this package's hash (`revoked_package`).
 20. Pinning and downgrade rules pass (§8) (`downgrade`, `pin_mismatch`).
 
@@ -244,6 +244,8 @@ Removing a package from the directory keeps the plugin's data. The plugin shows 
 - `keygen`: a development key by default, or `--release` for the official key (D12). The private key is written with owner-only permissions;
 - `pack`: builds the canonical `files.json` and the archive, and signs it in the same step. Everything but the signature is deterministic: ECDSA signatures are randomized, so two builds of the same plugin differ only in `files.json.sig`;
 - `verify`: runs the same checks as the server and prints the reason code.
+
+The tool can't see a server's exact shared-assembly set (§7.1). By default it treats the .NET runtime and the ASP.NET Core shared framework as shared. `--shared-list <file>` adds names, one per line, for example a list exported from the target server. The server's own check at load time is the one that counts.
 
 The repository's build packs and signs the built-in plugins with a development key, so the development loop never needs an unsigned mode.
 
