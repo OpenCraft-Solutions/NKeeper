@@ -204,14 +204,28 @@ The maintainer generates it locally with `NKeeper.PluginTool keygen --release`. 
 
 ### 7.2 Frontend
 
-- Plugin frontend files are served from the verified in-memory copy, never from disk, at `/plugins/<id>/<version>/<sha256-prefix>/<path>`, with `Cache-Control: immutable`.
-- The shell provides React and `@nkeeper/sdk` through an import map, so plugins share one copy and can't bring their own.
-- The shell loads each enabled plugin's entry module with its SHA-256 as a Subresource Integrity value where the browser supports it. Serving only verified bytes is the primary control.
+- Plugin frontend files are served from the verified in-memory copy, never from disk, at `/plugins/<id>/<version>/<first 12 hex digits of the package SHA-256>/<path inside frontend/>`:
+  - only for a **loaded** plugin, and only files under `frontend/` in its package;
+  - only file types on an allow-list: `.js`, `.mjs`, `.css`, `.json`, `.map`, `.svg`, `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.ico`, `.woff`, `.woff2`. Anything else is 404;
+  - with an explicit content type, `X-Content-Type-Options: nosniff` and `Cache-Control: public, max-age=31536000, immutable`. The hash prefix in the URL means a new package never reuses a cached URL.
+- The shell provides React and `@nkeeper/sdk` through an import map, so plugins share one copy and can't bring their own. The shared modules are `react`, `react/jsx-runtime`, `react-dom`, `react-dom/client` and `@nkeeper/sdk`. They are built once, by `@nkeeper/runtime`, as hashed ES modules that the shell's own build also imports by the same names, so there is exactly one React in the page.
+- Integrity: browsers can't attach Subresource Integrity to `import()`, and an import map can't gain entries after the first module loads. Serving only verified bytes is the control, and `GET /api/plugins` publishes each entry module's SHA-256 so it can be checked if browser support arrives.
 - **The import map is the one inline script,** and the Content Security Policy allows it by hash only:
   - its content is fixed for a server build, since it maps only React and `@nkeeper/sdk` to the shell's own hashed files, never plugin files;
   - the server computes its SHA-256 at startup and sends `script-src 'self' 'sha256-<hash>'`.
   
-  Any other inline script, and `eval`, stays blocked. Plugins are loaded by `import()` of same-origin URLs, so they never need an import map entry or an inline script. (Browsers can't load an import map from an external file, which is why it has to be inline and allowed by hash.)
+  Any other inline script, and `eval`, stays blocked. **The server refuses to start** if the shell's `index.html` contains any inline script other than exactly one import map, so a build mistake can't quietly widen the policy. Plugins are loaded by `import()` of same-origin URLs, so they never need an import map entry or an inline script. (Browsers can't load an import map from an external file, which is why it has to be inline and allowed by hash.)
+
+### 7.3 Who serves the shell
+
+The NKeeper server itself serves the shell (`index.html` and its hashed assets, from `Frontend:Root`) with the security headers, so the policy and the import map hash are decided in one place. The full set of headers:
+- `Content-Security-Policy`: `default-src 'self'; script-src 'self' 'sha256-<import map>'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`;
+- `X-Content-Type-Options: nosniff`;
+- `Referrer-Policy: no-referrer`.
+
+nginx, in the Phase 6 installer, terminates TLS and proxies, but doesn't serve files.
+
+In development the shell is built with `--watch` and the server serves it, so plugins load exactly as in production, under the real policy. The Vite dev server can still be used for work on the shell alone, but plugins don't load there: it can't share one React with modules imported at run time.
 
 ## 8. Installed, enabled, pinned
 
