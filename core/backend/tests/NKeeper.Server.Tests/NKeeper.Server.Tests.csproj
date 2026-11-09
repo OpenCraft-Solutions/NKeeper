@@ -23,6 +23,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\NKeeper.Server\NKeeper.Server.csproj" />
+    <ProjectReference Include="..\..\..\..\testing\NKeeper.Testing\NKeeper.Testing.csproj" />
   </ItemGroup>
 
 </Project>

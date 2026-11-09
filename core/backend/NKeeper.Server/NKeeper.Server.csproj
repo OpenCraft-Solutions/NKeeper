@@ -6,6 +6,7 @@
   -->
   <PropertyGroup>
     <IsPackable>false</IsPackable>
+    <UserSecretsId>nkeeper-server-2</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>
