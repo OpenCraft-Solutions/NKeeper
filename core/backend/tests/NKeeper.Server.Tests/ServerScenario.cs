@@ -133,6 +133,15 @@ internal sealed class ServerScenario : IAsyncDisposable
         return user.Id;
     }
 
+    /// <summary>Makes an account an administrator directly.</summary>
+    public async Task AddToAdministratorsAsync(string userName)
+    {
+        await using var scope = Services.CreateAsyncScope();
+        var users = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Identity.UserManager<NKeeper.Core.Persistence.ApplicationUser>>();
+        var user = await users.FindByNameAsync(userName) ?? throw new InvalidOperationException($"No user {userName}.");
+        Assert.True((await users.AddToRoleAsync(user, NKeeper.Core.Persistence.SystemRoles.Administrator)).Succeeded);
+    }
+
     /// <summary>Changes an account directly, as an administrator would.</summary>
     public async Task UpdateUserAsync(string userName, Action<NKeeper.Core.Persistence.ApplicationUser> change)
     {
