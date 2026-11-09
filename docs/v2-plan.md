@@ -264,7 +264,7 @@ Proxmox's API and iDRAC's Redfish use the core pinned `HttpClient`, so they are 
 | `HostService.Protocol` (`ServiceProtocol` enum, already stored as a string) | `HostService.Type` (string, FK-free, validated against registered types; unknown types are kept and shown as unavailable, just as 1.x keeps `Sftp`/`WinRm`) |
 | `HostService.RdpSecurity`, `.Address`, `.Instance` | `HostService.Settings jsonb`, validated by the type's schema. `Address` may stay a core column, since health checks, trust keys and jump logic all need "where does this listen". |
 | `HostService.Tools` (`List<string>?`) | unchanged (`text[]`), values validated against the type's registered tools |
-| `Host.HypervisorId`, `VirtualMachineId`, `HypervisorSeenAtUtc`, `IsVirtualMachine` | core: `RunsOnHostId`, `IsVirtualMachine` (tag inheritance is core and uses the relationship); `ExternalIds jsonb` keyed by provider (`{"proxmox": "cluster/101"}`) instead of a prefixed string parsed by regex |
+| `Host.HypervisorId`, `VirtualMachineId`, `HypervisorSeenAtUtc`, `IsVirtualMachine` | core: `RunsOnHostId`, `IsVirtualMachine` (tag inheritance is core and uses the relationship; inherited tags are for display and grouping only, since access grants match a host's **own** tags, as in 1.x, so changing `RunsOnHostId` never changes access); `ExternalIds jsonb` keyed by provider (`{"proxmox": "cluster/101"}`) instead of a prefixed string parsed by regex |
 | `Host.ZabbixHostId` | Zabbix plugin table `zabbix.host_links` |
 | `Host.CpuCores`, `MemoryMiB`, `SerialNumber`, `MacAddress` | stay core: several plugins fill them (Linux scan, WMI, iDRAC, Zabbix, hypervisors) |
 | `ZabbixSettings`, `EmailSettings`, `InventoryLimits` tables | `PluginSettings(pluginId, data jsonb, protectedSecrets bytea)` via `ISettingsStore<T>`; core settings (limits, email for 2FA) use the same store |
@@ -388,7 +388,7 @@ Two kinds, one lifecycle:
 - **Session IDs are bearer-proof.** Each stateful operation and each WebSocket channel attach checks that the caller is the owner *and* is signed in under a live sign-in session. Someone else's ID gets the same 404 as an unknown one. IDs are random 128-bit values, never sequential.
 - **Access changes end sessions that are no longer allowed.** Core raises an `AccessChanged` event for:
   - grants replaced;
-  - a host's tags edited (tag-based grants);
+  - a host's own tags edited (tag-based grants match own tags only, never inherited ones, so a `RunsOnHostId` change is not an access change);
   - a host deleted, or its service or credential removed;
   - a user disabled, deleted, or changed role;
   - the user's sign-in session revoked or expired.
@@ -448,7 +448,7 @@ Each phase ends in a state that builds, passes tests, **deploys with `docker com
 ### Phase 2: Prove different plugin shapes
 - **web**: stateful session kind, separate `nkw-*` origins and middleware, a service type without credentials, plugin settings (base domain), `IWebSessionLauncher` capability.
 - **wake-on-lan**: an action-only plugin, the minimum size.
-- **desktop, proof only:** RDP connects through guacd with a pinned certificate and a saved credential. That exercises the external-daemon requirement, the certificate probe in the trust store, and the credential path. AD sign-in pass-through, VNC, clipboard and the instruction filter follow in Phase 4, so desktop parity doesn't hold up the SDK freeze.
+- **desktop, proof only:** RDP connects through guacd with a pinned certificate and a saved credential, **with the browser instruction allow-list (1.x `GuacamoleInstructionFilter`) and its negative tests from the start**, because it is a security control on a deployable relay, not a parity feature. That exercises the external-daemon requirement, the certificate probe in the trust store, and the credential path. AD sign-in pass-through, VNC and clipboard follow in Phase 4, so desktop parity doesn't hold up the SDK freeze.
 - Health scheduler and TLS probes; the health report.
 - **Exit:** SSH and web parity with 1.x, an RDP session opens end to end, and the ported 1.x tests for those paths pass. wake-on-lan touched zero core files.
 
@@ -459,7 +459,7 @@ Each phase ends in a state that builds, passes tests, **deploys with `docker com
 
 ### Phase 4: Port the remaining features
 Each extension point is introduced with its first user (§4.2), and each plugin ports its 1.x tests. Suggested order, cheapest proofs first:
-1. `desktop` parity (VNC, AD pass-through, clipboard, instruction filter), `telnet`, `linux` (Files, Journal, SELinux, plus **Scanner** and **ServiceTool**: the scan pipeline is built here), `storage`.
+1. `desktop` parity (VNC, AD pass-through, clipboard), `telnet`, `linux` (Files, Journal, SELinux, plus **Scanner** and **ServiceTool**: the scan pipeline is built here), `storage`.
 2. `windows` (RPC, Event Log, WMI scanner), `idrac` (endpoint derivation for RACADM, optional `IWebSessionLauncher`).
 3. `db-core` (**sub-registry** pattern), then `db-mssql`, `db-oracle`, `db-ase`.
 4. `virt-core` (`IGuestProvider` registry, console relay), then `kvm`, `proxmox`, then `migration` (jobs).
