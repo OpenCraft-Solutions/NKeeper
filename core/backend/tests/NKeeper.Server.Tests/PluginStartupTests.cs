@@ -21,7 +21,7 @@ public sealed class PluginStartupTests(PostgresFixture postgres) : IClassFixture
     {
         await using var server = new ServerScenario(await postgres.CreateDatabaseAsync());
         server.Install(TestPlugins.Package(server.DevelopmentKey));
-        using var client = server.Client();
+        using var client = await server.SignedInClientAsync();
 
         var plugins = await client.GetFromJsonAsync<List<PluginStatusResponse>>("/api/plugins", Json, TestContext.Current.CancellationToken);
         var ping = await client.GetStringAsync(new Uri("/api/p/hello/ping", UriKind.Relative), TestContext.Current.CancellationToken);
@@ -55,7 +55,7 @@ public sealed class PluginStartupTests(PostgresFixture postgres) : IClassFixture
         var bytes = await File.ReadAllBytesAsync(path, TestContext.Current.CancellationToken);
         bytes[^30] ^= 0xFF;
         await File.WriteAllBytesAsync(path, bytes, TestContext.Current.CancellationToken);
-        using var client = server.Client();
+        using var client = await server.SignedInClientAsync();
 
         var plugins = await client.GetFromJsonAsync<List<PluginStatusResponse>>("/api/plugins", Json, TestContext.Current.CancellationToken);
         using var ping = await client.GetAsync(new Uri("/api/p/hello/ping", UriKind.Relative), TestContext.Current.CancellationToken);
@@ -67,11 +67,11 @@ public sealed class PluginStartupTests(PostgresFixture postgres) : IClassFixture
     }
 
     [Fact]
-    public async Task The_unauthenticated_plugin_list_carries_no_messages()
+    public async Task The_plugin_list_carries_no_messages()
     {
         await using var server = new ServerScenario(await postgres.CreateDatabaseAsync());
         File.WriteAllBytes(Path.Combine(server.PluginDirectory, "stray-1.0.0.nkp"), [1, 2, 3]);
-        using var client = server.Client();
+        using var client = await server.SignedInClientAsync();
 
         var json = await client.GetStringAsync(new Uri("/api/plugins", UriKind.Relative), TestContext.Current.CancellationToken);
 

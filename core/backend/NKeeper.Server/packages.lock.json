@@ -20,11 +20,26 @@
       "nkeeper.abstractions": {
         "type": "Project"
       },
+      "nkeeper.core": {
+        "type": "Project",
+        "dependencies": {
+          "NKeeper.Core.Persistence": "[2.0.0-dev, )"
+        }
+      },
       "nkeeper.core.persistence": {
         "type": "Project",
         "dependencies": {
+          "Microsoft.AspNetCore.DataProtection.EntityFrameworkCore": "[10.0.13, )",
+          "Microsoft.AspNetCore.Identity.EntityFrameworkCore": "[10.0.13, )",
           "NKeeper.Plugins.Host": "[2.0.0-dev, )",
           "Npgsql.EntityFrameworkCore.PostgreSQL": "[10.0.3, )"
+        }
+      },
+      "nkeeper.identity": {
+        "type": "Project",
+        "dependencies": {
+          "NKeeper.Core": "[2.0.0-dev, )",
+          "NKeeper.Core.Persistence": "[2.0.0-dev, )"
         }
       },
       "nkeeper.plugins.host": {
@@ -36,6 +51,24 @@
       },
       "nkeeper.plugins.packaging": {
         "type": "Project"
+      },
+      "Microsoft.AspNetCore.DataProtection.EntityFrameworkCore": {
+        "type": "CentralTransitive",
+        "requested": "[10.0.13, )",
+        "resolved": "10.0.13",
+        "contentHash": "p6pbz+KzSMO0lfZRF3bbGwBrdfZw/Ou0fQEum0ndGdvUeJQMGTfUxo+XzT3BN1bGRIBqexlw9ayXhjMBJ1mdUQ==",
+        "dependencies": {
+          "Microsoft.EntityFrameworkCore": "10.0.13"
+        }
+      },
+      "Microsoft.AspNetCore.Identity.EntityFrameworkCore": {
+        "type": "CentralTransitive",
+        "requested": "[10.0.13, )",
+        "resolved": "10.0.13",
+        "contentHash": "c6984ahCnqc3zqYgl5KqrBoY+LMKqJW6nZcFdBYNyp3PAA67prA/IgjQ/ySV0t3lEL2LEz3bcx91fbUYr8bRPA==",
+        "dependencies": {
+          "Microsoft.EntityFrameworkCore.Relational": "10.0.13"
+        }
       },
       "Microsoft.EntityFrameworkCore": {
         "type": "CentralTransitive",

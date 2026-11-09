@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
 using NKeeper.Plugins.Host;
 using NKeeper.Plugins.Packaging;
 using NKeeper.Testing;
@@ -69,13 +70,31 @@ internal sealed class ServerScenario : IAsyncDisposable
         return path;
     }
 
-    /// <summary>Starts the server (once) and returns a client for it.</summary>
-    public HttpClient Client()
+    public const string AdminUserName = "admin";
+    public const string AdminEmail = "admin@example.com";
+    public const string AdminPassword = "Admin-Passw0rd-1";
+
+    /// <summary>Extra settings for the server, applied before it starts.</summary>
+    public Dictionary<string, string?> Settings { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>Starts the server (once) and returns a client for it, which keeps cookies unless told not to.</summary>
+    public HttpClient Client(bool handleCookies = true)
     {
         _factory ??= new WebApplicationFactory<Program>().WithWebHostBuilder(web =>
         {
             web.UseEnvironment("Development");
             web.UseSetting("ConnectionStrings:NKeeper", ConnectionString);
+
+            // The test server is plain http, so the session cookie can't require HTTPS.
+            web.UseSetting("Authentication:RequireSecureCookies", "false");
+            web.UseSetting("BootstrapAdmin:Enabled", "true");
+            web.UseSetting("BootstrapAdmin:UserName", AdminUserName);
+            web.UseSetting("BootstrapAdmin:Email", AdminEmail);
+            web.UseSetting("BootstrapAdmin:Password", AdminPassword);
+            foreach (var (key, value) in Settings)
+            {
+                web.UseSetting(key, value);
+            }
             web.UseSetting("Plugins:Directory", PluginDirectory);
             web.UseSetting("Plugins:TrustDirectory", TrustDirectory);
             web.UseSetting("Plugins:DevelopmentTrustDirectory", DevelopmentTrustDirectory);
@@ -89,7 +108,39 @@ internal sealed class ServerScenario : IAsyncDisposable
                 web.UseSetting("Plugins:DevelopmentOwnerUid", new LinuxFileSystem().EffectiveUserId.ToString(System.Globalization.CultureInfo.InvariantCulture));
             }
         });
-        return _factory.CreateClient();
+        return _factory.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = handleCookies, AllowAutoRedirect = false });
+    }
+
+    /// <summary>A client signed in as the bootstrap administrator.</summary>
+    public async Task<HttpClient> SignedInClientAsync()
+    {
+        var client = Client();
+        using var response = await client.LoginAsync(AdminUserName, AdminPassword);
+        response.EnsureSuccessStatusCode();
+        return client;
+    }
+
+    /// <summary>Creates an account directly, as an administrator would.</summary>
+    public async Task<Guid> CreateUserAsync(string userName, string password, Action<NKeeper.Core.Persistence.ApplicationUser>? configure = null)
+    {
+        Client().Dispose();
+        await using var scope = Services.CreateAsyncScope();
+        var users = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Identity.UserManager<NKeeper.Core.Persistence.ApplicationUser>>();
+        var user = new NKeeper.Core.Persistence.ApplicationUser { UserName = userName, Email = $"{userName}@example.com", EmailConfirmed = true };
+        configure?.Invoke(user);
+        var result = await users.CreateAsync(user, password);
+        Assert.True(result.Succeeded, string.Join(" ", result.Errors.Select(e => e.Description)));
+        return user.Id;
+    }
+
+    /// <summary>Changes an account directly, as an administrator would.</summary>
+    public async Task UpdateUserAsync(string userName, Action<NKeeper.Core.Persistence.ApplicationUser> change)
+    {
+        await using var scope = Services.CreateAsyncScope();
+        var users = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Identity.UserManager<NKeeper.Core.Persistence.ApplicationUser>>();
+        var user = await users.FindByNameAsync(userName) ?? throw new InvalidOperationException($"No user {userName}.");
+        change(user);
+        Assert.True((await users.UpdateAsync(user)).Succeeded);
     }
 
     public IServiceProvider Services => _factory?.Services ?? throw new InvalidOperationException("The server hasn't started.");

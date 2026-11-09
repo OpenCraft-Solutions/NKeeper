@@ -166,5 +166,6 @@ internal static class FrontendHosting
             context.Response.Headers[HeaderNames.ContentSecurityPolicy] = shell.ContentSecurityPolicy;
             context.Response.Headers[HeaderNames.CacheControl] = "no-cache";
             return context.Response.Body.WriteAsync(shell.Index).AsTask();
-        });
+        })
+        .AllowAnonymous();
 }

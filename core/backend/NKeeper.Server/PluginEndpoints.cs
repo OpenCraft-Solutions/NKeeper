@@ -50,8 +50,8 @@ internal static class PluginEndpoints
     /// <summary>A package path as a URL path: each segment escaped (a valid name may hold '#' or '?'), the slashes kept.</summary>
     private static string EscapePath(string path) => string.Join('/', path.Split('/').Select(Uri.EscapeDataString));
 
-    public static void MapPluginStatus(this WebApplication app) =>
-        app.MapGet("/api/plugins", (PluginHostResult plugins) => plugins.Statuses
+    public static void MapPluginStatus(this IEndpointRouteBuilder api) =>
+        api.MapGet("/plugins", (PluginHostResult plugins) => plugins.Statuses
             .Select(s =>
             {
                 var loaded = s.State == PluginState.Loaded ? plugins.Loaded.FirstOrDefault(p => p.Manifest.Id == s.Id) : null;
@@ -90,7 +90,7 @@ internal static class PluginEndpoints
                 return Results.NotFound();
             }
 
-            context.Response.Headers[HeaderNames.CacheControl] = "public, max-age=31536000, immutable";
+            context.Response.Headers[HeaderNames.CacheControl] = "private, max-age=31536000, immutable";
             return Results.Bytes(bytes, contentType);
         });
 }

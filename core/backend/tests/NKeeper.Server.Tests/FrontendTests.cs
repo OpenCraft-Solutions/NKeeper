@@ -73,7 +73,7 @@ public sealed class FrontendTests(PostgresFixture postgres) : IClassFixture<Post
     {
         await using var server = new ServerScenario(await postgres.CreateDatabaseAsync());
         server.CreateShell(Index);
-        using var client = server.Client();
+        using var client = await server.SignedInClientAsync();
 
         using var response = await client.GetAsync(new Uri(path, UriKind.Relative), Token);
 
@@ -104,11 +104,12 @@ public sealed class FrontendTests(PostgresFixture postgres) : IClassFixture<Post
     public async Task An_api_only_server_serves_no_pages()
     {
         await using var server = new ServerScenario(await postgres.CreateDatabaseAsync());
-        using var client = server.Client();
+        using var client = await server.SignedInClientAsync();
 
         using var response = await client.GetAsync(new Uri("/", UriKind.Relative), Token);
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.NotEqual("text/html", response.Content.Headers.ContentType?.MediaType);
     }
 
     // ---- Plugin frontend files ----
@@ -119,7 +120,7 @@ public sealed class FrontendTests(PostgresFixture postgres) : IClassFixture<Post
         await using var server = new ServerScenario(await postgres.CreateDatabaseAsync());
         var frontend = Encoding.UTF8.GetBytes(TestPlugins.HelloFrontend());
         server.Install(TestPlugins.Package(server.DevelopmentKey, frontend: new Dictionary<string, byte[]> { [TestPlugins.FrontendEntry] = frontend }));
-        using var client = server.Client();
+        using var client = await server.SignedInClientAsync();
 
         var hello = Assert.Single((await client.GetFromJsonAsync<List<PluginStatusResponse>>("/api/plugins", Json, Token))!);
         using var response = await client.GetAsync(new Uri(hello.FrontendEntry!, UriKind.Relative), Token);
@@ -128,7 +129,8 @@ public sealed class FrontendTests(PostgresFixture postgres) : IClassFixture<Post
         Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(frontend)), hello.FrontendEntrySha256);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("text/javascript", response.Content.Headers.ContentType?.MediaType);
-        Assert.Equal("public, max-age=31536000, immutable", response.Headers.CacheControl?.ToString());
+        Assert.Equal((true, false, TimeSpan.FromDays(365)), (response.Headers.CacheControl!.Private, response.Headers.CacheControl.Public, response.Headers.CacheControl.MaxAge!.Value));
+        Assert.Contains("immutable", response.Headers.CacheControl.Extensions.Select(e => e.Name));
         Assert.Equal("nosniff", response.Headers.GetValues("X-Content-Type-Options").Single());
         Assert.Equal(frontend, await response.Content.ReadAsByteArrayAsync(Token));
     }
@@ -142,7 +144,7 @@ public sealed class FrontendTests(PostgresFixture postgres) : IClassFixture<Post
             server.DevelopmentKey,
             frontendEntry: "frontend/app #1.js",
             frontend: new Dictionary<string, byte[]> { ["frontend/app #1.js"] = frontend }));
-        using var client = server.Client();
+        using var client = await server.SignedInClientAsync();
 
         var hello = Assert.Single((await client.GetFromJsonAsync<List<PluginStatusResponse>>("/api/plugins", Json, Token))!);
         using var response = await client.GetAsync(new Uri(hello.FrontendEntry!, UriKind.Relative), Token);
@@ -169,7 +171,7 @@ public sealed class FrontendTests(PostgresFixture postgres) : IClassFixture<Post
             ["frontend/notes.txt"] = "not an allowed type"u8.ToArray(),
         });
         server.Install(package);
-        using var client = server.Client();
+        using var client = await server.SignedInClientAsync();
         var tag = (await client.GetFromJsonAsync<List<PluginStatusResponse>>("/api/plugins", Json, Token))!.Single().PackageSha256![..12];
 
         using var response = await client.GetAsync(new Uri(url.Replace("{tag}", tag, StringComparison.Ordinal), UriKind.Relative), Token);
@@ -185,7 +187,7 @@ public sealed class FrontendTests(PostgresFixture postgres) : IClassFixture<Post
         {
             [TestPlugins.FrontendEntry] = Encoding.UTF8.GetBytes(TestPlugins.HelloFrontend()),
         }));
-        using var client = server.Client();
+        using var client = await server.SignedInClientAsync();
 
         var hello = Assert.Single((await client.GetFromJsonAsync<List<PluginStatusResponse>>("/api/plugins", Json, Token))!);
         using var response = await client.GetAsync(new Uri($"/plugins/hello/1.0.0/{hello.PackageSha256![..12]}/index.js", UriKind.Relative), Token);

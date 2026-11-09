@@ -168,14 +168,14 @@ public sealed class PluginHost(
     }
 
     /// <summary>
-    /// Gives each loaded plugin its route group at <c>/api/p/&lt;id&gt;/</c>. Endpoints can't be unmapped,
+    /// Gives each loaded plugin its route group at <c>p/&lt;id&gt;/</c> under <paramref name="api"/>, core's <c>/api</c> group, so core's policies apply to it. Endpoints can't be unmapped,
     /// so a plugin that throws here stops the server from starting rather than leaving it half mapped.
     /// </summary>
-    public static void MapEndpoints(PluginHostResult result, WebApplication app, IConfiguration configuration)
+    public static void MapEndpoints(PluginHostResult result, IEndpointRouteBuilder api, IConfiguration configuration)
     {
         foreach (var plugin in result.Loaded)
         {
-            var group = app.MapGroup($"/api/p/{plugin.Manifest.Id}");
+            var group = api.MapGroup($"/p/{plugin.Manifest.Id}");
             try
             {
                 plugin.Instance.MapEndpoints(group, ContextFor(plugin, configuration));
