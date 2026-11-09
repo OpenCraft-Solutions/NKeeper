@@ -40,10 +40,10 @@ Each rule is enforced by a test in `core/backend/tests/NKeeper.Architecture.Test
 
 1. Refuse to run as root, outside Development.
 2. If it serves the shell (`Frontend:Root`), read `index.html` and check it: no inline script except at most one import map. Derive the Content Security Policy from the import map's hash.
-3. Migrate the core schema. Then bring the key ring in line with its certificate (§6.3), and create the bootstrap administrator if one is configured (§6.1).
+3. Migrate the core schema, then bring the key ring in line with its certificate (§6.3).
 4. Plugin host: check the plugin and trust directories, verify every package, check pins and dependencies, and load the enabled plugins from their verified bytes, each into its own `AssemblyLoadContext`.
 5. Call each loaded plugin's `ConfigureServices`. If one throws, its registrations are rolled back, and it and the plugins that depend on it are refused (`load_failed`); the others carry on. With `Plugins:RequireAllEnabledLoaded`, any enabled plugin that didn't load stops startup instead.
-6. Build the application, then map core endpoints, each plugin's endpoints (`MapEndpoints`), and the shell's fallback route. A plugin that fails in `MapEndpoints` stops startup, because endpoints can't be unmapped.
+6. Build the application and create the bootstrap administrator, if one is configured (§6.1). Then map core endpoints, each plugin's endpoints (`MapEndpoints`), and the shell's fallback route. A plugin that fails in `MapEndpoints` stops startup, because endpoints can't be unmapped.
 
 Plugin changes take effect at the next restart. So does a rebuilt shell.
 
