@@ -17,7 +17,7 @@ NKeeper 1.x covers a lot: SSH and Telnet terminals, RDP and VNC through Apache G
 
 > Core provides capabilities. Plugins consume capabilities and contribute functionality. Core never needs to know which plugins exist.
 
-The full design, including the audit of 1.x, the extension points, the data model and the phased plan, is in **[docs/v2-plan.md](docs/v2-plan.md)**.
+The full design, including the audit of 1.x, the extension points, the data model and the phased plan, is in **[docs/v2-plan.md](docs/v2-plan.md)**. How it is built today, and the rules that keep core and plugins apart, is in [docs/architecture.md](docs/architecture.md).
 
 ## Technology
 

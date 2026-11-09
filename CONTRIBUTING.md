@@ -6,7 +6,7 @@ Thanks for your interest in NKeeper. NKeeper 2.0 is in early development, so the
 
 ### Design documents come first
 
-The design lives in [`docs/`](docs/): [`v2-plan.md`](docs/v2-plan.md) and [`plugin-security.md`](docs/plugin-security.md) today, and `architecture.md` and `plugin-authoring.md` as they are written. **If a change affects the design, update the design documents first, in their own commit, before changing any code.** Design changes include:
+The design lives in [`docs/`](docs/): [`v2-plan.md`](docs/v2-plan.md), [`plugin-security.md`](docs/plugin-security.md) and [`architecture.md`](docs/architecture.md) today, and `plugin-authoring.md` when it is written. **If a change affects the design, update the design documents first, in their own commit, before changing any code.** Design changes include:
 
 - the core/plugin boundary or the plugin SDK;
 - the data model;
