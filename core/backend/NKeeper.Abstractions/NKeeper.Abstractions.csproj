@@ -3,9 +3,14 @@
   <!--
     The plugin SDK: contracts only. Plugins reference this assembly and nothing else from core,
     and it is shared with them from the server's default load context (docs/plugin-security.md §7.1).
+    ASP.NET Core is a shared framework too, so its abstractions may appear in the contracts.
   -->
   <PropertyGroup>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
 
 </Project>
