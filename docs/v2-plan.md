@@ -451,12 +451,14 @@ Moving a 2.0 instance between servers works as in 1.x: one passphrase-encrypted 
 - **Packages:** a plugin ships as a signed `.nkp` ZIP. Its signed `files.json` lists every file with its SHA-256, and ECDSA P-256 is used, built into .NET.
 - **Installation is root-only:** packages live in `/usr/lib/nkeeper/plugins/` and trusted keys in `/etc/nkeeper/plugin-trust/`, all owned by root and not writable by the service. The server checks ownership and modes at startup, refuses to run as root, and runs under a hardened systemd unit (`ProtectSystem=strict`). There is no upload through the web UI or the API.
 - **Verification fails closed,** in a fixed order, each step with a reason code:
-  - signature by a trusted, unrevoked key that is allowed to sign that ID (unprefixed IDs are reserved for the official key);
+  - the ZIP structure and hard size limits, including the signature metadata, before anything is decompressed;
+  - signature by a trusted, unrevoked key that is allowed to sign that ID (unprefixed IDs are reserved for the official key; development keys only in `Development`);
   - the exact file set, and every file's hash;
-  - strict ZIP limits;
   - SDK compatibility, no bundled shared assemblies;
   - pinning (same version with a new hash is refused, and downgrades are refused);
   - dependencies.
+- **A trust directory that fails its checks refuses every plugin**, since ignoring it would also ignore local revocations.
+- **The CSP stays strict.** The shell's import map is the one inline script, allowed by its hash.
 - **Loading:** the code loads from the same in-memory bytes that were verified, into a per-plugin `AssemblyLoadContext`. The frontend files are served from that same verified copy. Changes apply at restart.
 - **Who does what:** root installs (`plugin install`), and NKeeper administrators enable or disable. Every state change, and every refusal, is audited. A refusal also raises an alert.
 

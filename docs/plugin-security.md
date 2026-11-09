@@ -24,7 +24,7 @@ NKeeper loads plugins at run time from signed packages. A plugin runs **inside**
 | Replace a package with an older, validly signed version that has a known flaw | Installed versions are pinned. Downgrades are refused unless root explicitly allows one. (§8) |
 | Ship a different package under the same version number | Each package hash is pinned. The same ID and version with a different hash is refused as tampering. (§8) |
 | Take over an NKeeper administrator account | Can enable or disable plugins root already installed, and nothing more. Every change is audited. (§9) |
-| Craft a malicious ZIP (path traversal, duplicate entries, decompression bombs) | Strict package parser with limits. Paths are normalized and validated before use. (§5.3) |
+| Craft a malicious ZIP (path traversal, duplicate entries, decompression bombs) | Strict package parser with limits, applied to every entry, the signature metadata included, before anything is decompressed or authenticated. Paths are normalized and validated before use. (§5.2) |
 | Swap files between verification and loading | Not possible: verification and loading use the same in-memory bytes. (§7) |
 | Get a signed package that is itself malicious (a trusted publisher goes bad) | Out of scope for in-process loading, so only trust keys you would trust with the vault. Key scoping limits the damage, and keys and packages can be revoked. (§6.3) |
 | Root on the NKeeper server | Out of scope. Root can replace NKeeper itself. |
@@ -73,7 +73,9 @@ At startup, before reading any package, the server checks the plugin and trust d
 - none is a symlink;
 - the files are regular files.
 
-If the plugin directory fails, **no** plugin loads. If the trust directory fails, only the official key embedded in the server is trusted, and a security alert is raised (§9).
+If either directory fails, **no** plugin loads, built-in ones included, and a security alert is raised (§9).
+
+The trust directory can't be partially trusted. It also holds the local revocation list (§6.3), so carrying on with only the embedded official key would silently undo any local revocation of an official key or package. The server still starts with core alone, so an administrator can see the alert, unless `Plugins:RequireAllEnabledLoaded` is set (§9).
 
 The server **refuses to run as root** in production. The systemd unit installed in Phase 6 runs it as the unprivileged `nkeeper` user with at least:
 - `ProtectSystem=strict` and `ReadWritePaths=/var/lib/nkeeper`;
@@ -94,36 +96,46 @@ Packages are verified in this order. The first failure refuses the plugin with a
 2. Its size is at most 200 MB (`too_large`). It is read fully into memory and then closed. Everything below works on those bytes.
 3. The SHA-256 of the whole package is computed and kept for pinning (§8).
 
-### 5.2 Signature
+### 5.2 Structure and limits, before reading any entry
 
-4. `files.json` and `files.json.sig` exist (`unsigned`).
-5. The `keyId` belongs to a trusted, unrevoked, unexpired key (`untrusted_key`, `revoked_key`, `expired_key`).
-6. The signature over the exact bytes of `files.json` is valid for that key (`bad_signature`).
-7. The key is allowed to sign this plugin ID (§6.2) (`key_scope`).
-8. The `id` and `version` inside `files.json` match the file name and the manifest (`identity_mismatch`).
+Nothing is decompressed until the whole ZIP structure passes, including the signature metadata. A decompression bomb or malformed archive is refused before authentication, not after.
 
-### 5.3 Contents
-
-9. Every ZIP entry is checked (`bad_entry`):
+4. Only the central directory is parsed. It must be well formed, and each entry's local header must agree with it (`bad_zip`).
+5. Every entry is checked (`bad_entry`):
    - its path is relative, uses `/`, and contains no `..`, empty or `.` segments, drive letters, backslashes or control characters;
    - no two entries have the same path, including paths that differ only in case;
    - it is not a symlink, a directory with data, or an encrypted entry;
    - its compression method is *stored* or *deflate*.
-10. Limits: at most 5,000 entries, 500 MB uncompressed in total, and a compression ratio of at most 100:1 per entry. Each entry is inflated with a hard cap at its declared size (`limits`).
-11. The set of entries is **exactly** `files.json`'s list plus the two signature files: nothing missing, nothing extra (`file_set`).
-12. Every file's size and SHA-256 match its entry in the list (`hash_mismatch`).
+6. Declared limits (`limits`):
+   - at most 5,000 entries and 500 MB uncompressed in total;
+   - a compression ratio of at most 100:1 per entry;
+   - metadata caps: `nkeeper-plugin.json` at most 64 KB, `files.json` at most 1 MB, `files.json.sig` at most 4 KB.
+7. Every entry is decompressed through a bounded reader. It stops and refuses as soon as the output passes the entry's declared size, or the limits above (`limits`). This applies to the metadata files as well, so declared sizes are never trusted on their own.
 
-### 5.4 Manifest and compatibility
+### 5.3 Signature
 
-13. The manifest parses, its `formatVersion` is supported, and its `id` follows the ID rules (§6.2) (`bad_manifest`).
-14. Its `sdkVersion` range includes this server's SDK version (`sdk_incompatible`).
-15. It contains no copy of an assembly that core shares with plugins (§7.1) (`shared_assembly`).
-16. The revocation lists don't name this package's hash (`revoked_package`).
-17. Pinning and downgrade rules pass (§8) (`downgrade`, `pin_mismatch`).
+8. `files.json` and `files.json.sig` exist (`unsigned`).
+9. The `keyId` belongs to a trusted, unrevoked, unexpired key (`untrusted_key`, `revoked_key`, `expired_key`).
+10. The signature over the exact bytes of `files.json` is valid for that key (`bad_signature`).
+11. The key is allowed to sign this plugin ID in this environment (§6.2) (`key_scope`).
+12. The `id` and `version` inside `files.json` match the file name and the manifest (`identity_mismatch`).
 
-### 5.5 Dependencies
+### 5.4 Contents
 
-18. Every `dependsOn` entry is present, verified, enabled and in range. Otherwise this plugin is refused too (`dependency`). Dependency cycles are refused (`dependency_cycle`).
+13. The set of entries is **exactly** `files.json`'s list plus the two signature files: nothing missing, nothing extra (`file_set`).
+14. Every file's size and SHA-256 match its entry in the list (`hash_mismatch`).
+
+### 5.5 Manifest and compatibility
+
+15. The manifest parses, its `formatVersion` is supported, and its `id` follows the ID rules (§6.2) (`bad_manifest`).
+16. Its `sdkVersion` range includes this server's SDK version (`sdk_incompatible`).
+17. It contains no copy of an assembly that core shares with plugins (§7.1) (`shared_assembly`).
+18. The revocation lists don't name this package's hash (`revoked_package`).
+19. Pinning and downgrade rules pass (§8) (`downgrade`, `pin_mismatch`).
+
+### 5.6 Dependencies
+
+20. Every `dependsOn` entry is present, verified, enabled and in range. Otherwise this plugin is refused too (`dependency`). Dependency cycles are refused (`dependency_cycle`).
 
 Only a plugin that passes all of these **and** is enabled (§8) has its code loaded.
 
@@ -136,12 +148,15 @@ Only a plugin that passes all of these **and** is enabled (§8) has its code loa
   ```json
   { "keyId": "…", "publicKey": "<SPKI base64>", "allowedIds": ["com.example.*"], "notAfter": "2028-01-01", "comment": "Example Corp plugins" }
   ```
-- **Development keys:** created by the packaging tool on a developer's machine and marked `"development": true`. The server rejects them unless it runs in `Development`.
+- **Development keys:** created by the packaging tool on a developer's machine (and fresh for each CI run), and marked `"development": true`. They exist so that local and CI builds of the built-in plugins load without the release key.
+  - **In `Development`** (and the test environment), a development key in the configured development trust directory may sign official, unprefixed IDs. This is the only way anything but an official key can sign them.
+  - **In any other environment**, development keys are refused outright, whatever they claim to be allowed to sign (`untrusted_key`). So this authority can't exist in production.
+  - The development trust directory is configurable only in `Development`. Production always uses `/etc/nkeeper/plugin-trust/`.
 
 ### 6.2 Plugin IDs and key scope
 
 - IDs are lowercase `[a-z0-9-]` segments separated by dots.
-- **IDs without a dot** (`ssh`, `db-mssql`, `zabbix`) are reserved for official plugins, and only an official key may sign them.
+- **IDs without a dot** (`ssh`, `db-mssql`, `zabbix`) are reserved for official plugins. Only an official key may sign them, or a development key on a server running in `Development` (§6.1).
 - Everyone else uses a reverse-domain ID (`com.example.netbox`). A non-official key may sign only IDs matching its `allowedIds` patterns, and a pattern must name at least two fixed segments before any wildcard (`com.example.*` is allowed, `com.*` and `*` are not).
 
 So a compromised or careless third-party key can never stand in for an official plugin, or for another publisher's.
@@ -163,7 +178,7 @@ The maintainer generates it locally with `NKeeper.PluginTool keygen --release`. 
 ### 7.1 Backend
 
 - Each plugin gets its own `AssemblyLoadContext`, loaded from the verified in-memory bytes (`LoadFromStream`). No plugin assembly is ever loaded from a path.
-- **Shared assemblies** always resolve from the server's default context. These are `NKeeper.Abstractions`, `Microsoft.AspNetCore.*`, `Microsoft.Extensions.*`, `Microsoft.EntityFrameworkCore*`, `Npgsql*` and the .NET runtime. A package that contains its own copy of one is refused (§5.4), so a plugin can't swap in a different ASP.NET or EF.
+- **Shared assemblies** always resolve from the server's default context. These are `NKeeper.Abstractions`, `Microsoft.AspNetCore.*`, `Microsoft.Extensions.*`, `Microsoft.EntityFrameworkCore*`, `Npgsql*` and the .NET runtime. A package that contains its own copy of one is refused (§5.5), so a plugin can't swap in a different ASP.NET or EF.
 - A plugin's private dependencies, such as a database driver, load in its own context. A dependant sees only the assemblies its dependency lists in `exportedAssemblies`.
 - **Installing, updating, enabling or disabling a plugin takes effect at the next restart.** Code is never loaded into or unloaded from a running server. Unloading code that has registered routes, EF models and background services isn't reliable, so NKeeper doesn't try.
 
@@ -172,7 +187,11 @@ The maintainer generates it locally with `NKeeper.PluginTool keygen --release`. 
 - Plugin frontend files are served from the verified in-memory copy, never from disk, at `/plugins/<id>/<version>/<sha256-prefix>/<path>`, with `Cache-Control: immutable`.
 - The shell provides React and `@nkeeper/sdk` through an import map, so plugins share one copy and can't bring their own.
 - The shell loads each enabled plugin's entry module with its SHA-256 as a Subresource Integrity value where the browser supports it. Serving only verified bytes is the primary control.
-- The Content Security Policy stays strict: `script-src 'self'`, no `eval`, no inline scripts.
+- **The import map is the one inline script,** and the Content Security Policy allows it by hash only:
+  - its content is fixed for a server build, since it maps only React and `@nkeeper/sdk` to the shell's own hashed files, never plugin files;
+  - the server computes its SHA-256 at startup and sends `script-src 'self' 'sha256-<hash>'`.
+  
+  Any other inline script, and `eval`, stays blocked. Plugins are loaded by `import()` of same-origin URLs, so they never need an import map entry or an inline script. (Browsers can't load an import map from an external file, which is why it has to be inline and allowed by hash.)
 
 ## 8. Installed, enabled, pinned
 
@@ -226,13 +245,14 @@ The repository's build packs and signs the built-in plugins with a development k
 ## 11. Tests (Phase 0)
 
 Every refusal path has a test that builds a real package and expects that exact reason code:
-- **Signature:** unsigned, untrusted key, revoked key, expired key, development key in production, bad signature, key outside its scope, a third-party key signing an official ID.
+- **Signature:** unsigned, untrusted key, revoked key (embedded and local), expired key, bad signature, key outside its scope, a third-party key signing an official ID, a development key signing an official ID (accepted in `Development`, refused in production), and a development key refused outright in production.
 - **Identity:** mismatches between the file name, the file list and the manifest.
 - **Contents:**
   - a tampered file, a missing file, an extra file;
   - duplicate and case-colliding paths, path traversal, absolute paths, symlink entries;
   - an encrypted entry, an unsupported compression method;
-  - too many entries, too large, a decompression bomb.
+  - too many entries, too large, a decompression bomb in a data file, **and in each metadata file** (`files.json`, `files.json.sig`, the manifest), refused before any signature check;
+  - a malformed central directory, and a local header that disagrees with the central directory.
 - **Manifest and compatibility:** an incompatible SDK version, a bundled shared assembly, a revoked package hash.
 - **Versions:** a downgrade, the same version with a different hash, a newer version with a different signing key.
 - **Dependencies:** a missing, disabled or refused dependency, a dependency cycle.
@@ -241,5 +261,7 @@ Every refusal path has a test that builds a real package and expects that exact 
   - an owner other than root;
   - a symlinked directory or package;
   - a writable ancestor directory;
+  - a trust directory that fails its checks: every plugin refused, built-in ones included, with the alert raised;
   - running as root in production.
+- **Frontend:** the served Content Security Policy allows the import map by its hash, and blocks any other inline script.
 - **Positive paths:** a valid package loads; disabled stays unloaded; an update with the same key loads and is audited.
