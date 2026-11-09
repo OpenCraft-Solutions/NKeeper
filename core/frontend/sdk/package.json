@@ -1,0 +1,15 @@
+{
+  "name": "@nkeeper/sdk",
+  "description": "The NKeeper plugin SDK for frontends. Shared with plugins at run time through the import map.",
+  "private": true,
+  "license": "MIT",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -b",
+    "test": "vitest run"
+  }
+}
