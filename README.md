@@ -13,6 +13,7 @@ NKeeper 1.x covers a lot: SSH and Telnet terminals, RDP and VNC through Apache G
 
 - A small **core** owns everything about trust: identity and access, the credential vault, audit, session lifecycle, SSH connectivity and jump hosts, and pinning of host keys and certificates.
 - Everything else is a **plugin**: a self-contained folder with its own backend, frontend, tests and docs, built against a versioned SDK. That includes essentials like SSH terminals and remote desktops, which ship as built-in plugins.
+- Plugins are **loaded at run time from signed packages**. Only root on the server can install one, and every file is hash-checked and every signature verified before any plugin code runs. See [docs/plugin-security.md](docs/plugin-security.md).
 
 > Core provides capabilities. Plugins consume capabilities and contribute functionality. Core never needs to know which plugins exist.
 
@@ -26,7 +27,7 @@ The full design, including the audit of 1.x, the extension points, the data mode
 | Frontend | React, TypeScript, Vite |
 | Remote desktops | Apache Guacamole `guacd` |
 | Tests | xUnit with real servers in Testcontainers; Vitest and Testing Library |
-| Deployment | Docker Compose, or native services on Linux |
+| Deployment | Native Linux service: systemd, nginx and PostgreSQL on Debian/Ubuntu or RHEL-family distributions |
 
 ## Contributing
 
