@@ -51,13 +51,14 @@ public static class AuthEndpoints
         // Idempotent: succeeds even when not signed in.
         auth.MapPost("/logout", async (HttpContext context, SignInManager<ApplicationUser> signIn, IAuditLog audit) =>
             {
+                // Deletes the session row through the ticket store, and clears the cookie, before anything
+                // else can go wrong. The request's principal still names the user, for the audit event.
+                await signIn.SignOutAsync();
                 if (context.User.Identity?.IsAuthenticated == true)
                 {
                     await audit.RecordAsync(new AuditEntry(AuditActions.SignOut), context.RequestAborted);
                 }
 
-                // Deletes the session row through the ticket store, and clears the cookie.
-                await signIn.SignOutAsync();
                 return Results.NoContent();
             })
             .AllowAnonymous();

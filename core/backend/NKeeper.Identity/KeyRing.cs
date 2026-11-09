@@ -71,6 +71,8 @@ public sealed class KeyRingEncryption(DbContextOptions<CoreDbContext> database, 
 {
     private static readonly XNamespace DataProtection = "http://schemas.asp.net/2015/03/dataProtection";
     private static readonly XName RequiresEncryption = DataProtection + "requiresEncryption";
+    // Data Protection writes <encryptedSecret> in its own namespace (xmlns="http://schemas.asp.net/2015/03/dataProtection"),
+    // as stored keys show; KeyRingTests check both the lookup and the rewrite against real keys.
     private static readonly XName EncryptedSecret = DataProtection + "encryptedSecret";
     private static readonly XName X509Certificate = XName.Get("X509Certificate", "http://www.w3.org/2000/09/xmldsig#");
 

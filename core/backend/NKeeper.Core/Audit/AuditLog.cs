@@ -63,7 +63,7 @@ public sealed class AuditLog(
             });
             await db.SaveChangesAsync(cancellationToken);
         }
-        catch (Exception ex) when (ex is DbUpdateException or System.Data.Common.DbException or InvalidOperationException or TimeoutException)
+        catch (Exception ex) when (ex is DbUpdateException or System.Data.Common.DbException or InvalidOperationException or TimeoutException or OperationCanceledException)
         {
             logger.LogError(ex, "Couldn't record the audit event {Action} for {Actor}.", entry.Action, actor);
         }

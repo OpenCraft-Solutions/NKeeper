@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { definePlugin } from '@nkeeper/sdk'
+import { api, definePlugin } from '@nkeeper/sdk'
 import { describe, expect, it, vi } from 'vitest'
 import { App } from './App'
 import { loadPluginFrontends, type PluginStatus } from './plugins'
@@ -135,6 +135,45 @@ describe('App', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('The user name or password is incorrect.')
     expect(screen.getByLabelText('Password')).toHaveValue('')
+  })
+
+  it('stays signed in, and says so, when signing out fails', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/auth/antiforgery') {
+        return Response.json({ token: 'token-1', headerName: 'X-XSRF-TOKEN' })
+      }
+      if (url === '/api/auth/logout') {
+        return Response.json({ status: 503, detail: 'The server is unavailable.' }, { status: 503, headers: { 'Content-Type': 'application/problem+json' } })
+      }
+      return Response.json([status({ frontendEntry: null })])
+    }))
+    const user = userEvent.setup()
+
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: 'Sign out' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('The server is unavailable.')
+    expect(screen.getByText('hello (built in)')).toBeInTheDocument()
+    expect(screen.queryByRole('form', { name: 'Sign in' })).not.toBeInTheDocument()
+  })
+
+  it('keeps the sign-in form when the session ends while plugins are still loading', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) =>
+      url === '/api/plugins'
+        ? Response.json([status()])
+        : Response.json({ status: 401 }, { status: 401, headers: { 'Content-Type': 'application/problem+json' } }),
+    ))
+    // The plugin's activation calls the API and gets a 401: the session ended meanwhile.
+    const importer = vi.fn(async () => ({
+      default: definePlugin({ id: 'hello', activate: async () => { await api.get('/api/p/hello/ping').catch(() => undefined) } }),
+    }))
+
+    render(<App importer={importer} />)
+
+    expect(await screen.findByRole('form', { name: 'Sign in' })).toBeInTheDocument()
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(screen.getByRole('form', { name: 'Sign in' })).toBeInTheDocument()
+    expect(screen.queryByText('hello (built in)')).not.toBeInTheDocument()
   })
 
   it('names the product', () => {

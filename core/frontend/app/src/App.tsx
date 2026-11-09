@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api, ApiError, onUnauthorized, resetAntiforgeryToken } from '@nkeeper/sdk'
 import { loadPluginFrontends, type FrontendState, type ModuleImporter, type PluginStatus } from './plugins'
 import { SignIn } from './SignIn'
@@ -21,21 +21,33 @@ type Load =
 export function App({ importer }: { importer?: ModuleImporter }) {
   const [load, setLoad] = useState<Load>({ kind: 'loading' })
   const [attempt, setAttempt] = useState(0)
+  const [signOutError, setSignOutError] = useState<string | null>(null)
+  // Bumped whenever the session ends, so a load still in flight can't bring back the signed-in view.
+  const session = useRef(0)
 
   // A session that ends (signed out elsewhere, expired, revoked) brings back the sign-in form.
-  useEffect(() => onUnauthorized(() => setLoad({ kind: 'signedOut' })), [])
+  useEffect(
+    () =>
+      onUnauthorized(() => {
+        session.current += 1
+        setLoad({ kind: 'signedOut' })
+      }),
+    [],
+  )
 
   useEffect(() => {
     let cancelled = false
+    const started = session.current
+    const current = () => !cancelled && session.current === started
     void (async () => {
       try {
         const plugins = await api.get<PluginStatus[]>('/api/plugins')
         const frontends = await loadPluginFrontends(plugins, importer)
-        if (!cancelled) {
+        if (current()) {
           setLoad({ kind: 'ready', plugins, frontends })
         }
       } catch (error) {
-        if (!cancelled) {
+        if (current()) {
           setLoad(
             error instanceof ApiError && error.status === 401
               ? { kind: 'signedOut' }
@@ -49,9 +61,17 @@ export function App({ importer }: { importer?: ModuleImporter }) {
     }
   }, [importer, attempt])
 
+  // Only a sign-out the server confirmed shows the sign-in form: until then the session may still be valid.
   async function signOut() {
-    await api.post('/api/auth/logout').catch(() => undefined)
+    setSignOutError(null)
+    try {
+      await api.post('/api/auth/logout')
+    } catch (error) {
+      setSignOutError(error instanceof ApiError ? error.message : 'Signing out failed. Try again.')
+      return
+    }
     resetAntiforgeryToken()
+    session.current += 1
     setLoad({ kind: 'signedOut' })
   }
 
@@ -97,6 +117,7 @@ export function App({ importer }: { importer?: ModuleImporter }) {
           <button type="button" onClick={() => void signOut()}>
             Sign out
           </button>
+          {signOutError && <span role="alert"> {signOutError}</span>}
         </p>
       )}
     </main>

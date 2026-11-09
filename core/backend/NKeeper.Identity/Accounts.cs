@@ -29,11 +29,15 @@ public sealed class CredentialValidator(
             user = await users.FindByEmailAsync(identifier);
         }
 
-        if (user is null || user.IsDisabled)
+        // A locked account is refused before any hash is checked, so it takes the same path as an
+        // unknown one; otherwise its faster answer would show that it exists.
+        if (user is null || user.IsDisabled || await users.IsLockedOutAsync(user))
         {
             // Spend the time a real check would, so the response doesn't reveal which accounts exist.
             hasher.VerifyHashedPassword(TimingUser, TimingHash.Value, password);
-            logger.LogInformation("Sign-in failed: {Reason}.", user is null ? "no such account" : $"account {user.Id} is disabled");
+            logger.LogInformation(
+                "Sign-in failed: {Reason}.",
+                user is null ? "no such account" : user.IsDisabled ? $"account {user.Id} is disabled" : $"account {user.Id} is locked out");
             return null;
         }
 
