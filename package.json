@@ -14,7 +14,7 @@
     "lint": "oxlint --deny-warnings",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
-    "build": "npm run build --workspaces --if-present"
+    "build": "npm run build -w @nkeeper/runtime && npm run build -w @nkeeper/app"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^7.0.1",
