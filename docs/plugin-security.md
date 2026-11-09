@@ -42,11 +42,13 @@ frontend/<entry>.js, …     pre-built ES modules and assets
 ```
 
 **Manifest** (`nkeeper-plugin.json`):
-- `formatVersion`, `id`, `name`, `version` (SemVer), `sdkVersion` (the range it is compatible with);
+- `formatVersion`, `id`, `name`, `version` (SemVer 2.0), `sdkVersion` (the range it is compatible with);
 - `dependsOn` (IDs with version ranges), `requirements` (e.g. `guacd`);
 - `backend.entryAssembly` and `backend.entryType` (the `IPlugin` implementation);
 - `backend.exportedAssemblies`: contract assemblies dependants may use, such as `db-core`'s engine interfaces;
-- `frontend.entry`.
+- `frontend.entry` (optional: a plugin may have no frontend).
+
+A **version range** is one or more comparators separated by spaces, all of which must hold: `>=0.1.0 <0.2.0`. The operators are `=`, `>`, `>=`, `<` and `<=`, with SemVer 2.0 precedence.
 
 **File list** (`files.json`): a canonical JSON document with the format version, the plugin ID and version (repeated so they are covered by the signature), and one entry per file in the package except `files.json` and `files.json.sig`, sorted by path:
 
@@ -55,9 +57,11 @@ frontend/<entry>.js, …     pre-built ES modules and assets
   "files": [ { "path": "backend/NKeeper.Plugins.Ssh.dll", "size": 48128, "sha256": "…" }, … ] }
 ```
 
-**Signature** (`files.json.sig`): `{ "keyId": "…", "algorithm": "ECDSA-P256-SHA256", "signature": "<base64>" }`. ECDSA P-256 with SHA-256 is built into .NET, so no third-party cryptography library is involved.
+**Signature** (`files.json.sig`): `{ "keyId": "…", "algorithm": "ECDSA-P256-SHA256", "signature": "<base64>" }`. ECDSA P-256 with SHA-256 is built into .NET, so no third-party cryptography library is involved. The signature is the 64-byte IEEE P1363 form (`r ‖ s`). A key's `keyId` is the lowercase hex of the first 16 bytes of the SHA-256 of its public key (DER SubjectPublicKeyInfo), so an ID can't be claimed for a different key.
 
-Native libraries are **not allowed** in format version 1. If a plugin ever needs one, the format gets a version 2 with a defined extraction step.
+Native libraries are **not allowed** in format version 1 (`native_library`): every `.dll` must be a managed assembly, and `.so`, `.dylib` and `.exe` files are refused. If a plugin ever needs native code, the format gets a version 2 with a defined extraction step.
+
+The archive itself is deliberately plain: no ZIP64, no data descriptors, no encryption, no directory entries, no spanning, and file names in UTF-8. The packaging tool writes exactly that, and the verifier accepts nothing else.
 
 ## 4. Where packages and keys live, and who may write there
 
@@ -100,42 +104,43 @@ Packages are verified in this order. The first failure refuses the plugin with a
 
 Nothing is decompressed until the whole ZIP structure passes, including the signature metadata. A decompression bomb or malformed archive is refused before authentication, not after.
 
-4. Only the central directory is parsed. It must be well formed, and each entry's local header must agree with it (`bad_zip`).
+4. Only the central directory is parsed. It must be well formed, and each entry's local header must agree with it. Entries' data may not overlap or extend into the central directory (`bad_zip`).
 5. Every entry is checked (`bad_entry`):
    - its path is relative, uses `/`, and contains no `..`, empty or `.` segments, drive letters, backslashes or control characters;
    - no two entries have the same path, including paths that differ only in case;
-   - it is not a symlink, a directory with data, or an encrypted entry;
+   - it is not a directory, a symlink or an encrypted entry, and it doesn't use ZIP64 or a data descriptor;
    - its compression method is *stored* or *deflate*.
 6. Declared limits (`limits`):
    - at most 5,000 entries and 500 MB uncompressed in total;
    - a compression ratio of at most 100:1 per entry;
    - metadata caps: `nkeeper-plugin.json` at most 64 KB, `files.json` at most 1 MB, `files.json.sig` at most 4 KB.
-7. Every entry is decompressed through a bounded reader. It stops and refuses as soon as the output passes the entry's declared size, or the limits above (`limits`). This applies to the metadata files as well, so declared sizes are never trusted on their own.
+7. Every entry is decompressed through a bounded reader. It stops and refuses as soon as the output passes the entry's declared size, or the limits above (`limits`). This applies to the metadata files as well, so declared sizes are never trusted on their own. Output shorter than declared, or a CRC-32 mismatch, is `bad_zip`.
 
 ### 5.3 Signature
 
 8. `files.json` and `files.json.sig` exist (`unsigned`).
 9. The `keyId` belongs to a trusted, unrevoked, unexpired key (`untrusted_key`, `revoked_key`, `expired_key`).
 10. The signature over the exact bytes of `files.json` is valid for that key (`bad_signature`).
-11. The key is allowed to sign this plugin ID in this environment (§6.2) (`key_scope`).
-12. The `id` and `version` inside `files.json` match the file name and the manifest (`identity_mismatch`).
+11. `files.json` parses as a file list of a supported format version (`bad_file_list`). It is parsed only after its signature is verified.
+12. The key is allowed to sign this plugin ID in this environment (§6.2) (`key_scope`).
+13. The `id` and `version` inside `files.json` match the file name, which must be exactly `<id>-<version>.nkp` (`identity_mismatch`). The manifest is checked against them in step 16.
 
 ### 5.4 Contents
 
-13. The set of entries is **exactly** `files.json`'s list plus the two signature files: nothing missing, nothing extra (`file_set`).
-14. Every file's size and SHA-256 match its entry in the list (`hash_mismatch`).
+14. The set of entries is **exactly** `files.json`'s list plus the two signature files: nothing missing, nothing extra (`file_set`).
+15. Every file's size and SHA-256 match its entry in the list (`hash_mismatch`).
 
 ### 5.5 Manifest and compatibility
 
-15. The manifest parses, its `formatVersion` is supported, and its `id` follows the ID rules (§6.2) (`bad_manifest`).
-16. Its `sdkVersion` range includes this server's SDK version (`sdk_incompatible`).
-17. It contains no copy of an assembly that core shares with plugins (§7.1) (`shared_assembly`).
-18. The revocation lists don't name this package's hash (`revoked_package`).
-19. Pinning and downgrade rules pass (§8) (`downgrade`, `pin_mismatch`).
+16. The manifest parses, its `formatVersion` is supported, its `id` follows the ID rules (§6.2), and its entry assembly is in the package (`bad_manifest`). Its `id` and `version` match `files.json` (`identity_mismatch`).
+17. Its `sdkVersion` range includes this server's SDK version (`sdk_incompatible`).
+18. It contains no native code (§3) (`native_library`), and no copy of an assembly that core shares with plugins (§7.1), judged by each assembly's metadata name, not its file name (`shared_assembly`).
+19. The revocation lists don't name this package's hash (`revoked_package`).
+20. Pinning and downgrade rules pass (§8) (`downgrade`, `pin_mismatch`).
 
 ### 5.6 Dependencies
 
-20. Every `dependsOn` entry is present, verified, enabled and in range. Otherwise this plugin is refused too (`dependency`). Dependency cycles are refused (`dependency_cycle`).
+21. Every `dependsOn` entry is present, verified, enabled and in range. Otherwise this plugin is refused too (`dependency`). Dependency cycles are refused (`dependency_cycle`).
 
 Only a plugin that passes all of these **and** is enabled (§8) has its code loaded.
 
@@ -178,7 +183,7 @@ The maintainer generates it locally with `NKeeper.PluginTool keygen --release`. 
 ### 7.1 Backend
 
 - Each plugin gets its own `AssemblyLoadContext`, loaded from the verified in-memory bytes (`LoadFromStream`). No plugin assembly is ever loaded from a path.
-- **Shared assemblies** always resolve from the server's default context. These are `NKeeper.Abstractions`, `Microsoft.AspNetCore.*`, `Microsoft.Extensions.*`, `Microsoft.EntityFrameworkCore*`, `Npgsql*` and the .NET runtime. A package that contains its own copy of one is refused (§5.5), so a plugin can't swap in a different ASP.NET or EF.
+- **Shared assemblies** always resolve from the server's default context. The shared set is exactly what that context provides (its trusted platform assemblies): the .NET runtime, ASP.NET Core, `NKeeper.Abstractions` and core's own dependencies such as EF Core and Npgsql. A package that contains its own copy of one is refused (§5.5), so a plugin can't swap in a different ASP.NET or EF. Plugin projects reference shared packages without copying them (`ExcludeAssets="runtime"`).
 - A plugin's private dependencies, such as a database driver, load in its own context. A dependant sees only the assemblies its dependency lists in `exportedAssemblies`.
 - **Installing, updating, enabling or disabling a plugin takes effect at the next restart.** Code is never loaded into or unloaded from a running server. Unloading code that has registered routes, EF models and background services isn't reliable, so NKeeper doesn't try.
 
@@ -235,10 +240,10 @@ Removing a package from the directory keeps the plugin's data. The plugin shows 
 
 ## 10. Tooling
 
-`tools/NKeeper.PluginTool` builds and signs packages:
-- `keygen` (development keys by default);
-- `pack` (canonical `files.json`, excluding shared assemblies, stamping the manifest);
-- `sign`, `verify` (the same verifier the server uses, from shared code).
+`tools/NKeeper.PluginTool` is a thin command line over `NKeeper.Plugins.Packaging`, the library that also holds the server's verifier, so the tool and the server can't disagree:
+- `keygen`: a development key by default, or `--release` for the official key (D12). The private key is written with owner-only permissions;
+- `pack`: builds the canonical `files.json` and the deterministic archive, and signs it in the same step;
+- `verify`: runs the same checks as the server and prints the reason code.
 
 The repository's build packs and signs the built-in plugins with a development key, so the development loop never needs an unsigned mode.
 
