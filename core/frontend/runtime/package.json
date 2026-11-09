@@ -1,0 +1,17 @@
+{
+  "name": "@nkeeper/runtime",
+  "description": "The modules the shell shares with plugins (React, ReactDOM, the JSX runtime, the SDK) and the import map naming them.",
+  "private": true,
+  "license": "MIT",
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/generate.mjs && vite build",
+    "test": "node --test \"scripts/*.test.mjs\""
+  },
+  "dependencies": {
+    "@nkeeper/sdk": "*",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  }
+}
