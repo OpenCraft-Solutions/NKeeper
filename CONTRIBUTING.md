@@ -50,7 +50,7 @@ Use `example.com`/`*.example` names and the documentation address ranges (`192.0
 You need:
 
 - the .NET 10 SDK (the exact version is pinned in [`global.json`](global.json));
-- Node.js 24 LTS (see [`.nvmrc`](.nvmrc); 22.12 or later works);
+- Node.js 24 LTS, 24.15 or later (see [`.nvmrc`](.nvmrc)); Node 22.22.2+ and 26+ also work. These follow the strictest requirement among the locked dependencies (currently `jsdom`);
 - Docker, for the test suite only;
 - PostgreSQL, to run the server locally, once it has a database (Phase 0, PR 3).
 
