@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Architecture tests (docs/architecture.md §2): the rules that keep core and plugins apart, checked
+    against the project files, the sources and the built output.
+  -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <OutputType>Exe</OutputType>
+    <!-- Test names use underscores; inline test-data arrays (CA1861) are clearer than static fields. -->
+    <NoWarn>$(NoWarn);CA1707;CA1861</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The C# compiler's own parser, so every kind of string literal is read as the compiler reads it. -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <!--
+    Built first, so the tests can inspect their output, but never referenced as assemblies: these tests
+    must not depend on what they check. Every plugin project is picked up as it is added.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\NKeeper.Server\NKeeper.Server.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\..\..\testing\plugins\*\*.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\..\..\plugins\*\backend\*.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AssemblyMetadata Include="RepositoryRoot" Value="$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../../../../'))" />
+    <AssemblyMetadata Include="Configuration" Value="$(Configuration)" />
+    <AssemblyMetadata Include="TargetFramework" Value="$(TargetFramework)" />
+  </ItemGroup>
+
+</Project>
