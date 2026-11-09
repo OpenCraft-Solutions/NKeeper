@@ -85,6 +85,10 @@ public sealed class FrontendTests(PostgresFixture postgres) : IClassFixture<Post
     [InlineData("<script type=\"importmap\">{\"imports\":{}}</script>")]
     [InlineData("<script type=\"text/javascript\">window.x = 1</script>")]
     [InlineData("<script src=\"/assets/app-1a2b3c.js\">inline too</script>")]
+    [InlineData("<script type=\"text/javascript\" data-type=\"importmap\">window.x = 1</script>")]
+    [InlineData("<script data-src=\"x\" type=\"module\">window.x = 1</script>")]
+    [InlineData("<script type=\"importmap-x\">window.x = 1</script>")]
+    [InlineData("<script type=\"module\" type=\"importmap\">window.x = 1</script>")]
     public async Task The_server_refuses_to_start_with_an_extra_inline_script(string extra)
     {
         await using var server = new ServerScenario(await postgres.CreateDatabaseAsync());
@@ -126,6 +130,25 @@ public sealed class FrontendTests(PostgresFixture postgres) : IClassFixture<Post
         Assert.Equal("text/javascript", response.Content.Headers.ContentType?.MediaType);
         Assert.Equal("public, max-age=31536000, immutable", response.Headers.CacheControl?.ToString());
         Assert.Equal("nosniff", response.Headers.GetValues("X-Content-Type-Options").Single());
+        Assert.Equal(frontend, await response.Content.ReadAsByteArrayAsync(Token));
+    }
+
+    [Fact]
+    public async Task An_entry_name_with_url_reserved_characters_is_published_escaped()
+    {
+        await using var server = new ServerScenario(await postgres.CreateDatabaseAsync());
+        var frontend = Encoding.UTF8.GetBytes(TestPlugins.HelloFrontend());
+        server.Install(TestPlugins.Package(
+            server.DevelopmentKey,
+            frontendEntry: "frontend/app #1.js",
+            frontend: new Dictionary<string, byte[]> { ["frontend/app #1.js"] = frontend }));
+        using var client = server.Client();
+
+        var hello = Assert.Single((await client.GetFromJsonAsync<List<PluginStatusResponse>>("/api/plugins", Json, Token))!);
+        using var response = await client.GetAsync(new Uri(hello.FrontendEntry!, UriKind.Relative), Token);
+
+        Assert.EndsWith("/app%20%231.js", hello.FrontendEntry, StringComparison.Ordinal);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(frontend, await response.Content.ReadAsByteArrayAsync(Token));
     }
 

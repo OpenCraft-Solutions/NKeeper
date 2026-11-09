@@ -185,6 +185,10 @@ export async function readJsonLines<T>(response: Response, onLine: (line: T) => 
   for (let next = await reader.read(); !next.done; next = await reader.read()) {
     const lines = (text + next.value).split('\n')
     text = lines.pop() ?? ''
-    lines.filter(Boolean).forEach((line) => onLine(JSON.parse(line) as T))
+    lines.filter((line) => line.trim()).forEach((line) => onLine(JSON.parse(line) as T))
+  }
+  // JSON Lines allows the last record to end without a newline.
+  if (text.trim()) {
+    onLine(JSON.parse(text) as T)
   }
 }

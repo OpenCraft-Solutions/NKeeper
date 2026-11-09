@@ -47,6 +47,9 @@ internal static class PluginEndpoints
     public static string FrontendBase(LoadedPlugin plugin, string packageSha256) =>
         $"/plugins/{plugin.Manifest.Id}/{plugin.Manifest.Version.Text}/{packageSha256[..12]}/";
 
+    /// <summary>A package path as a URL path: each segment escaped (a valid name may hold '#' or '?'), the slashes kept.</summary>
+    private static string EscapePath(string path) => string.Join('/', path.Split('/').Select(Uri.EscapeDataString));
+
     public static void MapPluginStatus(this WebApplication app) =>
         app.MapGet("/api/plugins", (PluginHostResult plugins) => plugins.Statuses
             .Select(s =>
@@ -61,7 +64,7 @@ internal static class PluginEndpoints
                     s.BuiltIn,
                     s.PackageSha256,
                     s.KeyId,
-                    entry is null || s.PackageSha256 is null ? null : FrontendBase(loaded!, s.PackageSha256) + entry[PackageFormat.FrontendFolder.Length..],
+                    entry is null || s.PackageSha256 is null ? null : FrontendBase(loaded!, s.PackageSha256) + EscapePath(entry[PackageFormat.FrontendFolder.Length..]),
                     entry is null ? null : Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(loaded!.Files[entry].Span)));
             })
             .ToList());

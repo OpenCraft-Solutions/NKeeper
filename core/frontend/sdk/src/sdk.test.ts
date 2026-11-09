@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { ApiError, api, definePlugin, isPluginDefinition, onUnauthorized } from './index'
+import { ApiError, api, definePlugin, isPluginDefinition, onUnauthorized, readJsonLines } from './index'
 
 describe('definePlugin', () => {
   it('returns a frozen definition', () => {
@@ -49,5 +49,33 @@ describe('api', () => {
     unsubscribe()
 
     expect(listener).toHaveBeenCalledOnce()
+  })
+})
+
+describe('readJsonLines', () => {
+  function streamOf(...chunks: string[]): Response {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        chunks.forEach((chunk) => controller.enqueue(new TextEncoder().encode(chunk)))
+        controller.close()
+      },
+    })
+    return new Response(body)
+  }
+
+  it('hands over records split across chunks, skipping blank lines', async () => {
+    const lines: unknown[] = []
+
+    await readJsonLines(streamOf('{"id":1}\n{"i', 'd":2}\n\n'), (line) => lines.push(line))
+
+    expect(lines).toEqual([{ id: 1 }, { id: 2 }])
+  })
+
+  it('hands over a last record that has no trailing newline', async () => {
+    const lines: unknown[] = []
+
+    await readJsonLines(streamOf('{"id":1}\n{"id":2}'), (line) => lines.push(line))
+
+    expect(lines).toEqual([{ id: 1 }, { id: 2 }])
   })
 })

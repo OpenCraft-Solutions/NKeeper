@@ -51,8 +51,8 @@ public sealed partial class ShellDocument
         var importMaps = new List<string>();
         foreach (Match script in ScriptPattern().Matches(html))
         {
-            var attributes = script.Groups["attributes"].Value;
-            if (SrcAttributePattern().IsMatch(attributes))
+            var attributes = ParseAttributes(script.Groups["attributes"].Value);
+            if (attributes.ContainsKey("src"))
             {
                 if (script.Groups["body"].Value.Trim().Length > 0)
                 {
@@ -62,7 +62,10 @@ public sealed partial class ShellDocument
                 continue;
             }
 
-            if (!ImportMapTypePattern().IsMatch(attributes))
+            // A browser treats a script as an import map only when its (first) type attribute is exactly
+            // "importmap", ignoring ASCII case and surrounding whitespace. Any other inline script may be
+            // JavaScript, and its hash must never get into the policy.
+            if (!attributes.TryGetValue("type", out var type) || !string.Equals(type.Trim(), "importmap", StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException("index.html has an inline script other than the import map; the Content Security Policy allows none.");
             }
@@ -95,11 +98,20 @@ public sealed partial class ShellDocument
     [GeneratedRegex(@"<script\b(?<attributes>[^>]*)>(?<body>[\s\S]*?)</script\s*>", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex ScriptPattern();
 
-    [GeneratedRegex(@"\bsrc\s*=", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex SrcAttributePattern();
+    /// <summary>A start tag's attributes by lower-case name; as in HTML, the first of a repeated name wins.</summary>
+    private static Dictionary<string, string> ParseAttributes(string text)
+    {
+        var attributes = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (Match attribute in AttributePattern().Matches(text))
+        {
+            attributes.TryAdd(attribute.Groups["name"].Value.ToLowerInvariant(), attribute.Groups["value"].Value);
+        }
 
-    [GeneratedRegex(@"\btype\s*=\s*[""']?importmap[""']?(\s|$)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex ImportMapTypePattern();
+        return attributes;
+    }
+
+    [GeneratedRegex(@"(?<name>[^\s""'>/=]+)(?:\s*=\s*(?:""(?<value>[^""]*)""|'(?<value>[^']*)'|(?<value>[^\s>]+)))?", RegexOptions.CultureInvariant)]
+    private static partial Regex AttributePattern();
 }
 
 internal static class FrontendHosting
