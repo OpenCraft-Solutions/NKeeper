@@ -6,7 +6,7 @@ Thanks for your interest in NKeeper. NKeeper 2.0 is in early development, so the
 
 ### Design documents come first
 
-The design lives in [`docs/`](docs/): [`v2-plan.md`](docs/v2-plan.md) today, and `architecture.md` and `plugin-authoring.md` as they are written. **If a change affects the design, update the design documents first, in their own commit, before changing any code.** Design changes include:
+The design lives in [`docs/`](docs/): [`v2-plan.md`](docs/v2-plan.md) and [`plugin-security.md`](docs/plugin-security.md) today, and `architecture.md` and `plugin-authoring.md` as they are written. **If a change affects the design, update the design documents first, in their own commit, before changing any code.** Design changes include:
 
 - the core/plugin boundary or the plugin SDK;
 - the data model;
@@ -31,7 +31,8 @@ Implementation details that don't contradict the documents don't need a doc chan
 
 ### Tests
 
-- Backend tests run against real servers (PostgreSQL, OpenSSH, guacd and so on) in [Testcontainers](https://dotnet.testcontainers.org/). You need Docker to run them.
+- Backend tests run against real servers (PostgreSQL, OpenSSH, guacd and so on) in [Testcontainers](https://dotnet.testcontainers.org/). You need Docker to run them. This is the only place NKeeper uses Docker: it's installed natively on Linux, never as a container.
+- Changes to plugin loading or package verification come with a test for every new refusal path (see [plugin-security.md](docs/plugin-security.md#11-tests-phase-0)).
 - New behaviour comes with tests. A bug fix comes with a test that fails without it.
 - When porting code from 1.x, port its tests with it.
 
@@ -50,7 +51,10 @@ The tooling is being set up in Phase 0 of the [plan](docs/v2-plan.md#8-gameplan)
 
 - the .NET 10 SDK;
 - Node.js 22 or 24 LTS;
-- Docker.
+- PostgreSQL, to run the server locally;
+- Docker, for the test suite only.
+
+Plugins are always signed, even in development. The build creates a local development key and signs the built-in plugins with it, so there is no unsigned mode to switch on.
 
 ## Reporting bugs and requesting features
 

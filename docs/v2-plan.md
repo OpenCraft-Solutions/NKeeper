@@ -1,6 +1,6 @@
 # NKeeper 2.0: audit and modular architecture plan
 
-Status: revision 3, no code written yet.
+Status: revision 4, decisions recorded (§9), no code written yet.
 Source audited: [NKeeper 1.x](https://github.com/DHemken97/NKeeper) at commit [`04de1dc`](https://github.com/DHemken97/NKeeper/commit/04de1dc) (PR #39).
 
 > **Guiding principle.** Core provides capabilities. Plugins consume capabilities and contribute functionality. Core must never need to know which plugins exist to work correctly.
@@ -21,6 +21,12 @@ Source audited: [NKeeper 1.x](https://github.com/DHemken97/NKeeper) at commit [`
 - Phase 2 proves desktop sessions without requiring full desktop parity (§8).
 - Session lifecycle audit events are core-owned (§4.2).
 
+**Revision 4 changes** (decisions recorded, §9):
+- **Plugins load at run time** from signed packages, with root-only installation, per-file hash and signature verification, and version pinning. The security design is in [plugin-security.md](plugin-security.md) and summarized in §7.6. This also changes §5, §6, §6.1 and Phase 0.
+- **Native Linux only:** no IIS, no Docker or container deployment. Docker stays a development and CI dependency for the test containers only (§8, D8).
+- **No upgrade path from 1.x for now** (D10). The `import-v1` plugin and the Phase 1 export fixture are removed. Instance transfer between 2.0 servers stays (§7.4).
+- D11 (providing guacd without Docker) and D12 (custody of the official signing key) are decided: a native guacd service first, with a container fallback; two copies of the release key.
+
 ---
 
 ## 1. Summary
@@ -35,7 +41,12 @@ All of it lives in one API project and one frontend feature tree. Each kind of s
 - everything that is about a *kind of thing you connect to* becomes a **plugin**: a vertical slice (backend + frontend + tests + docs) that registers through declared extension points;
 - the database-engine layer that already exists in 1.x (`IDatabaseConnector`, `IDatabaseDialect`, `DatabaseReports`, `tools.ts`) is the model. It is already a small plugin system, and 2.0 applies the same pattern everywhere.
 
-Recommendation on loading: **plugins are compiled in (first-party, in-repo) for 2.0**, using the same contracts a runtime loader would use later. Plugins handle decrypted credentials, so loading third-party DLLs at run time is a security decision, not just a packaging one. See [§9](#9-decisions-needed-from-you).
+**Plugins are loaded at run time from signed packages** (decision D1). A plugin runs inside the server with access to decrypted credentials, so loading one is treated as installing code into NKeeper:
+- only root on the server can install a package;
+- every file is hash-checked and the package signature verified before any code loads;
+- an NKeeper administrator can only enable what root installed.
+
+See §7.6 and [plugin-security.md](plugin-security.md).
 
 ---
 
@@ -125,7 +136,7 @@ Largest hotspots: `WorkspacePage.tsx` (1,264 lines), `HostManager.cs` (937), `Gu
 │  │ Session framework (stream + stateful, limits, keep-alive, stores)    │  │
 │  │ Connectivity (SSH transport, jump tunnels, port forwards, scripts)   │  │
 │  │ Trust store (TOFU) │ Health scheduler │ Jobs │ Settings │ Transfer   │  │
-│  │ Plugin host (discovery, dependency order, enable/disable, manifest)  │  │
+│  │ Plugin host (verify signed packages, load, dependencies, enable)     │  │
 │  └──────────────────────────────▲──────────────────────────────────────┘  │
 │                                 │ NKeeper.Abstractions (the plugin SDK)   │
 │  ┌──────┬──────┬────────┬──────┴─┬────────┬────────┬────────┬─────────┐   │
@@ -279,7 +290,12 @@ Proxmox's API and iDRAC's Redfish use the core pinned `HttpClient`, so they are 
   - a **startup upgrade step** after each plugin's migrations. It rewrites outdated rows in batches, each batch in a transaction with `WHERE v = <old>` guards, so it is idempotent and safe to repeat.
 - A plugin can't be enabled while its upgrade step is failing. Plugin tables are versioned by their own EF migrations. Bundles record each plugin's data version, so an import can upgrade older sections.
 
-**Installed vs enabled.** *Installed* means compiled into the build: migrations run and data is kept. *Enabled* is an instance setting: endpoints are mapped and contributions are visible. Services of a type whose plugin is installed but disabled, or not installed at all, stay in the inventory and show as unavailable.
+**Installed vs enabled.** States are defined in [plugin-security.md §8](plugin-security.md#8-installed-enabled-pinned):
+- *Installed:* a verified package is in the plugin directory, but its code isn't loaded.
+- *Enabled:* an administrator turned it on. Its code loads at startup, and its migrations run.
+- *Disabled* or *removed:* its data and settings are kept, and its services stay in the inventory as unavailable.
+
+The same applies to service types no installed plugin provides.
 
 ---
 
@@ -292,6 +308,7 @@ NKeeper_2/
 ├─ README.md
 ├─ docs/
 │  ├─ v2-plan.md                     ← this document
+│  ├─ plugin-security.md             plugin packages, signing, verification and loading
 │  ├─ architecture.md                core/plugin model, extension points (written in phase 0)
 │  ├─ plugin-authoring.md            how to write a plugin, with the ssh plugin as the worked example
 │  └─ (installation, user-guide, administration, configuration, security, troubleshooting — ported from 1.x)
@@ -301,12 +318,14 @@ NKeeper_2/
 │  │  ├─ NKeeper.Abstractions/       plugin SDK: contracts, descriptor, contribution types (no EF)
 │  │  ├─ NKeeper.Core/               kernel services: inventory, access, vault, audit, sessions,
 │  │  │                              trust store, pinned HttpClient, health scheduler, jobs,
-│  │  │                              settings, transfer, plugin host
+│  │  │                              settings, transfer
+│  │  ├─ NKeeper.Plugins.Host/       package verification (shared with the packaging tool),
+│  │  │                              filesystem checks, load contexts, pinning, enable state
 │  │  ├─ NKeeper.Connectivity.Ssh/   IConnectivity over SSH.NET: connections, scripts, port forwards,
 │  │  │                              jump tunnels (infrastructure: no UI, no service type)
 │  │  ├─ NKeeper.Core.Persistence/   CoreDbContext, entity configs, migrations, plugin DbContext base
 │  │  ├─ NKeeper.Identity/           Identity, auth session store, auth providers (local, LDAP, OIDC, email 2FA)
-│  │  └─ NKeeper.Server/             Program.cs only: composes core + enabled plugins, middleware, SPA hosting
+│  │  └─ NKeeper.Server/             Program.cs only: composes core, runs the plugin host, middleware, SPA hosting
 │  └─ frontend/
 │     ├─ app/                        shell: router, layout, workspace (tree, tabs, dialogs), keyboard
 │     ├─ ui/                         component kit (Button, Dialog, ContextMenu, ResultGrid, Splitter…)
@@ -336,7 +355,6 @@ NKeeper_2/
 │  ├─ db-ase/                        SAP ASE + Replication Server engines, reports, Copy Database, drift compare
 │  ├─ zabbix/                        settings, host link, detail section, comparison report, import
 │  ├─ import-mremoteng/              mRemoteNG importer
-│  ├─ import-v1/                     NKeeper 1.x bundle reader; dispatches legacy rows to plugins' ILegacyV1Mapper
 │  ├─ network-scan/                  external port scan, ARP neighbour proposals
 │  ├─ wake-on-lan/                   (tiny: shows how small a plugin can be)
 │  └─ reports-ip/                    IP address map report
@@ -344,24 +362,29 @@ NKeeper_2/
 ├─ testing/
 │  ├─ NKeeper.Testing/               ApiFactory, Postgres fixture, SSH/xrdp/guacd fixtures, ManualClock,
 │  │                                 fake-CLI script harness, plugin contract test
-│  └─ fixtures/                      shared fake scripts (virsh, multipath, journalctl…) and container Dockerfiles
+│  └─ fixtures/                      shared fake scripts (virsh, multipath, journalctl…) and test-container
+│                                    Dockerfiles (development and CI only, never deployment)
 │
-├─ deploy/
-│  ├─ docker-compose.yml             guacd service behind a profile (only if desktop is enabled)
-│  ├─ container/                     single-image build (supervisord, nginx)
+├─ tools/
+│  └─ NKeeper.PluginTool/            keygen, pack, sign, verify (.nkp packages)
+│
+├─ deploy/                           native Linux only (D8)
+│  ├─ systemd/                       hardened nkeeper.service (ProtectSystem=strict, non-root user)
 │  ├─ nginx/
-│  └─ scripts/                       setup.sh / setup.ps1 / build-image.*
+│  └─ setup.sh                       install / upgrade / uninstall on Debian/Ubuntu and RHEL-family
 │
 ├─ NKeeper.slnx                      all backend projects
 ├─ package.json                      npm workspaces: core/frontend/*, plugins/*/frontend
 └─ Directory.Build.props             .NET 10, nullable, warnings-as-errors (from 1.x)
 ```
 
-### 6.1 How plugins are wired at build time
+### 6.1 How plugins are built, packaged and loaded
 
-- **Backend:** `NKeeper.Server` references the plugin projects. A generated `PluginCatalog` (or one explicit list) instantiates them. Enable/disable is a runtime instance setting: disabled plugins don't map endpoints or contribute, but their migrations still run, so data is kept.
-- **Frontend:** the app imports `import.meta.glob('/plugins/*/frontend/index.ts')`. Each plugin's heavy views are `lazy()` so they are code-split (Guacamole, spice-html5, xterm and the DB grid only load when used). The shell renders only plugins the server reports as enabled.
-- **Later, third-party plugins** (Phase 8) would run out of process, since `AssemblyLoadContext` isolates versions, not privileges. The manifest and contribution contracts carry over. The in-process services become an RPC surface.
+- **Build:** each plugin builds as its own backend assembly and frontend ES-module bundle. `NKeeper.Server` does **not** reference any plugin project, and the architecture tests enforce that. React and `@nkeeper/sdk` are externals, provided by the shell's import map.
+- **Package:** `NKeeper.PluginTool` packs each plugin into a signed `.nkp`. Built-in plugins are packed and signed by the build: with a development key locally and in CI, and with the official key for releases (D12).
+- **Load:** at startup the plugin host verifies every package in the plugin directory and loads the enabled ones from their verified in-memory bytes, each into its own `AssemblyLoadContext`. The frontend shell asks `GET /api/plugins` which plugins are enabled and imports their entry modules from `/plugins/<id>/…`. Heavy views stay lazy-loaded inside each bundle. Changes take effect at the next restart.
+- **Built-in plugins use the same path.** SSH, desktop and web ship as packages in the release and are verified like any other plugin, so the loader is exercised on every start.
+- **Untrusted third-party plugins** (Phase 8) would run out of process, since `AssemblyLoadContext` isolates versions, not privileges. Signed, trusted plugins run in process as described in [plugin-security.md](plugin-security.md).
 
 ### 6.2 What "add a service type" looks like in 2.0
 
@@ -407,40 +430,67 @@ The generic builder knows the rules that are core concepts today: credential sco
 
 Core runs a scan as a pipeline: pick scanners that apply to the host (by service type and kind), run them over one shared connection where possible (the single-SSH-login property of 1.x is kept by letting Linux-side scanners contribute *script sections* to one combined script), merge `ScanContribution`s, and run the proposal engine (new hosts from neighbours, guest links, cluster nodes, unlink). The matchers (`GuestMatcher`, `ClusterNodeMatcher`, `NeighborMatcher`) are pure and generic, so they move to core inventory.
 
-### 7.4 Instance transfer and the upgrade path from 1.x
+### 7.4 Instance transfer
 
-The 1.x encrypted bundle is the upgrade route. It avoids an in-place schema migration of a 1.x database and gives a tested, one-way path: export from 1.x, import into 2.0. The work is split so that **core never learns 1.x's protocol knowledge**:
+Moving a 2.0 instance between servers works as in 1.x: one passphrase-encrypted bundle, with secrets re-encrypted for the new server.
+- **Core** owns the generic parts:
+  - `BundleReader`/`BundleWriter`;
+  - an `ImportCoordinator` (preview, ordering by plugin dependency, one transaction, ID remapping, secret re-encryption);
+  - the core sections: users, grants, hosts, tags, credentials, trusted keys, hardware and `RunsOnHostId`.
+- **Each plugin** adds its own section through a `TransferParticipant`, versioned like all plugin data (§5).
+- A section for a plugin that isn't installed on the target is kept in the preview and reported, never silently dropped.
 
-| Where | Responsibility |
-| --- | --- |
-| **core** `Transfer/` | generic: `BundleReader`/`BundleWriter` (2.0 format), `ImportCoordinator` (preview, ordering by plugin dependency, one transaction, ID remapping, secret re-encryption), and the core sections (users, grants, hosts, tags, credentials, trusted keys, hardware, `RunsOnHostId`) |
-| **plugin** `import-v1` | decrypts and parses the 1.x bundle format, maps the *core* parts of the 1.x model, and hands each 1.x service row, and each host-level field it doesn't own, to whichever plugin claims it. Disabled by default; enable it to upgrade. |
-| **each plugin** | `ILegacyV1Mapper`: claims 1.x protocol names through its `ServiceType` import aliases (ssh claims `Ssh`; db-mssql claims `Ssms` and maps `Instance` to settings; desktop claims `Rdp`/`Vnc` and maps `RdpSecurity`), plus any host fields it owns (zabbix claims `ZabbixHostId`; kvm and proxmox claim their `VirtualMachineId` prefixes and turn them into `ExternalIds`) |
-
-Anything nobody claims is kept as a service of unknown type ("unavailable"), never dropped, and the import preview lists it. The Phase 1 fixture test runs through this same path, so a missing mapper shows up as an unclaimed item in that test.
+**Upgrading from 1.x is deferred** (D10). If it's added later, it fits the same split without touching core: an `import-v1` plugin reads the 1.x bundle and maps the core parts. Each plugin claims its own 1.x protocol names and fields through the import aliases on its `ServiceType`. The data model table in §5 and Appendix A record where every 1.x field would go.
 
 ### 7.5 Permissions (optional extension, flagged)
 
-1.x has Use/Manage per host. Plugins could declare **capabilities** (`storage.action`, `mssql.kill`, `vm.power`, `migration.run`) that grants could include, finer-grained than "Use". Recommendation: build the hook in the SDK now (capabilities declared, all granted with Use or Manage as today) and decide later whether to expose it in the UI.
+1.x has Use/Manage per host. Plugins could declare **capabilities** (`storage.action`, `mssql.kill`, `vm.power`, `migration.run`) that grants could include, finer-grained than "Use". Decided (D6): build the hook in the SDK now (capabilities declared, all granted with Use or Manage as today) and decide later whether to expose it in the UI.
+
+### 7.6 Runtime plugins (summary of [plugin-security.md](plugin-security.md))
+
+- **Packages:** a plugin ships as a signed `.nkp` ZIP. Its signed `files.json` lists every file with its SHA-256, and ECDSA P-256 is used, built into .NET.
+- **Installation is root-only:** packages live in `/usr/lib/nkeeper/plugins/` and trusted keys in `/etc/nkeeper/plugin-trust/`, all owned by root and not writable by the service. The server checks ownership and modes at startup, refuses to run as root, and runs under a hardened systemd unit (`ProtectSystem=strict`). There is no upload through the web UI or the API.
+- **Verification fails closed,** in a fixed order, each step with a reason code:
+  - the ZIP structure and hard size limits, including the signature metadata, before anything is decompressed;
+  - signature by a trusted, unrevoked key that is allowed to sign that ID (unprefixed IDs are reserved for the official key; development keys only in `Development`);
+  - the exact file set, and every file's hash;
+  - SDK compatibility, no bundled shared assemblies;
+  - pinning (same version with a new hash is refused, and downgrades are refused);
+  - dependencies.
+- **A trust directory that fails its checks refuses every plugin**, since ignoring it would also ignore local revocations.
+- **The CSP stays strict.** The shell's import map is the one inline script, allowed by its hash.
+- **Loading:** the code loads from the same in-memory bytes that were verified, into a per-plugin `AssemblyLoadContext`. The frontend files are served from that same verified copy. Changes apply at restart.
+- **Who does what:** root installs (`plugin install`), and NKeeper administrators enable or disable. Every state change, and every refusal, is audited. A refusal also raises an alert.
 
 ---
 
 ## 8. Gameplan
 
-Each phase ends in a state that builds, passes tests, **deploys with `docker compose up`**, and does something useful. Exit criteria are checkable. The order proves the SDK with real plugins *before* most of the core is built around it.
+Each phase ends in a state that builds, passes tests, **installs as a native Linux service**, and does something useful. Docker is used only for the test containers in development and CI (D8). Exit criteria are checkable. The order proves the SDK with real plugins *before* most of the core is built around it.
 
 ### Phase 0: Architecture skeleton
-- Solution, npm workspaces, `Directory.Build.props`, lint/format, CI, a compose file for Postgres (and guacd behind a profile).
-- `NKeeper.Abstractions` v0 (only the contracts in §4.2's v0 table), plugin discovery, dependency validation, installed/enabled state.
-- `@nkeeper/sdk` v0: `definePlugin`, registries, API client (port `lib/api.ts`: CSRF, problem details).
-- Architecture tests: plugins reference only `NKeeper.Abstractions`; core never mentions a service type ID.
-- **Exit:** the server boots, discovers a no-op plugin, and serves `GET /api/plugins`; the shell lists it; the contract test runs in CI.
+- **Security first:** the plugin host and the package tooling come before anything else, built to [plugin-security.md](plugin-security.md):
+  - `NKeeper.Plugins.Host`: package verification, filesystem checks, pinning, load contexts, enable state;
+  - `NKeeper.PluginTool`: keygen, pack, sign, verify;
+  - a test for every refusal path (§11 there).
+- Solution, npm workspaces, `Directory.Build.props`, lint/format, and CI: build, tests including the Testcontainers ones, lint, type-check, and package verification of the built-in plugins. CodeQL and Dependabot for NuGet and npm.
+- `NKeeper.Abstractions` v0 (only the contracts in §4.2's v0 table), dependency validation, installed/enabled state.
+- `@nkeeper/sdk` v0: `definePlugin`, registries, the import map for shared modules, the API client (port `lib/api.ts`: CSRF, problem details).
+- Architecture tests:
+  - plugins reference only `NKeeper.Abstractions`;
+  - `NKeeper.Server` references no plugin;
+  - core never mentions a service type ID.
+- **Exit:**
+  - the server boots, verifies a signed no-op plugin package, loads it and serves `GET /api/plugins`;
+  - the shell loads the plugin's frontend module and lists it;
+  - a tampered copy of the package is refused with the right reason code;
+  - CI runs all of it.
 
 ### Phase 1: Minimal core + the SSH plugin
 - Only the core that an SSH session needs: local sign-in, bootstrap admin, users, Use/Manage grants, `HostAccess` and `HostContext`, inventory (hosts, tags, services with versioned settings, credentials with per-service scoping), vault and key ring, the session framework (stream kind), trust store, `NKeeper.Connectivity.Ssh` with jump hosts, and audit events.
 - The **`ssh` plugin**: service type, terminal session, TOFU prompt, `Connect` menu action, TCP health probe.
 - Frontend shell: sign-in, tree with search and group-by, a host editor driven by service-type schemas, tabs.
-- **1.x export fixture:** export a real 1.x instance with every service type, scoped credentials, trusted keys, grants, Zabbix links and VMs, sanitized and committed under `testing/fixtures/v1-bundle/`. A test decrypts it and maps every record to the 2.0 model, failing on anything that has nowhere to go. Most of the mapping is still stubbed, but unrepresentable data is found now, not in Phase 5.
+- A first native install: a hardened systemd unit, nginx, PostgreSQL, and the root-owned plugin and trust directories (an early version of the Phase 6 installer).
 - The authorization sweep test (§4.4) goes in now, while there are few endpoints.
 - Port the 1.x tests for auth, access, inventory, jump hosts, key ring and SSH sessions.
 - **Exit:** a deployable build in which you can sign in, add hosts and open SSH terminals (also through a jump host). This is usable for daily SSH work.
@@ -449,6 +499,7 @@ Each phase ends in a state that builds, passes tests, **deploys with `docker com
 - **web**: stateful session kind, separate `nkw-*` origins and middleware, a service type without credentials, plugin settings (base domain), `IWebSessionLauncher` capability.
 - **wake-on-lan**: an action-only plugin, the minimum size.
 - **desktop, proof only:** RDP connects through guacd with a pinned certificate and a saved credential, **with the browser instruction allow-list (1.x `GuacamoleInstructionFilter`) and its negative tests from the start**, because it is a security control on a deployable relay, not a parity feature. That exercises the external-daemon requirement, the certificate probe in the trust store, and the credential path. AD sign-in pass-through, VNC and clipboard follow in Phase 4, so desktop parity doesn't hold up the SDK freeze.
+- **guacd as a native service (D11):** build guacd 1.6 from source on each supported distribution family in CI, and run the RDP proof against that build. If a family can't build or run it reliably, that family falls back to guacd in a container, and the plan records the result.
 - Health scheduler and TLS probes; the health report.
 - **Exit:** SSH and web parity with 1.x, an RDP session opens end to end, and the ported 1.x tests for those paths pass. wake-on-lan touched zero core files.
 
@@ -467,20 +518,26 @@ Each extension point is introduced with its first user (§4.2), and each plugin 
 6. Identity providers: AD (LDAP), OIDC, email 2FA (**AuthProvider**).
 - **Exit:** feature parity with 1.x, every step a deployable build.
 
-### Phase 5: Transfer and the 1.x upgrade
-- **TransferParticipant**s, 2.0 export/import, and completing the V1 bundle importer against the Phase 1 fixture.
-- **Exit:** the fixture, and a fresh real 1.x export, import with every host, credential, trusted key, grant and Zabbix link intact.
+### Phase 5: Instance transfer
+- **TransferParticipant**s and 2.0 export/import (§7.4). There is no 1.x import (D10).
+- **Exit:** an instance exports from one 2.0 server and imports into another with every host, credential, trusted key, grant and plugin section intact.
 
 ### Phase 6: Deployment and docs
-- Setup scripts, single-container image, native Linux (and IIS, if kept: D8), nginx; a plugins admin page (installed vs enabled, unmet requirements).
+- **The native Linux installer** (`deploy/setup.sh`) for Debian/Ubuntu and RHEL-family:
+  - install, upgrade and uninstall;
+  - the hardened systemd unit, nginx with HTTPS, PostgreSQL;
+  - the plugin and trust directories with the right ownership;
+  - guacd as decided in D11.
+- The plugins admin page: installed, enabled and refused, with signer, hash and requirements.
+- The `plugin` command line.
 - Port and update the user, admin and security docs; write a README for each plugin.
-- **Exit:** fresh install and 1.x upgrade documented and tested end to end on each supported mode.
+- **Exit:** fresh install, upgrade and plugin install documented and tested end to end on both distribution families.
 
 ### Phase 7 (optional, post-2.0): Capability permissions in the UI
 Expose plugin-declared capabilities (`storage.action`, `mssql.kill`, `vm.power`, `migration.run`) in grants.
 
-### Phase 8 (optional, post-2.0): Third-party plugins
-`AssemblyLoadContext` is **not** a security boundary: a plugin loaded in process has the API's full privileges, including the vault. Trusted, signed first-party add-ons could load that way. **Untrusted third-party plugins would run out of process** (a separate worker speaking a narrow RPC protocol, given only the capabilities and credentials core chooses to pass it), with a remote ES module for their frontend.
+### Phase 8 (optional, post-2.0): Untrusted third-party plugins
+`AssemblyLoadContext` is **not** a security boundary: a plugin loaded in process has the API's full privileges, including the vault. Signed plugins from trusted keys load that way from Phase 0 on ([plugin-security.md](plugin-security.md)). **Untrusted third-party plugins would run out of process** (a separate worker speaking a narrow RPC protocol, given only the capabilities and credentials core chooses to pass it), with a remote ES module for their frontend.
 
 ### Porting rules (all phases)
 - **Port, don't rewrite, the domain logic.** Parsers, planners, dialects, scripts and their tests move nearly verbatim into their plugin. The refactor is in the seams, not the SQL or shell scripts.
@@ -490,20 +547,25 @@ Expose plugin-declared capabilities (`storage.action`, `mssql.kill`, `vm.power`,
 
 ---
 
-## 9. Decisions needed from you
+## 9. Decisions
 
-| # | Question | My recommendation |
-| --- | --- | --- |
-| D1 | Plugins compiled in (first-party) or loaded at run time (third-party DLLs)? | **Compiled in for 2.0.** Plugins see decrypted secrets, and in-process loading is no sandbox. Untrusted plugins, if ever, run out of process (Phase 8). |
-| D2 | Rewrite in `NKeeper_2` porting code across, or refactor 1.x in place? | **New repo, porting code** (as you've set up). 1.x stays shippable meanwhile. The bundle importer is the upgrade path. |
-| D3 | Keep the stack (.NET 10, React 19/Vite, PostgreSQL, guacd)? | **Yes.** Nothing in the audit argues for a change. |
-| D4 | Plugin granularity: one per product area (as above), or finer (separate files/journal/selinux plugins)? | **Product area.** `linux` bundles small SSH tools; split later if one grows. |
-| D5 | Upgrade path: bundle import only, or also an in-place DB migration from 1.x schema? | **Bundle import only.** Simpler, already tested infrastructure, one-way. |
-| D6 | Capability-level permissions in 2.0 UI, or only the hook? | **Hook only** in 2.0. |
-| D7 | Multi-instance/scale-out sessions as a 2.0 goal? | **No.** Keep in-process sessions behind `ISessionStore` so it's possible later. |
-| D8 | Any 1.x features to drop or defer (e.g. IIS mode, which is untested; the RPC session)? | Your call. Dropping IIS would simplify Phase 6. |
-| D9 | SSH terminal / RDP / web as core code, or bundled `builtIn` plugins (see [§3.2](#32-alternative-considered-ssh-rdp-and-inventory-as-core-features))? | **Bundled built-in plugins.** Same product, cleaner core. (The external review agreed.) |
-| D10 | Can you produce the 1.x export fixture (a sanitized instance that uses every service type)? Phase 1 needs it. | A throwaway 1.x install with fake hosts is enough; no real secrets. |
+Decided on 2026-11-09 unless marked open. Changing one is a design change: update this table first.
+
+| # | Question | Decision | Notes |
+| --- | --- | --- | --- |
+| D1 | Plugins compiled in, or loaded at run time? | **Loaded at run time from signed packages.** | In-process, so only trusted keys. Root installs and admins enable, with no web upload. Every file is hash-checked and every package signature verified. See [plugin-security.md](plugin-security.md). Untrusted plugins would need Phase 8. |
+| D2 | New repository or refactor 1.x in place? | **New repository, clean start**, porting domain logic and tests from 1.x. | 1.x stays available while 2.0 is built. |
+| D3 | Keep the stack? | **Yes:** .NET 10, React and Vite, PostgreSQL, guacd. | |
+| D4 | Plugin granularity | **One plugin per product area** (e.g. `linux` holds Files, Journal and SELinux). | Fewer packages and dependency edges. A tool that grows its own data or dependants can be split out later without breaking anything, since IDs and service types don't change. |
+| D5 | Upgrade path from 1.x | **Deferred with D10.** If built, by bundle import, not in-place migration. | §7.4 records how it would fit without touching core. |
+| D6 | Capability-level permissions | **Hook only:** plugins declare capabilities, and grants stay Use/Manage. | The UI is Phase 7. Declaring capabilities from the start avoids re-touching every plugin later. |
+| D7 | Scale-out sessions | **No.** Sessions stay in-process, behind `ISessionStore` and the session registry. | A single node is the supported deployment, and the interfaces keep scale-out possible later. |
+| D8 | Install modes | **Native Linux only** (systemd, nginx, PostgreSQL). No IIS, no Docker or container deployment. | Docker remains a development and CI dependency for the Testcontainers test suite only, because real-server tests need it. |
+| D9 | SSH / RDP / web as core code or bundled plugins? | **Built-in plugins**, loaded and verified like any other. | §3.2. |
+| D10 | Migration from 1.x | **Not now.** | No `import-v1` plugin and no 1.x fixture. Can be added later as a plugin. |
+| D11 | How is guacd provided without Docker? Distributions don't ship guacd 1.6, which is why 1.x's native mode still ran it in a container. | **Native service first:**<br>- the installer builds guacd 1.6 from source against the distribution's FreeRDP and libvncserver;<br>- it runs as its own unprivileged systemd service, listening on `127.0.0.1` only.<br>**If that doesn't work** reliably on a supported distribution, guacd alone runs in a container (Podman), as the one "absolutely required" exception to D8. | Proven in Phase 2: a build on each supported distribution family in CI, then an RDP session end to end. The fallback is decided per distribution family, from those results. |
+| D12 | How is the official plugin signing key held and rotated? | **Two copies of one dedicated release key:**<br>- one as a secret of a protected GitHub Actions environment, which requires maintainer approval for each release;<br>- one offline backup held by the maintainer.<br>Each release embeds the current public key and the next one, for rotation. | The maintainer generates the key locally with `NKeeper.PluginTool keygen --release`. It is never generated by automation and never committed. Until the first release, all builds use development keys, which production servers refuse. |
+
 
 ---
 
@@ -541,7 +603,7 @@ Expose plugin-declared capabilities (`storage.action`, `mssql.kill`, `vm.power`,
 | `Health/WakeOnLan` | `plugins/wake-on-lan` |
 | `Auditing/` / `features/audit` | `NKeeper.Core` audit |
 | `Diagnostics/` / `DiagnosticsPanel` | `NKeeper.Core` diagnostics |
-| `Transfer/` / `features/transfer` | `NKeeper.Core` transfer (generic bundle + coordinator) + `TransferParticipant`s; 1.x reading in `plugins/import-v1` + per-plugin `ILegacyV1Mapper`s |
+| `Transfer/` / `features/transfer` | `NKeeper.Core` transfer (generic bundle + coordinator) + `TransferParticipant`s (1.x import deferred, D10) |
 | `features/reports` (IP, VM resources, inventory) | `plugins/reports-ip`, `plugins/virt-core`, core |
 | `features/appearance`, `lib/hotkeys` | `core/frontend/app` |
-| `scripts/`, `container/`, `frontend/nginx`, compose | `deploy/` |
+| `scripts/`, `container/`, `frontend/nginx`, compose | `deploy/`: native Linux only (systemd, nginx, `setup.sh`); the container and IIS modes are dropped (D8) |
