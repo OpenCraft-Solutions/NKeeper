@@ -293,8 +293,9 @@ public static partial class PackageVerifier
             var metadata = pe.GetMetadataReader();
             return metadata.IsAssembly ? metadata.GetString(metadata.GetAssemblyDefinition().Name) : null;
         }
-        catch (BadImageFormatException)
+        catch (Exception ex) when (ex is BadImageFormatException or InvalidOperationException or ArgumentException or OverflowException)
         {
+            // Malformed PE or metadata: whatever it is, it is not a managed assembly we would load.
             return null;
         }
     }

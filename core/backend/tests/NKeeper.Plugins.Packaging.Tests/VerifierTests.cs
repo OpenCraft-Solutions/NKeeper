@@ -464,6 +464,15 @@ public sealed class VerifierTests : IDisposable
     }
 
     [Fact]
+    public void A_dll_with_a_truncated_PE_header_is_refused_not_thrown()
+    {
+        var files = TestPackages.Files();
+        files["backend/Broken.dll"] = TestPackages.PluginAssembly[..400];
+
+        AssertRefused(ReasonCodes.NativeLibrary, _packages.Build(files: files).Content);
+    }
+
+    [Fact]
     public void A_bundled_copy_of_a_shared_assembly_is_refused_whatever_its_file_name()
     {
         var files = TestPackages.Files();
