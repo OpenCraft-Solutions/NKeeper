@@ -109,14 +109,17 @@ public sealed partial class SemanticVersion : IComparable<SemanticVersion>, IEqu
     private static int Compare(SemanticVersion? left, SemanticVersion? right) =>
         left is null ? (right is null ? 0 : -1) : left.CompareTo(right);
 
-    /// <summary>Numeric identifiers compare numerically and rank below alphanumeric ones.</summary>
+    /// <summary>
+    /// Numeric identifiers compare numerically and rank below alphanumeric ones. They can be longer
+    /// than any integer type, and have no leading zeros, so they compare by length, then digits.
+    /// </summary>
     private static int CompareIdentifiers(string left, string right)
     {
-        var leftNumeric = long.TryParse(left, NumberStyles.None, CultureInfo.InvariantCulture, out var leftNumber);
-        var rightNumeric = long.TryParse(right, NumberStyles.None, CultureInfo.InvariantCulture, out var rightNumber);
+        var leftNumeric = left.All(char.IsAsciiDigit);
+        var rightNumeric = right.All(char.IsAsciiDigit);
         return (leftNumeric, rightNumeric) switch
         {
-            (true, true) => leftNumber.CompareTo(rightNumber),
+            (true, true) => left.Length != right.Length ? left.Length.CompareTo(right.Length) : string.CompareOrdinal(left, right),
             (true, false) => -1,
             (false, true) => 1,
             _ => string.CompareOrdinal(left, right),

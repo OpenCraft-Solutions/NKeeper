@@ -83,14 +83,41 @@ public sealed class ToolTests : IDisposable
     [Fact]
     public void A_private_key_is_readable_by_its_owner_only()
     {
-        Assert.SkipWhen(OperatingSystem.IsWindows(), "Unix file modes only.");
+        var keys = Path.Combine(_root, "keys");
+        Assert.Equal(Tool.Ok, Run("keygen", "--out", keys, "--name", "dev"));
+        var path = Path.Combine(keys, "dev.private.pem");
+
+        if (OperatingSystem.IsWindows())
+        {
+            // An explicit, non-inherited ACL with a single rule for the current user.
+            var security = new FileInfo(path).GetAccessControl();
+            var rules = security.GetAccessRules(includeExplicit: true, includeInherited: true, typeof(System.Security.Principal.SecurityIdentifier))
+                .Cast<System.Security.AccessControl.FileSystemAccessRule>()
+                .ToList();
+            Assert.True(security.AreAccessRulesProtected);
+            var rule = Assert.Single(rules);
+            Assert.Equal(System.Security.Principal.WindowsIdentity.GetCurrent().User, rule.IdentityReference);
+            Assert.False(rule.IsInherited);
+        }
+        else
+        {
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(path));
+        }
+    }
+
+    [Fact]
+    public void A_shared_list_from_the_server_is_applied()
+    {
         var keys = Path.Combine(_root, "keys");
         Run("keygen", "--out", keys, "--name", "dev");
+        var package = PackSample(Path.Combine(keys, "dev.private.pem"));
+        var list = Path.Combine(_root, "shared.txt");
+        File.WriteAllLines(list, ["# exported from the server", typeof(ToolTests).Assembly.GetName().Name!]);
 
-        if (!OperatingSystem.IsWindows())
-        {
-            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(Path.Combine(keys, "dev.private.pem")));
-        }
+        var (code, output) = RunWithOutput("verify", package, "--trust", keys, "--development", "--shared-list", list);
+
+        Assert.Equal(Tool.Refused, code);
+        Assert.Contains("refused (shared_assembly)", output, StringComparison.Ordinal);
     }
 
     [Theory]

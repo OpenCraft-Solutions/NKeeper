@@ -257,10 +257,25 @@ public sealed class VerifierTests : IDisposable
     [Fact]
     public void A_decompression_bomb_in_a_data_file_is_refused()
     {
+        // The writer would store this; a hostile package deflates it far beyond 100:1.
+        var bomb = new byte[2_000_000];
         var files = TestPackages.FilesWithManifest();
-        files["frontend/bomb.js"] = new byte[2_000_000];
+        files["frontend/bomb.js"] = bomb;
 
-        AssertRefused(ReasonCodes.Limits, TestPackages.Assemble(files, _packages.OfficialKey));
+        AssertRefused(ReasonCodes.Limits, TestPackages.Assemble(files, _packages.OfficialKey, mutate: entries => entries.Select(e => e.Name == "frontend/bomb.js"
+            ? e with { RawDataOverride = ZipWriter.Deflate(bomb), MethodOverride = ZipEntryInfo.MethodDeflate }
+            : e)));
+    }
+
+    [Fact]
+    public void Very_repetitive_files_are_stored_so_the_tools_own_packages_verify()
+    {
+        var files = TestPackages.Files();
+        files["frontend/repetitive.js"] = Encoding.UTF8.GetBytes(string.Concat(Enumerable.Repeat("/* padding */\n", 200_000)));
+
+        var package = _packages.Build(files: files);
+
+        Assert.True(PackageVerifier.Verify(package.Content, package.FileName, _packages.Context()).IsVerified);
     }
 
     [Theory]
@@ -476,7 +491,8 @@ public sealed class VerifierTests : IDisposable
     public void A_bundled_copy_of_a_shared_assembly_is_refused_whatever_its_file_name()
     {
         var files = TestPackages.Files();
-        files["backend/Innocent.dll"] = File.ReadAllBytes(typeof(JsonSerializer).Assembly.Location);
+        // xUnit's core assembly is in this process's shared set, and IL-only like real plugin dependencies.
+        files["backend/Innocent.dll"] = File.ReadAllBytes(typeof(FactAttribute).Assembly.Location);
 
         AssertRefused(ReasonCodes.SharedAssembly, _packages.Build(files: files).Content);
     }

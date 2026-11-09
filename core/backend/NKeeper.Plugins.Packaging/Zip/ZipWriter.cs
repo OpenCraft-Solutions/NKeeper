@@ -124,8 +124,11 @@ internal static class ZipWriter
         var method = ZipEntryInfo.MethodStored;
         if (!entry.ForceStored && entry.Data.Length > 0)
         {
+            // Deflate only when it helps and stays within the verifier's ratio limit; very repetitive
+            // data is stored instead, so the writer's own output always verifies.
             var deflated = Deflate(entry.Data);
-            if (deflated.Length < entry.Data.Length)
+            if (deflated.Length < entry.Data.Length
+                && entry.Data.LongLength <= (long)deflated.Length * PackageLimits.Default.MaxCompressionRatio)
             {
                 (method, payload) = (ZipEntryInfo.MethodDeflate, deflated);
             }

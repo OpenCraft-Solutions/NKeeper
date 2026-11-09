@@ -54,8 +54,8 @@ public sealed class TrustedKey
     /// <summary>A third-party key allowed to sign the IDs matching <paramref name="allowedIds"/>.</summary>
     public static TrustedKey ThirdParty(ReadOnlySpan<byte> publicKey, IReadOnlyList<string> allowedIds, string? comment = null, DateOnly? notAfter = null)
     {
-        var invalid = allowedIds.FirstOrDefault(p => !IsValidPattern(p));
-        if (allowedIds.Count == 0 || invalid is not null)
+        var invalid = allowedIds.FirstOrDefault(p => p is null || !IsValidPattern(p));
+        if (allowedIds.Count == 0 || allowedIds.Any(p => p is null) || invalid is not null)
         {
             throw new TrustConfigurationException(
                 $"A third-party key needs at least one allowed ID, and each must be a reverse-domain ID or a pattern such as 'com.example.*' with at least two fixed segments ('{invalid}' is not).");

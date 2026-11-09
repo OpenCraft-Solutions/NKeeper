@@ -35,7 +35,7 @@ public sealed partial record Revocations(IReadOnlySet<string> KeyIds, IReadOnlyS
 
         var keyIds = file.RevokedKeyIds ?? [];
         var hashes = file.RevokedPackageSha256 ?? [];
-        if (keyIds.Any(k => !SigningKeys.IsKeyId(k)) || hashes.Any(h => !Sha256Pattern().IsMatch(h)))
+        if (keyIds.Any(k => k is null || !SigningKeys.IsKeyId(k)) || hashes.Any(h => h is null || !Sha256Pattern().IsMatch(h)))
         {
             throw new TrustConfigurationException("The revocation list has a malformed key ID or package hash.");
         }

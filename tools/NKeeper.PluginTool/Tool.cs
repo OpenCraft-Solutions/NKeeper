@@ -24,17 +24,25 @@ internal static class Tool
               copies of the private key: the protected release environment and an offline backup.
 
           pack --manifest <nkeeper-plugin.json> --backend <dir> [--frontend <dir>] --key <private.pem> --out <dir>
+               [--shared-list <file>]
               Builds <id>-<version>.nkp from the manifest and the backend/frontend folders, signs it,
               and checks the result with the verifier.
 
           verify <package.nkp> [--trust <dir>] [--official <public.txt>]... [--development] [--sdk <version>]
+                 [--shared-list <file>]
               Runs the server's checks and prints the result. Exits 0 if verified, 1 if refused.
+
+        Shared assemblies: the tool can't see a server's exact set. It assumes the .NET runtime and the
+        ASP.NET Core shared framework; --shared-list adds names, one per line (e.g. exported from the
+        target server). The server's own check when it loads the plugin is the one that counts.
         """;
 
-    /// <param name="sharedAssemblies">What counts as shared with the server (§7.1); this process's trusted platform assemblies by default.</param>
+    /// <param name="sharedAssemblies">
+    /// What counts as shared with the server (§7.1). By default, the .NET runtime and the ASP.NET Core
+    /// shared framework; <c>--shared-list</c> adds to it either way.
+    /// </param>
     public static int Run(string[] args, TextWriter output, TextWriter error, IReadOnlySet<string>? sharedAssemblies = null)
     {
-        var shared = sharedAssemblies ?? SharedAssemblies.OfCurrentProcess();
         try
         {
             if (args.Length == 0 || args[0] is "-h" or "--help" or "help")
@@ -44,6 +52,12 @@ internal static class Tool
             }
 
             var options = Options.Parse(args[1..]);
+            var shared = new HashSet<string>(sharedAssemblies ?? DefaultSharedAssemblies(), StringComparer.OrdinalIgnoreCase);
+            if (options.Get("shared-list") is { } list)
+            {
+                shared.UnionWith(File.ReadLines(list).Select(l => l.Trim()).Where(l => l.Length > 0 && !l.StartsWith('#')));
+            }
+
             return args[0] switch
             {
                 "keygen" => KeyGen(options, output),
@@ -206,11 +220,54 @@ internal static class Tool
         }
     }
 
+    /// <summary>
+    /// The .NET runtime this tool runs on, plus the ASP.NET Core shared framework of the same major
+    /// version, which every NKeeper server also provides to plugins.
+    /// </summary>
+    private static HashSet<string> DefaultSharedAssemblies()
+    {
+        var names = new HashSet<string>(SharedAssemblies.OfCurrentProcess(), StringComparer.OrdinalIgnoreCase);
+
+        // The runtime lives in <dotnet>/shared/Microsoft.NETCore.App/<version>/; ASP.NET Core beside it.
+        var runtime = System.Runtime.InteropServices.RuntimeEnvironment.GetRuntimeDirectory();
+        var aspNetCore = Path.GetFullPath(Path.Combine(runtime, "..", "..", "Microsoft.AspNetCore.App"));
+        if (Directory.Exists(aspNetCore))
+        {
+            var latest = Directory.GetDirectories(aspNetCore)
+                .Select(d => (Path: d, Version: Version.TryParse(Path.GetFileName(d), out var v) ? v : null))
+                .Where(d => d.Version?.Major == Environment.Version.Major)
+                .MaxBy(d => d.Version);
+            if (latest.Path is not null)
+            {
+                names.UnionWith(Directory.EnumerateFiles(latest.Path, "*.dll").Select(Path.GetFileNameWithoutExtension).OfType<string>());
+            }
+        }
+
+        return names;
+    }
+
     private static void WriteNew(string path, byte[] content, bool ownerOnly, bool overwrite = false)
     {
+        var mode = overwrite ? FileMode.Create : FileMode.CreateNew;
+        if (ownerOnly && OperatingSystem.IsWindows())
+        {
+            // Windows has no Unix mode: create the file with an ACL that grants only the current user
+            // access and inherits nothing from the folder, before any key material is written.
+            var security = new System.Security.AccessControl.FileSecurity();
+            security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+            var user = System.Security.Principal.WindowsIdentity.GetCurrent().User
+                ?? throw new UnauthorizedAccessException("Can't determine the current Windows user to restrict the key file to.");
+            security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(
+                user, System.Security.AccessControl.FileSystemRights.FullControl, System.Security.AccessControl.AccessControlType.Allow));
+            using var restricted = System.IO.FileSystemAclExtensions.Create(
+                new FileInfo(path), mode, System.Security.AccessControl.FileSystemRights.Write, FileShare.None, 4096, FileOptions.None, security);
+            restricted.Write(content);
+            return;
+        }
+
         var options = new FileStreamOptions
         {
-            Mode = overwrite ? FileMode.Create : FileMode.CreateNew,
+            Mode = mode,
             Access = FileAccess.Write,
         };
         if (!OperatingSystem.IsWindows())

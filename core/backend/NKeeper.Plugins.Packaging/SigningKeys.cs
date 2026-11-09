@@ -23,8 +23,7 @@ public static partial class SigningKeys
         try
         {
             key.ImportSubjectPublicKeyInfo(subjectPublicKeyInfo, out var read);
-            if (read != subjectPublicKeyInfo.Length || key.KeySize != 256
-                || key.ExportParameters(includePrivateParameters: false).Curve.Oid.Value != ECCurve.NamedCurves.nistP256.Oid.Value)
+            if (read != subjectPublicKeyInfo.Length || !IsP256(key))
             {
                 throw new CryptographicException("The key is not an ECDSA P-256 public key.");
             }
@@ -37,6 +36,10 @@ public static partial class SigningKeys
             throw;
         }
     }
+
+    /// <summary>Whether a key is on the NIST P-256 curve: not merely 256 bits, which secp256k1 also is.</summary>
+    internal static bool IsP256(ECDsa key) =>
+        key.KeySize == 256 && key.ExportParameters(includePrivateParameters: false).Curve.Oid.Value == ECCurve.NamedCurves.nistP256.Oid.Value;
 
     [GeneratedRegex("^[0-9a-f]{32}$", RegexOptions.CultureInvariant)]
     private static partial Regex KeyIdPattern();
@@ -69,7 +72,7 @@ public sealed class PluginSigningKey : IDisposable
         try
         {
             key.ImportFromPem(pem);
-            if (key.KeySize != 256)
+            if (!SigningKeys.IsP256(key))
             {
                 throw new CryptographicException("The key is not an ECDSA P-256 key.");
             }

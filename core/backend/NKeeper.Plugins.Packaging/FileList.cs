@@ -78,12 +78,14 @@ public sealed partial record FileList(int FormatVersion, string Id, string Versi
         string? previous = null;
         foreach (var file in doc.Files)
         {
-            if (!PackagePath.IsValid(file.Path)
+            // Nullable annotations aren't enforced on collection elements, so check for null entries.
+            if (file is null
+                || !PackagePath.IsValid(file.Path)
                 || file.Path is PackageFormat.FileListPath or PackageFormat.SignaturePath
                 || file.Size < 0
                 || !Sha256Pattern().IsMatch(file.Sha256))
             {
-                error = $"File list entry '{file.Path}' is invalid.";
+                error = $"File list entry '{file?.Path}' is invalid.";
                 return false;
             }
 

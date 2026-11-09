@@ -21,10 +21,11 @@ public static class PackageBuilder
         ArgumentNullException.ThrowIfNull(key);
 
         var all = new Dictionary<string, byte[]>(StringComparer.Ordinal) { [PackageFormat.ManifestPath] = manifestJson };
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { PackageFormat.ManifestPath };
+        // Reserved names and duplicates are judged case-insensitively, as the verifier judges them.
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { PackageFormat.ManifestPath, PackageFormat.FileListPath, PackageFormat.SignaturePath };
         foreach (var (path, data) in files)
         {
-            if (!PackagePath.IsValid(path) || path is PackageFormat.FileListPath or PackageFormat.SignaturePath || !seen.Add(path))
+            if (!PackagePath.IsValid(path) || !seen.Add(path))
             {
                 throw new ArgumentException($"'{path}' is not a valid, unique package path.", nameof(files));
             }

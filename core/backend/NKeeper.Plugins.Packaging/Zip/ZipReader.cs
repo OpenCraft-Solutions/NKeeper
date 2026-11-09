@@ -257,22 +257,23 @@ internal static class ZipReader
         }
     }
 
+    /// <summary>Whether a well-formed extra field contains block <paramref name="id"/>; a truncated one is <see cref="ReasonCodes.BadZip"/>.</summary>
     private static bool HasExtra(ReadOnlySpan<byte> extra, ushort id)
     {
+        var found = false;
         var i = 0;
-        while (i + 4 <= extra.Length)
+        while (i < extra.Length)
         {
-            var headerId = U16(extra, i);
-            var size = U16(extra, i + 2);
-            if (headerId == id)
+            if (i + 4 > extra.Length || i + 4 + U16(extra, i + 2) > extra.Length)
             {
-                return true;
+                throw Bad("An entry has a malformed extra field.");
             }
 
-            i += 4 + size;
+            found |= U16(extra, i) == id;
+            i += 4 + U16(extra, i + 2);
         }
 
-        return false;
+        return found;
     }
 
     private static void Require(ReadOnlySpan<byte> archive, int offset, int length)

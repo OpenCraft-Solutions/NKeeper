@@ -270,7 +270,7 @@ public static partial class PackageVerifier
             }
 
             var name = ManagedAssemblyName(data)
-                ?? throw Refuse(ReasonCodes.NativeLibrary, $"'{path}' is not a managed assembly; native libraries aren't allowed.");
+                ?? throw Refuse(ReasonCodes.NativeLibrary, $"'{path}' is not an IL-only managed assembly; native code isn't allowed.");
             if (shared.Contains(name))
             {
                 throw Refuse(ReasonCodes.SharedAssembly, $"'{path}' is a copy of '{name}', which the server provides to every plugin.");
@@ -290,6 +290,16 @@ public static partial class PackageVerifier
                 return null;
             }
 
+            // IL-only: a mixed-mode (C++/CLI) image has metadata too, but carries native code (§5.5 step 18).
+            var cor = pe.PEHeaders.CorHeader;
+            if (cor is null
+                || (cor.Flags & CorFlags.ILOnly) == 0
+                || (cor.Flags & CorFlags.NativeEntryPoint) != 0
+                || cor.ManagedNativeHeaderDirectory.Size != 0)
+            {
+                return null;
+            }
+
             var metadata = pe.GetMetadataReader();
             return metadata.IsAssembly ? metadata.GetString(metadata.GetAssemblyDefinition().Name) : null;
         }
@@ -303,6 +313,6 @@ public static partial class PackageVerifier
     private static PackageRejectedException Refuse(string reasonCode, string message) => new(reasonCode, message);
 
     // Loose on purpose: the exact <id>-<version> match is checked against the signed file list in step 13.
-    [GeneratedRegex(@"^[a-z0-9][a-z0-9.\-+]*\.nkp$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"^[a-z0-9][a-zA-Z0-9.\-+]*\.nkp$", RegexOptions.CultureInvariant)]
     private static partial Regex FileNamePattern();
 }

@@ -76,6 +76,14 @@ public sealed partial record PluginManifest(
             return $"'{doc.SdkVersion}' is not a version range.";
         }
 
+        // Nullable annotations aren't enforced on collection elements, so check for null entries.
+        if (doc.DependsOn?.Any(d => d is null) == true
+            || doc.Requirements?.Any(r => r is null) == true
+            || doc.Backend.ExportedAssemblies?.Any(a => a is null) == true)
+        {
+            return "Lists may not contain null entries.";
+        }
+
         var dependencies = new List<PluginDependency>();
         foreach (var dependency in doc.DependsOn ?? [])
         {
