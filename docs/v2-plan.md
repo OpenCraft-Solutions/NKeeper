@@ -529,7 +529,7 @@ Each phase ends in a state that builds, passes tests, **installs as a native Lin
      - users, local sign-in with the 1.x password rules, bootstrap admin;
      - the server-side auth session store, cookies and antiforgery, rate limits;
      - core's policies on the plugin route group;
-     - the authorization sweep test, started here.
+     - the authorization sweep test, started here;
      - the audit log (`IAuditLog`), grown from Phase 0's plugin audit events, so sign-ins and sign-outs are recorded from the start.
   3. **Access:**
      - hosts and tags;
