@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/core/">
     <Project Path="core/backend/NKeeper.Abstractions/NKeeper.Abstractions.csproj" />
+    <Project Path="core/backend/NKeeper.Core.Persistence/NKeeper.Core.Persistence.csproj" />
     <Project Path="core/backend/NKeeper.Plugins.Host/NKeeper.Plugins.Host.csproj" />
     <Project Path="core/backend/NKeeper.Plugins.Packaging/NKeeper.Plugins.Packaging.csproj" />
     <Project Path="core/backend/NKeeper.Server/NKeeper.Server.csproj" />
