@@ -25,7 +25,7 @@ Source audited: [NKeeper 1.x](https://github.com/DHemken97/NKeeper) at commit [`
 - **Plugins load at run time** from signed packages, with root-only installation, per-file hash and signature verification, and version pinning. The security design is in [plugin-security.md](plugin-security.md) and summarized in §7.6. This also changes §5, §6, §6.1 and Phase 0.
 - **Native Linux only:** no IIS, no Docker or container deployment. Docker stays a development and CI dependency for the test containers only (§8, D8).
 - **No upgrade path from 1.x for now** (D10). The `import-v1` plugin and the Phase 1 export fixture are removed. Instance transfer between 2.0 servers stays (§7.4).
-- Two new open decisions: how guacd is provided without Docker (D11, before Phase 2) and how the official signing key is held (D12, before the first release).
+- D11 (providing guacd without Docker) and D12 (custody of the official signing key) are decided: a native guacd service first, with a container fallback; two copies of the release key.
 
 ---
 
@@ -497,6 +497,7 @@ Each phase ends in a state that builds, passes tests, **installs as a native Lin
 - **web**: stateful session kind, separate `nkw-*` origins and middleware, a service type without credentials, plugin settings (base domain), `IWebSessionLauncher` capability.
 - **wake-on-lan**: an action-only plugin, the minimum size.
 - **desktop, proof only:** RDP connects through guacd with a pinned certificate and a saved credential, **with the browser instruction allow-list (1.x `GuacamoleInstructionFilter`) and its negative tests from the start**, because it is a security control on a deployable relay, not a parity feature. That exercises the external-daemon requirement, the certificate probe in the trust store, and the credential path. AD sign-in pass-through, VNC and clipboard follow in Phase 4, so desktop parity doesn't hold up the SDK freeze.
+- **guacd as a native service (D11):** build guacd 1.6 from source on each supported distribution family in CI, and run the RDP proof against that build. If a family can't build or run it reliably, that family falls back to guacd in a container, and the plan records the result.
 - Health scheduler and TLS probes; the health report.
 - **Exit:** SSH and web parity with 1.x, an RDP session opens end to end, and the ported 1.x tests for those paths pass. wake-on-lan touched zero core files.
 
@@ -560,8 +561,8 @@ Decided on 2026-11-09 unless marked open. Changing one is a design change: updat
 | D8 | Install modes | **Native Linux only** (systemd, nginx, PostgreSQL). No IIS, no Docker or container deployment. | Docker remains a development and CI dependency for the Testcontainers test suite only, because real-server tests need it. |
 | D9 | SSH / RDP / web as core code or bundled plugins? | **Built-in plugins**, loaded and verified like any other. | §3.2. |
 | D10 | Migration from 1.x | **Not now.** | No `import-v1` plugin and no 1.x fixture. Can be added later as a plugin. |
-| D11 | **Open, decide before Phase 2:** how is guacd provided without Docker? Distributions don't ship guacd 1.6, which is why 1.x's native mode still ran it in a container. | Recommendation: **the installer builds guacd 1.6 from source** against the distribution's FreeRDP and libvncserver, and runs it as its own unprivileged systemd service listening on `127.0.0.1` only. | The alternative, Podman for guacd alone, is the "absolutely required" exception, and only if building from source proves unreliable on a supported distribution. |
-| D12 | **Open, decide before the first release:** how is the official plugin signing key held and rotated? | Recommendation: a dedicated release key, used only by a protected GitHub Actions environment that needs maintainer approval for each release, with an offline backup. Each release embeds the current key and the next one, for rotation. | Until then, all builds use development keys, which production servers refuse. |
+| D11 | How is guacd provided without Docker? Distributions don't ship guacd 1.6, which is why 1.x's native mode still ran it in a container. | **Native service first:**<br>- the installer builds guacd 1.6 from source against the distribution's FreeRDP and libvncserver;<br>- it runs as its own unprivileged systemd service, listening on `127.0.0.1` only.<br>**If that doesn't work** reliably on a supported distribution, guacd alone runs in a container (Podman), as the one "absolutely required" exception to D8. | Proven in Phase 2: a build on each supported distribution family in CI, then an RDP session end to end. The fallback is decided per distribution family, from those results. |
+| D12 | How is the official plugin signing key held and rotated? | **Two copies of one dedicated release key:**<br>- one as a secret of a protected GitHub Actions environment, which requires maintainer approval for each release;<br>- one offline backup held by the maintainer.<br>Each release embeds the current public key and the next one, for rotation. | The maintainer generates the key locally with `NKeeper.PluginTool keygen --release`. It is never generated by automation and never committed. Until the first release, all builds use development keys, which production servers refuse. |
 
 
 ---
