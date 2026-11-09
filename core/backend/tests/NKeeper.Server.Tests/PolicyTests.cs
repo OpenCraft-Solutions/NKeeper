@@ -3,8 +3,8 @@ using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
-using NKeeper.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
+using NKeeper.Abstractions;
 using NKeeper.Testing;
 
 namespace NKeeper.Server.Tests;
