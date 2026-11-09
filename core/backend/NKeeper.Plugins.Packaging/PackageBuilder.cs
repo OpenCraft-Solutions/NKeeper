@@ -10,7 +10,8 @@ public static class PackageBuilder
 {
     /// <summary>
     /// Builds a signed package from a manifest and the plugin's files (package paths such as
-    /// <c>backend/Foo.dll</c> to contents). The output is deterministic for the same input and key.
+    /// <c>backend/Foo.dll</c> to contents). Everything but the signature is deterministic: ECDSA signatures
+    /// are randomized, so two builds of the same plugin differ only in <c>files.json.sig</c>.
     /// </summary>
     /// <exception cref="ArgumentException">The manifest is invalid, or a path is invalid or reserved.</exception>
     public static BuiltPackage Build(byte[] manifestJson, IReadOnlyDictionary<string, byte[]> files, PluginSigningKey key)

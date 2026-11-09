@@ -176,5 +176,5 @@ public sealed class TrustedKey
             ? id.StartsWith(pattern[..^1], StringComparison.Ordinal) && id.Length > pattern.Length - 1
             : id == pattern;
 
-    private sealed record KeyFile(string KeyId, string PublicKey, IReadOnlyList<string>? AllowedIds, string? NotAfter, string? Comment, bool? Development);
+    private sealed record KeyFile(string KeyId, string PublicKey, IReadOnlyList<string>? AllowedIds = null, string? NotAfter = null, string? Comment = null, bool? Development = null);
 }

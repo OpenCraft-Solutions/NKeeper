@@ -147,14 +147,14 @@ public sealed partial record PluginManifest(
         string Name,
         string Version,
         string SdkVersion,
-        IReadOnlyList<DependencyDocument>? DependsOn,
-        IReadOnlyList<string>? Requirements,
         BackendDocument Backend,
-        FrontendDocument? Frontend);
+        IReadOnlyList<DependencyDocument>? DependsOn = null,
+        IReadOnlyList<string>? Requirements = null,
+        FrontendDocument? Frontend = null);
 
     private sealed record DependencyDocument(string Id, string Version);
 
-    private sealed record BackendDocument(string EntryAssembly, string EntryType, IReadOnlyList<string>? ExportedAssemblies);
+    private sealed record BackendDocument(string EntryAssembly, string EntryType, IReadOnlyList<string>? ExportedAssemblies = null);
 
     private sealed record FrontendDocument(string Entry);
 }

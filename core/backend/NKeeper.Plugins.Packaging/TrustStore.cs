@@ -50,7 +50,7 @@ public sealed partial record Revocations(IReadOnlySet<string> KeyIds, IReadOnlyS
     [GeneratedRegex("^[0-9a-f]{64}$", RegexOptions.CultureInvariant)]
     private static partial Regex Sha256Pattern();
 
-    private sealed record RevocationsFile(IReadOnlyList<string>? RevokedKeyIds, IReadOnlyList<string>? RevokedPackageSha256);
+    private sealed record RevocationsFile(IReadOnlyList<string>? RevokedKeyIds = null, IReadOnlyList<string>? RevokedPackageSha256 = null);
 }
 
 /// <summary>The keys a server trusts and what it has revoked.</summary>
