@@ -1,0 +1,70 @@
+using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore;
+using NKeeper.Abstractions;
+using NKeeper.Core.Persistence;
+
+namespace NKeeper.Core.Access;
+
+/// <summary>
+/// Authorizes host-scoped endpoints (docs/architecture.md §7.3) before they run, and gives them their
+/// <see cref="HostContext"/>. Middleware, so it covers every kind of endpoint a plugin can map.
+/// </summary>
+/// <remarks>Runs after authorization, which has already required a sign-in.</remarks>
+public sealed class HostScopeMiddleware(RequestDelegate next)
+{
+    public const string HostManageDeniedCode = "host_manage_denied";
+
+    public async Task InvokeAsync(HttpContext context, HostAccess access, CoreDbContext db)
+    {
+        if (context.GetEndpoint()?.Metadata.GetMetadata<HostScopeMetadata>() is not { } scope)
+        {
+            await next(context);
+            return;
+        }
+
+        if (context.User.Identity?.IsAuthenticated != true)
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            return;
+        }
+
+        var permission = Guid.TryParse(context.Request.RouteValues[HostScope.RouteParameter]?.ToString(), out var hostId)
+            ? await access.GetPermissionAsync(hostId, RequestUser.From(context.User), context.RequestAborted)
+            : Access.HostPermission.None;
+
+        if (permission == Access.HostPermission.None)
+        {
+            // Hidden and missing hosts look the same.
+            await Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "Not found").ExecuteAsync(context);
+            return;
+        }
+
+        if (scope.Required == Abstractions.HostPermission.Manage && permission != Access.HostPermission.Manage)
+        {
+            await Results.Problem(
+                    statusCode: StatusCodes.Status403Forbidden,
+                    title: "Not allowed",
+                    detail: "You can use this host but not change it. Ask an administrator for Manage access.",
+                    extensions: new Dictionary<string, object?> { ["code"] = HostManageDeniedCode })
+                .ExecuteAsync(context);
+            return;
+        }
+
+        var host = await db.Hosts.AsNoTracking().Include(h => h.Tags).FirstOrDefaultAsync(h => h.Id == hostId, context.RequestAborted);
+        if (host is null)
+        {
+            // Deleted since the check.
+            await Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "Not found").ExecuteAsync(context);
+            return;
+        }
+
+        context.Features.Set(new HostContext(
+            host.Id,
+            host.Name,
+            host.Hostname,
+            host.IpAddress,
+            [.. host.Tags.OrderBy(t => t.Name, StringComparer.OrdinalIgnoreCase).Select(t => new Abstractions.HostTag(t.Name, t.Value.Length == 0 ? null : t.Value))],
+            permission == Access.HostPermission.Manage ? Abstractions.HostPermission.Manage : Abstractions.HostPermission.Use));
+        await next(context);
+    }
+}

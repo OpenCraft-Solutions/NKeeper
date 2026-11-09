@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using NKeeper.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 using NKeeper.Testing;
 
@@ -25,7 +26,7 @@ public sealed partial class PolicyTests(PostgresFixture postgres) : IClassFixtur
         using var anonymous = server.Client(handleCookies: false);
         var checkedPaths = new List<string>();
 
-        foreach (var (path, method, _) in Calls(server).Where(c => !c.Anonymous))
+        foreach (var (path, method, _, _) in Calls(server).Where(c => !c.Anonymous))
         {
             using var request = new HttpRequestMessage(new HttpMethod(method), new Uri(path, UriKind.Relative));
             using var response = await anonymous.SendAsync(request, Token);
@@ -48,7 +49,7 @@ public sealed partial class PolicyTests(PostgresFixture postgres) : IClassFixtur
         using var client = await server.SignedInClientAsync();
         var checkedPaths = new List<string>();
 
-        foreach (var (path, method, _) in Calls(server).Where(c => UnsafeMethods.Contains(c.Method) && c.Path.StartsWith("/api/", StringComparison.Ordinal)))
+        foreach (var (path, method, _, _) in Calls(server).Where(c => UnsafeMethods.Contains(c.Method) && c.Path.StartsWith("/api/", StringComparison.Ordinal)))
         {
             using var request = new HttpRequestMessage(new HttpMethod(method), new Uri(path, UriKind.Relative));
             using var response = await client.SendAsync(request, Token);
@@ -86,6 +87,87 @@ public sealed partial class PolicyTests(PostgresFixture postgres) : IClassFixtur
         Assert.Equal(["GET /api/auth/antiforgery", "GET /health/live", "POST /api/auth/login", "POST /api/auth/logout"], anonymous);
     }
 
+    // ---- Host scope (architecture.md §7.3) ----
+
+    [Fact]
+    public async Task Every_host_scoped_endpoint_hides_a_host_from_a_user_without_a_grant()
+    {
+        await using var server = await ServerWithHelloAsync();
+        var hostId = await CreateHostAsync(server);
+        await server.CreateUserAsync("bob", "Bob-Passw0rd-123");
+        using var bob = await SignInAsync(server, "bob");
+        var scoped = Calls(server, hostId).Where(c => c.Scope is not null).ToList();
+
+        foreach (var (path, method, _, _) in scoped)
+        {
+            using var response = await bob.SendWithTokenAsync(new HttpMethod(method), path);
+            Assert.True(response.StatusCode == HttpStatusCode.NotFound, $"{method} {path} answered {(int)response.StatusCode} for a host the user can't see.");
+        }
+
+        Assert.Contains(scoped, c => c.Scope!.Required == HostPermission.Use);
+        Assert.Contains(scoped, c => c.Scope!.Required == HostPermission.Manage);
+    }
+
+    [Fact]
+    public async Task A_use_only_user_is_refused_every_manage_endpoint_and_served_the_use_ones()
+    {
+        await using var server = await ServerWithHelloAsync();
+        var hostId = await CreateHostAsync(server);
+        var bobId = await server.CreateUserAsync("bob", "Bob-Passw0rd-123");
+        using (var admin = await server.SignedInClientAsync())
+        {
+            (await admin.SendWithTokenAsync(HttpMethod.Put, $"/api/users/{bobId}/grants", new[] { new { hostId, level = "use" } })).EnsureSuccessStatusCode();
+        }
+
+        using var bob = await SignInAsync(server, "bob");
+        foreach (var (path, method, _, scope) in Calls(server, hostId).Where(c => c.Scope is not null))
+        {
+            using var response = await bob.SendWithTokenAsync(new HttpMethod(method), path);
+            if (scope!.Required == HostPermission.Manage)
+            {
+                Assert.True(response.StatusCode == HttpStatusCode.Forbidden, $"{method} {path} answered {(int)response.StatusCode} to a Use-only user.");
+                Assert.Equal("host_manage_denied", (await response.ProblemAsync()).GetProperty("code").GetString());
+            }
+            else
+            {
+                Assert.True(response.IsSuccessStatusCode, $"{method} {path} answered {(int)response.StatusCode} to a user who may use the host.");
+            }
+        }
+    }
+
+    [Fact]
+    public async Task A_host_scoped_endpoint_gets_the_authorized_host()
+    {
+        await using var server = await ServerWithHelloAsync();
+        var hostId = await CreateHostAsync(server);
+        using var admin = await server.SignedInClientAsync();
+
+        var whoami = await admin.GetStringAsync(new Uri($"/api/p/hello/hosts/{hostId}/whoami", UriKind.Relative), Token);
+        using var raw = await admin.SendWithTokenAsync(HttpMethod.Post, $"/api/p/hello/hosts/{hostId}/raw");
+        using var missing = await admin.GetAsync(new Uri($"/api/p/hello/hosts/{Guid.NewGuid()}/whoami", UriKind.Relative), Token);
+
+        Assert.Equal("web01 Manage", whoami);
+        Assert.Equal("managing web01", await raw.Content.ReadAsStringAsync(Token));
+        Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
+    }
+
+    private static async Task<Guid> CreateHostAsync(ServerScenario server)
+    {
+        using var admin = await server.SignedInClientAsync();
+        using var response = await admin.SendWithTokenAsync(HttpMethod.Post, "/api/hosts", new { name = "web01", ipAddress = "192.0.2.10" });
+        response.EnsureSuccessStatusCode();
+        using var json = System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync(Token));
+        return json.RootElement.GetProperty("id").GetGuid();
+    }
+
+    private static async Task<HttpClient> SignInAsync(ServerScenario server, string userName)
+    {
+        var client = server.Client();
+        using var response = await client.LoginAsync(userName, "Bob-Passw0rd-123");
+        response.EnsureSuccessStatusCode();
+        return client;
+    }
+
     private async Task<ServerScenario> ServerWithHelloAsync()
     {
         var server = new ServerScenario(await postgres.CreateDatabaseAsync());
@@ -96,14 +178,19 @@ public sealed partial class PolicyTests(PostgresFixture postgres) : IClassFixtur
         return server;
     }
 
+    /// <summary>One concrete call of a mapped route, with the host scope it needs, if any.</summary>
+    private sealed record Call(string Path, string Method, bool Anonymous, HostScopeMetadata? Scope);
+
     /// <summary>
-    /// Every mapped route as a concrete call: parameters filled in, and each of its methods, or GET and
-    /// POST for one that takes any method. The shell's fallback route is left out: it serves pages.
+    /// Every mapped route as a concrete call: parameters filled in (a GUID parameter with
+    /// <paramref name="hostId"/>), and each of its methods, or GET and POST for one that takes any
+    /// method. The shell's fallback route is left out: it serves pages.
     /// </summary>
-    private static List<(string Path, string Method, bool Anonymous)> Calls(ServerScenario server)
+    private static List<Call> Calls(ServerScenario server, Guid? hostId = null)
     {
         server.Client().Dispose();
-        var calls = new List<(string, string, bool)>();
+        var id = (hostId ?? Guid.NewGuid()).ToString();
+        var calls = new List<Call>();
         foreach (var endpoint in server.Services.GetRequiredService<EndpointDataSource>().Endpoints.OfType<RouteEndpoint>())
         {
             var pattern = endpoint.RoutePattern.RawText ?? string.Empty;
@@ -112,10 +199,13 @@ public sealed partial class PolicyTests(PostgresFixture postgres) : IClassFixtur
                 continue;
             }
 
-            var path = "/" + RouteParameter().Replace(pattern.TrimStart('/'), m => m.Value.Contains("**", StringComparison.Ordinal) ? "x.js" : "x");
+            var path = "/" + RouteParameter().Replace(
+                pattern.TrimStart('/'),
+                m => m.Value.Contains("**", StringComparison.Ordinal) ? "x.js" : m.Value.Contains(":guid", StringComparison.Ordinal) ? id : "x");
             var anonymous = endpoint.Metadata.GetMetadata<IAllowAnonymous>() is not null;
+            var scope = endpoint.Metadata.GetMetadata<HostScopeMetadata>();
             var methods = endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods ?? [HttpMethods.Get, HttpMethods.Post];
-            calls.AddRange(methods.Select(m => (path, m, anonymous)));
+            calls.AddRange(methods.Select(m => new Call(path, m, anonymous, scope)));
         }
 
         return calls;
