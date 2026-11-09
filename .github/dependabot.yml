@@ -23,3 +23,9 @@ updates:
     groups:
       npm-minor-and-patch:
         update-types: [minor, patch]
+    ignore:
+      # The type definitions must match the Node version NKeeper runs on (24 LTS, see .nvmrc), not the
+      # newest Node: a major update would let code compile against APIs that don't exist at run time.
+      # Raise this together with .nvmrc and package.json "engines".
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]

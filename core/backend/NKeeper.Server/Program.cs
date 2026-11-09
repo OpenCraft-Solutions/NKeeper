@@ -29,6 +29,13 @@ using var startupLogging = LoggerFactory.Create(logging => logging
     .AddConsole());
 var pluginLogger = startupLogging.CreateLogger("NKeeper.Plugins");
 
+// The shell, if this server serves one, is checked before anything else (§7.3): an index.html with an
+// inline script other than its import map stops the server here.
+var frontendRoot = builder.Configuration.GetSection(FrontendOptions.SectionName).Get<FrontendOptions>()?.Root;
+var shell = string.IsNullOrWhiteSpace(frontendRoot)
+    ? null
+    : ShellDocument.Load(Path.Combine(builder.Environment.ContentRootPath, frontendRoot));
+
 // Startup order (§9): the core schema first, so plugin records can be read and written…
 var connectionString = builder.Configuration.GetConnectionString("NKeeper")
     ?? throw new InvalidOperationException("ConnectionStrings:NKeeper is required.");
@@ -63,11 +70,21 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 
 // …and only then is the web application built.
 var app = builder.Build();
+app.UseSecurityHeaders();
+if (shell is not null)
+{
+    app.UseShell(shell);
+}
 
 // Liveness only: the process is up and serving requests.
 app.MapGet("/health/live", () => Results.Text("Healthy"));
 app.MapPluginStatus();
+app.MapPluginFrontends();
 PluginHost.MapEndpoints(plugins, app, builder.Configuration);
+if (shell is not null)
+{
+    app.MapShellFallback(shell);
+}
 
 await app.RunAsync();
 

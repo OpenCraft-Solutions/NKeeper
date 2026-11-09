@@ -44,6 +44,20 @@ internal sealed class ServerScenario : IAsyncDisposable
 
     public PluginSigningKey DevelopmentKey { get; } = PluginSigningKey.Generate();
 
+    /// <summary>A built shell for the server to serve (Frontend:Root); none for an API-only server.</summary>
+    public string? FrontendRoot { get; set; }
+
+    /// <summary>A shell directory under this scenario, with the given index.html and a hashed asset.</summary>
+    public string CreateShell(string indexHtml)
+    {
+        var root = Directory.CreateDirectory(Path.Combine(_root, "shell")).FullName;
+        Directory.CreateDirectory(Path.Combine(root, "assets"));
+        File.WriteAllText(Path.Combine(root, "index.html"), indexHtml);
+        File.WriteAllText(Path.Combine(root, "assets", "app-1a2b3c.js"), "console.log('shell')");
+        FrontendRoot = root;
+        return root;
+    }
+
     public string Install(BuiltPackage package)
     {
         var path = package.WriteTo(PluginDirectory);
@@ -65,6 +79,11 @@ internal sealed class ServerScenario : IAsyncDisposable
             web.UseSetting("Plugins:Directory", PluginDirectory);
             web.UseSetting("Plugins:TrustDirectory", TrustDirectory);
             web.UseSetting("Plugins:DevelopmentTrustDirectory", DevelopmentTrustDirectory);
+            if (FrontendRoot is not null)
+            {
+                web.UseSetting("Frontend:Root", FrontendRoot);
+            }
+
             if (OperatingSystem.IsLinux())
             {
                 web.UseSetting("Plugins:DevelopmentOwnerUid", new LinuxFileSystem().EffectiveUserId.ToString(System.Globalization.CultureInfo.InvariantCulture));
