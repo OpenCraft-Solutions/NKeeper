@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The plugin package format, trust and verification (docs/plugin-security.md). Bytes in, result
+    out: no file system, no network, no ASP.NET. Shared by the server's plugin host and the
+    packaging tool, so the two can never disagree about what a valid package is.
+  -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="NKeeper.Plugins.Packaging.Tests" />
+  </ItemGroup>
+
+</Project>
