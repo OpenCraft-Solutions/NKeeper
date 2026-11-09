@@ -322,21 +322,26 @@ Decision D13 ([v2-plan.md §4.6](v2-plan.md#46-credentials-core-uses-them-plugin
 - A handle is bound to:
   - the user, host and service it was resolved for;
   - the plugin it was issued to, through that plugin's own instance of the broker;
-  - the request or session that obtained it. It expires with them, and when the user's access to the host changes.
+  - its lifetime: the request that obtained it, or the plugin session (a terminal, say) that request opened, when the plugin ties it to one. It expires when that lifetime ends, when the user signs out, and when the user's access to the host changes.
 - Core refuses a handle used outside any of these bindings, and audits the refusal as `credential.denied`.
 - Handles are never written to the database, and never sent to the browser.
 
 ### 12.2 Prompted secrets
 
 - The credential prompt is a core component in `@nkeeper/sdk`. It posts to a core endpoint, never to a plugin's.
-- Core holds the typed secret in memory only, in the user's auth session, until the handle using it expires or the user signs out. It is never persisted.
-- A plugin endpoint that opens a session receives the handle the prompt returned, not the secret.
+- Core holds the typed secret in memory only, in the user's auth session. It is never persisted.
+- The browser gets back a **prompt reference**, not a handle. A prompt reference is:
+  - opaque and single-use;
+  - bound to the user's auth session, the host and the service;
+  - short-lived: it expires after 2 minutes if unused.
+- The browser passes the prompt reference to the plugin's endpoint. That endpoint gives it to the broker, which exchanges it, once, for a handle bound to the plugin and to the request or the session it opens. The secret moves from the prompt reference to the handle, never through the plugin.
+- An unused prompt reference, and its secret, are dropped when it expires, and at sign-out.
 
 ### 12.3 Using a handle
 
 1. **Authenticated connection.** Core opens the connection, checks the host key or certificate against the trust store, authenticates, and returns the connected object:
    - `IConnectivity.OpenSshAsync` (exec, shell, SFTP, forwards, through jump hosts);
-   - an authenticated `HttpClient`, whose handler adds the credential to each request;
+   - an authenticated `HttpClient`. Core's handler sends a **private copy** of each request with the credential added, and the plugin's own request is never changed. The response the plugin gets refers back to the plugin's request (`RequestMessage`), so neither carries the credential. Redirects to another origin don't keep it, and error messages are built without it;
    - later, a database connection opened by core with `Persist Security Info=false`.
 2. **Secret on the wire.** The plugin builds the outgoing message with a typed placeholder, not a string. Core's writer replaces the placeholder with the secret as it writes to the socket. The message the plugin holds, logs or keeps never contains it.
 3. **Released plaintext** (a last resort). Rules:
@@ -356,6 +361,7 @@ It does **not** contain a malicious plugin running in process. Such a plugin can
 ### 12.5 Tests (with each tier)
 
 - A handle used by another user, for another host or service, by another plugin, after it expired, or after access to the host was revoked: refused and audited.
-- A prompted secret is gone after sign-out, and it never reaches a plugin endpoint.
+- A prompt reference works once, only for its own auth session, host and service, and not after it expires or after sign-out. Its secret never reaches a plugin endpoint.
 - No secret appears in captured logs, API responses, audit events or exception messages, across the SSH paths (password, private key and passphrase, jump host).
+- With the authenticated `HttpClient`: the credential is absent from the plugin's request, from `response.RequestMessage`, from logged HTTP requests and responses, from error messages, and from a redirect to another origin.
 - A plugin without the declaration can't obtain a plaintext secret (from the third tier on).

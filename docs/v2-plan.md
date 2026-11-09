@@ -280,8 +280,8 @@ Proxmox's API and iDRAC's Redfish use the core pinned `HttpClient`, so they are 
 
 A plugin asks core to **use** a credential, not to hand it over (D13). The rules are in [plugin-security.md §12](plugin-security.md#12-credentials). In short:
 
-- **The broker chooses.** `ICredentialBroker` decides which credential applies to one service of an authorized host: a saved one (with per-service scoping, as in 1.x `usedWith`), one the user typed into a prompt, or the user's own sign-in (pass-through). It returns an opaque **credential handle**. A handle is bound to the user, the host, the service and the request or session that obtained it, and it expires with them.
-- **Secrets never pass through plugin endpoints.** A credential prompt is a core component (`@nkeeper/sdk`) that posts to a core endpoint. The plugin's own endpoint receives only the handle.
+- **The broker chooses.** `ICredentialBroker` decides which credential applies to one service of an authorized host: a saved one (with per-service scoping, as in 1.x `usedWith`), one the user typed into a prompt, or the user's own sign-in (pass-through). It returns an opaque **credential handle**. A handle is bound to the user, the host, the service, the plugin, and the request or plugin session it serves, and it expires with them.
+- **Secrets never pass through plugin endpoints.** A credential prompt is a core component (`@nkeeper/sdk`) that posts to a core endpoint. The browser gets a single-use prompt reference, and the plugin's endpoint hands that to the broker, which exchanges it for a handle.
 - **Core uses the handle, in this order of preference:**
   1. **Core opens the connection.** The plugin gets it already authenticated:
      - an SSH connection (exec, shell, SFTP, port forwards) from `IConnectivity`;
