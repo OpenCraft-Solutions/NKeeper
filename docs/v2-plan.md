@@ -525,6 +525,7 @@ Each phase ends in a state that builds, passes tests, **installs as a native Lin
 - **Delivery order.** Each step is one pull request, or a few, and each leaves `main` working:
   1. **Design:** credential brokering (§4.6, D13, plugin-security.md §12) and this order.
   2. **Identity:**
+     - the key ring: Data Protection keys in the database, encrypted with a certificate kept outside it, as in 1.x. The auth tickets and antiforgery tokens need it first;
      - users, local sign-in with the 1.x password rules, bootstrap admin;
      - the server-side auth session store, cookies and antiforgery, rate limits;
      - core's policies on the plugin route group;
@@ -534,8 +535,7 @@ Each phase ends in a state that builds, passes tests, **installs as a native Lin
      - hosts and tags;
      - Use/Manage grants, `HostAccess`, `HostContext` and `IHostDirectory`, with host-scoped plugin endpoints.
   4. **Vault and credentials:**
-     - the key ring (Data Protection keys in the database, encrypted with a certificate kept outside it, as in 1.x);
-     - credentials with per-service scoping and write-only APIs;
+     - credentials encrypted with the key ring, with per-service scoping and write-only APIs;
      - `ICredentialBroker`, handles and the core credential prompt.
   5. **Service types:**
      - SDK contributions `ServiceType` (settings schema and version), `SessionType` (stream), `HostAction` and `HealthProbe` (TCP);
