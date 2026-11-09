@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The kernel (docs/architecture.md §1): core services every feature uses. Today the audit log;
+    access, the vault, sessions and connectivity arrive in Phase 1.
+  -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NKeeper.Core.Persistence\NKeeper.Core.Persistence.csproj" />
+  </ItemGroup>
+
+</Project>
