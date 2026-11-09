@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { api, ApiError } from '@nkeeper/sdk'
+import { api, ApiError, onUnauthorized, resetAntiforgeryToken } from '@nkeeper/sdk'
 import { loadPluginFrontends, type FrontendState, type ModuleImporter, type PluginStatus } from './plugins'
+import { SignIn } from './SignIn'
 
 const STATE_LABELS: Record<PluginStatus['state'], string> = {
   loaded: 'Loaded',
@@ -10,11 +11,19 @@ const STATE_LABELS: Record<PluginStatus['state'], string> = {
   missing: 'Missing',
 }
 
-type Load = { kind: 'loading' } | { kind: 'error'; message: string } | { kind: 'ready'; plugins: PluginStatus[]; frontends: Map<string, FrontendState> }
+type Load =
+  | { kind: 'loading' }
+  | { kind: 'signedOut' }
+  | { kind: 'error'; message: string }
+  | { kind: 'ready'; plugins: PluginStatus[]; frontends: Map<string, FrontendState> }
 
-/** The application shell (Phase 0): lists the server's plugins and loads their frontends. */
+/** The application shell: signs the user in, lists the server's plugins and loads their frontends. */
 export function App({ importer }: { importer?: ModuleImporter }) {
   const [load, setLoad] = useState<Load>({ kind: 'loading' })
+  const [attempt, setAttempt] = useState(0)
+
+  // A session that ends (signed out elsewhere, expired, revoked) brings back the sign-in form.
+  useEffect(() => onUnauthorized(() => setLoad({ kind: 'signedOut' })), [])
 
   useEffect(() => {
     let cancelled = false
@@ -27,20 +36,31 @@ export function App({ importer }: { importer?: ModuleImporter }) {
         }
       } catch (error) {
         if (!cancelled) {
-          setLoad({ kind: 'error', message: error instanceof ApiError ? error.message : 'The plugin list could not be loaded.' })
+          setLoad(
+            error instanceof ApiError && error.status === 401
+              ? { kind: 'signedOut' }
+              : { kind: 'error', message: error instanceof ApiError ? error.message : 'The plugin list could not be loaded.' },
+          )
         }
       }
     })()
     return () => {
       cancelled = true
     }
-  }, [importer])
+  }, [importer, attempt])
+
+  async function signOut() {
+    await api.post('/api/auth/logout').catch(() => undefined)
+    resetAntiforgeryToken()
+    setLoad({ kind: 'signedOut' })
+  }
 
   return (
     <main>
       <h1>NKeeper</h1>
       <p>Version 2.0 is in early development.</p>
-      <h2>Plugins</h2>
+      {load.kind === 'signedOut' && <SignIn onSignedIn={() => setAttempt((n) => n + 1)} />}
+      {load.kind !== 'signedOut' && <h2>Plugins</h2>}
       {load.kind === 'loading' && <p>Loading plugins…</p>}
       {load.kind === 'error' && <p role="alert">{load.message}</p>}
       {load.kind === 'ready' && load.plugins.length === 0 && <p>No plugins are installed.</p>}
@@ -71,6 +91,13 @@ export function App({ importer }: { importer?: ModuleImporter }) {
             ))}
           </tbody>
         </table>
+      )}
+      {load.kind === 'ready' && (
+        <p>
+          <button type="button" onClick={() => void signOut()}>
+            Sign out
+          </button>
+        </p>
       )}
     </main>
   )
