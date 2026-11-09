@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The plugin SDK: contracts only. Plugins reference this assembly and nothing else from core,
+    and it is shared with them from the server's default load context (docs/plugin-security.md §7.1).
+  -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+</Project>

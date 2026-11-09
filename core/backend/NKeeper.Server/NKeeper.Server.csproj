@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!--
+    The ASP.NET Core host: the composition root only. It references core projects, never a plugin
+    (plugins are loaded at run time from signed packages, docs/plugin-security.md).
+  -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NKeeper.Abstractions\NKeeper.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="NKeeper.Server.Tests" />
+  </ItemGroup>
+
+</Project>
