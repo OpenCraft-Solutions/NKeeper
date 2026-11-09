@@ -22,6 +22,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\NKeeper.Plugins.Packaging\NKeeper.Plugins.Packaging.csproj" />
+    <ProjectReference Include="..\..\..\..\tools\NKeeper.PluginTool\NKeeper.PluginTool.csproj" />
   </ItemGroup>
 
 </Project>

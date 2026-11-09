@@ -163,6 +163,16 @@
           "xunit.v3.runner.common": "[3.2.2]"
         }
       },
+      "nkeeper-plugin": {
+        "type": "Project",
+        "dependencies": {
+          "NKeeper.Abstractions": "[2.0.0-dev, )",
+          "NKeeper.Plugins.Packaging": "[2.0.0-dev, )"
+        }
+      },
+      "nkeeper.abstractions": {
+        "type": "Project"
+      },
       "nkeeper.plugins.packaging": {
         "type": "Project"
       }

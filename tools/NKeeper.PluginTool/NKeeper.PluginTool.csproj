@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- keygen, pack and verify for plugin packages (docs/plugin-security.md §10). -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <AssemblyName>nkeeper-plugin</AssemblyName>
+    <RootNamespace>NKeeper.PluginTool</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\core\backend\NKeeper.Abstractions\NKeeper.Abstractions.csproj" />
+    <ProjectReference Include="..\..\core\backend\NKeeper.Plugins.Packaging\NKeeper.Plugins.Packaging.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="NKeeper.Plugins.Packaging.Tests" />
+  </ItemGroup>
+
+</Project>
