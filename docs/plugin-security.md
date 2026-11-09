@@ -46,7 +46,8 @@ frontend/<entry>.js, …     pre-built ES modules and assets
 - `dependsOn` (IDs with version ranges), `requirements` (e.g. `guacd`);
 - `backend.entryAssembly` and `backend.entryType` (the `IPlugin` implementation);
 - `backend.exportedAssemblies`: contract assemblies dependants may use, such as `db-core`'s engine interfaces;
-- `frontend.entry` (optional: a plugin may have no frontend).
+- `frontend.entry` (optional: a plugin may have no frontend);
+- `builtIn` (optional, default `false`): ship-with-NKeeper plugins such as `ssh`. It is honoured **only** when the package is signed by an official key, or by a development key on a server running in `Development`. From any other signer it is ignored, so a third-party plugin can never make itself undisableable. This is how the server knows what is built in without core naming any plugin.
 
 A **version range** is one or more comparators separated by spaces, all of which must hold: `>=0.1.0 <0.2.0`. The operators are `=`, `>`, `>=`, `<` and `<=`, with SemVer 2.0 precedence.
 
@@ -71,7 +72,7 @@ The archive itself is deliberately plain: no ZIP64, no data descriptors, no encr
 | `/etc/nkeeper/plugin-trust/` | `root:root` `0755` | additional trusted keys and the local revocation list, `root:root` `0644` |
 | `/var/lib/nkeeper/` | `nkeeper:nkeeper` `0750` | the only place the service may write (diagnostics, temporary files) |
 
-At startup, before reading any package, the server checks the plugin and trust directories, every ancestor directory, and every file in them, using `lstat` (no symlinks followed):
+At startup, before reading any package, the server checks the plugin and trust directories, every ancestor directory, and every file in them, without following symlinks (Linux `statx` with `AT_SYMLINK_NOFOLLOW`, whose result layout is the same on every architecture):
 - the owner is `root`;
 - none is writable by group or others;
 - none is a symlink;
@@ -88,7 +89,7 @@ The server **refuses to run as root** in production. The systemd unit installed 
 
 Even code execution inside NKeeper can't change what it loads next time.
 
-**Development** (`ASPNETCORE_ENVIRONMENT=Development`) on a non-Linux machine skips only the ownership and mode checks, and logs a warning on every start. Signatures and hashes are always checked, everywhere.
+**Development** (`ASPNETCORE_ENVIRONMENT=Development`) on a non-Linux machine skips only the ownership and mode checks, and logs a warning on every start. Signatures and hashes are always checked, everywhere. **Outside Development, on any OS other than Linux, no plugin loads**, since the checks above can't be made there.
 
 ## 5. Verifying a package
 
@@ -203,20 +204,26 @@ The maintainer generates it locally with `NKeeper.PluginTool keygen --release`. 
 | State | Meaning |
 | --- | --- |
 | **Installed** | A package is in the plugin directory and passes verification. Its manifest is read, and its code is not loaded. |
-| **Enabled** | An administrator has turned it on in NKeeper. Its code loads at startup, its migrations run, and its endpoints and contributions appear. Built-in plugins are enabled on first start and can't be disabled. |
+| **Enabled** | An administrator has turned it on in NKeeper. Its code loads at startup, its migrations run, and its endpoints and contributions appear. Built-in plugins (§3, `builtIn`) are enabled the first time they are seen and can't be disabled. |
 | **Disabled** | Its code doesn't load. Its data and settings are kept. Its service types show as unavailable. |
 | **Refused** | Verification failed. Its code doesn't load, it is shown with the reason code, and an alert is raised (§9). |
+| **Awaiting signer approval** | A newer version signed by a different key than the recorded one. Its code doesn't load until an administrator approves the new signer. |
 
-Core records each enabled plugin in `core.installed_plugins`:
-- `id`, `version`, `package_sha256`, `key_id`;
-- who enabled it, and when.
+Core records every plugin it has seen in `core.installed_plugins`:
+- `id`, `version`, `package_sha256`, `key_id`, whether it is built in;
+- whether it is enabled, and who enabled it, and when;
+- when it was first seen and last updated.
+
+A plugin seen for the first time is recorded and audited (`plugin.discovered`). A built-in plugin starts enabled; any other starts disabled until an administrator enables it.
 
 At every start:
 - **same version, same hash:** loads;
 - **same version, different hash:** refused (`pin_mismatch`), treated as tampering;
 - **newer version, same signing key:** an update. It loads and the record is updated, with the update audited;
-- **newer version, different signing key:** it needs an administrator to approve the new key before it loads;
+- **newer version, different signing key:** awaiting signer approval. An administrator must approve the new key before it loads;
 - **older version:** refused (`downgrade`), unless root has run `nkeeper plugin allow-downgrade <id> <version>`, which allows exactly that version once.
+
+Until administrators exist (Phase 1), nothing can enable a plugin or approve a signer, so only built-in plugins load. The `allow-downgrade` command arrives with the rest of the command line in Phase 6; until then a downgrade is always refused.
 
 Removing a package from the directory keeps the plugin's data. The plugin shows as missing until its package returns.
 
@@ -235,6 +242,8 @@ Removing a package from the directory keeps the plugin's data. The plugin shows 
 **Audit.** Plugin events are core-owned audit events:
 - `plugin.discovered`, `plugin.enabled`, `plugin.disabled`, `plugin.updated`, `plugin.loaded`;
 - `plugin.refused`, with the reason code. This also raises a high-severity alert in diagnostics and a banner for administrators.
+
+**Startup order.** The core database schema is migrated first, so plugin state can be read and recorded. Then the plugin host checks the directories, loads the trust configuration, verifies every package, applies pinning and dependencies, and loads the enabled plugins' code. Only then is the web application built, with the loaded plugins' services and endpoints.
 
 **Startup.** By default a refused plugin doesn't stop the server. The rest of NKeeper starts without it (and without its dependants), and the alert is raised. Setting `Plugins:RequireAllEnabledLoaded=true` makes the server refuse to start if any *enabled* plugin is refused, for operators who'd rather be down than run without a security-relevant plugin.
 
