@@ -61,7 +61,16 @@ public sealed class PluginHostResult
 
             _loaded.Remove(plugin);
             var index = _statuses.FindIndex(s => s.Id == next.Id);
-            _statuses[index] = _statuses[index] with { State = PluginState.Refused, ReasonCode = next.Code, Message = next.Message };
+            var refused = new PluginStatus(next.Id, plugin.Manifest.Version.Text, PluginState.Refused, next.Code, next.Message, null, null, BuiltInIds.Contains(next.Id), null);
+            if (index < 0)
+            {
+                _statuses.Add(refused);
+            }
+            else
+            {
+                _statuses[index] = _statuses[index] with { State = PluginState.Refused, ReasonCode = next.Code, Message = next.Message };
+            }
+
             _alerts.Add($"Plugin {next.Id} refused ({next.Code}): {next.Message}");
             failed.Add(next.Id);
             foreach (var dependant in _loaded.Where(p => p.Manifest.DependsOn.Any(d => d.Id == next.Id)))
@@ -126,7 +135,7 @@ public sealed class PluginHost(
     /// Calls each loaded plugin's <see cref="IPlugin.ConfigureServices"/>. A plugin that throws is
     /// refused (<c>load_failed</c>) with its dependants, and the registrations it made are removed.
     /// </summary>
-    public void ConfigureServices(PluginHostResult result, IServiceCollection services, IConfiguration configuration)
+    public async Task ConfigureServicesAsync(PluginHostResult result, IServiceCollection services, IConfiguration configuration, CancellationToken cancellationToken)
     {
         foreach (var plugin in result.Loaded.ToList())
         {
@@ -150,7 +159,7 @@ public sealed class PluginHost(
                 logger.LogError(ex, "Plugin {PluginId} failed in ConfigureServices", plugin.Manifest.Id);
                 foreach (var id in result.Fail(plugin.Manifest.Id, HostReasonCodes.LoadFailed, $"ConfigureServices threw {ex.GetType().Name}: {ex.Message}"))
                 {
-                    audit.WriteAsync("plugin.refused", id, HostReasonCodes.LoadFailed, CancellationToken.None).GetAwaiter().GetResult();
+                    await audit.WriteAsync("plugin.refused", id, HostReasonCodes.LoadFailed, cancellationToken);
                 }
             }
         }

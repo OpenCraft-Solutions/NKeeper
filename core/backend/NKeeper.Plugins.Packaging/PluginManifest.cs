@@ -31,7 +31,7 @@ public sealed partial record PluginManifest(
     IReadOnlyList<string> Requirements,
     PluginBackend Backend,
     PluginFrontend? Frontend,
-    bool BuiltIn)
+    bool BuiltIn = false)
 {
     /// <summary>
     /// Parses and validates a manifest. When <paramref name="packageFiles"/> is given, the entry

@@ -46,11 +46,17 @@ internal sealed class PluginLoadContext : AssemblyLoadContext
     /// <summary>The simple name of the assembly at a package path, if it is one of this plugin's.</summary>
     public static string? AssemblyNameOf(ReadOnlyMemory<byte> data)
     {
-        using var stream = new MemoryStream(data.ToArray(), writable: false);
+        using var stream = ReadOnlyStream(data);
         using var pe = new PEReader(stream);
         var metadata = pe.GetMetadataReader();
         return metadata.IsAssembly ? metadata.GetString(metadata.GetAssemblyDefinition().Name) : null;
     }
+
+    /// <summary>A read-only stream over the verified bytes, without copying them when they are backed by an array.</summary>
+    private static MemoryStream ReadOnlyStream(ReadOnlyMemory<byte> data) =>
+        System.Runtime.InteropServices.MemoryMarshal.TryGetArray(data, out var segment) && segment.Array is not null
+            ? new MemoryStream(segment.Array, segment.Offset, segment.Count, writable: false)
+            : new MemoryStream(data.ToArray(), writable: false);
 
     protected override Assembly? Load(AssemblyName assemblyName)
     {
@@ -63,7 +69,7 @@ internal sealed class PluginLoadContext : AssemblyLoadContext
 
         if (_assemblies.TryGetValue(name, out var data))
         {
-            return LoadFromStream(new MemoryStream(data.ToArray(), writable: false));
+            return LoadFromStream(ReadOnlyStream(data));
         }
 
         foreach (var dependency in _dependencies)

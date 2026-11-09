@@ -298,7 +298,7 @@ public sealed class PluginHostTests : IDisposable
         var result = await host.LoadAsync(TestContext.Current.CancellationToken);
         var services = new ServiceCollection();
 
-        host.ConfigureServices(result, services, new ConfigurationBuilder().Build());
+        await host.ConfigureServicesAsync(result, services, new ConfigurationBuilder().Build(), TestContext.Current.CancellationToken);
 
         Assert.Empty(services);
         Assert.Empty(result.Loaded);

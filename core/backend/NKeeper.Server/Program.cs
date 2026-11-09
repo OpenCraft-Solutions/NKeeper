@@ -54,7 +54,7 @@ var pluginHost = new PluginHost(
     pluginLogger,
     TimeProvider.System);
 var plugins = await pluginHost.LoadAsync(CancellationToken.None);
-pluginHost.ConfigureServices(plugins, builder.Services, builder.Configuration);
+await pluginHost.ConfigureServicesAsync(plugins, builder.Services, builder.Configuration, CancellationToken.None);
 
 builder.Services.AddSingleton(plugins);
 builder.Services.AddSingleton(TimeProvider.System);
