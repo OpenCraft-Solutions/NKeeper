@@ -6,10 +6,14 @@
   -->
   <PropertyGroup>
     <IsPackable>false</IsPackable>
+    <UserSecretsId>nkeeper-server-2</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\NKeeper.Abstractions\NKeeper.Abstractions.csproj" />
+    <ProjectReference Include="..\NKeeper.Core.Persistence\NKeeper.Core.Persistence.csproj" />
+    <ProjectReference Include="..\NKeeper.Plugins.Host\NKeeper.Plugins.Host.csproj" />
+    <ProjectReference Include="..\NKeeper.Plugins.Packaging\NKeeper.Plugins.Packaging.csproj" />
   </ItemGroup>
 
   <ItemGroup>

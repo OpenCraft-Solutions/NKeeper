@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Shared test helpers: test plugin packages, a PostgreSQL fixture. Referenced only by test projects. -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Testcontainers.PostgreSql" />
+    <PackageReference Include="xunit.v3.extensibility.core" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\core\backend\NKeeper.Plugins.Packaging\NKeeper.Plugins.Packaging.csproj" />
+    <ProjectReference Include="..\..\core\backend\NKeeper.Core.Persistence\NKeeper.Core.Persistence.csproj" />
+    <!--
+      Built first, but not referenced as an assembly: the test plugin must not be in the test process's
+      trusted platform assemblies, or it would count as shared (§7.1) and load in the default context.
+    -->
+    <ProjectReference Include="..\plugins\NKeeper.TestPlugins.Hello\NKeeper.TestPlugins.Hello.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AssemblyMetadata Include="HelloPluginPath" Value="$(MSBuildThisFileDirectory)../plugins/NKeeper.TestPlugins.Hello/bin/$(Configuration)/$(TargetFramework)/NKeeper.TestPlugins.Hello.dll" />
+  </ItemGroup>
+
+</Project>

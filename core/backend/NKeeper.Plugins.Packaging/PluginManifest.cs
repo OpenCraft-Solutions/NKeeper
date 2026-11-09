@@ -17,6 +17,10 @@ public sealed record PluginBackend(string EntryAssembly, string EntryType, IRead
 public sealed record PluginFrontend(string Entry);
 
 /// <summary>A plugin's manifest, <c>nkeeper-plugin.json</c> (docs/plugin-security.md §3), validated.</summary>
+/// <remarks>
+/// <see cref="BuiltIn"/> is only what the package claims. The plugin host honours it only for
+/// official signers (or development keys in Development).
+/// </remarks>
 public sealed partial record PluginManifest(
     int FormatVersion,
     string Id,
@@ -26,7 +30,8 @@ public sealed partial record PluginManifest(
     IReadOnlyList<PluginDependency> DependsOn,
     IReadOnlyList<string> Requirements,
     PluginBackend Backend,
-    PluginFrontend? Frontend)
+    PluginFrontend? Frontend,
+    bool BuiltIn = false)
 {
     /// <summary>
     /// Parses and validates a manifest. When <paramref name="packageFiles"/> is given, the entry
@@ -136,7 +141,8 @@ public sealed partial record PluginManifest(
             dependencies,
             requirements,
             new PluginBackend(backend.EntryAssembly, backend.EntryType, exported),
-            doc.Frontend is { } f ? new PluginFrontend(f.Entry) : null);
+            doc.Frontend is { } f ? new PluginFrontend(f.Entry) : null,
+            doc.BuiltIn ?? false);
         return null;
     }
 
@@ -158,7 +164,8 @@ public sealed partial record PluginManifest(
         BackendDocument Backend,
         IReadOnlyList<DependencyDocument>? DependsOn = null,
         IReadOnlyList<string>? Requirements = null,
-        FrontendDocument? Frontend = null);
+        FrontendDocument? Frontend = null,
+        bool? BuiltIn = null);
 
     private sealed record DependencyDocument(string Id, string Version);
 

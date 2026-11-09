@@ -197,6 +197,12 @@ IPlugin
   Contribute(IPluginContributions)         everything below
 ```
 
+The manifest lives in the package (`nkeeper-plugin.json`, [plugin-security.md §3](plugin-security.md#3-package-format-nkp-format-version-1)), not in code. **SDK v0** (Phase 0) starts with only the first two members:
+- `ConfigureServices(IServiceCollection)`, with a context giving the plugin's ID, version and configuration section;
+- `MapEndpoints(IEndpointRouteBuilder)`, where the builder is the route group core created at `/api/p/{id}/`.
+
+`Contribute` and the typed wrappers arrive with their first users (§4.2). `GET /api/plugins` stays unauthenticated until identity arrives in Phase 1. It lists only IDs, versions, states and hashes.
+
 A matching **frontend module** exports `definePlugin({ id, ... })`. The server's `GET /api/plugins` returns the enabled plugins and their declarative contributions. The frontend joins them with its local components by key.
 
 ### 4.2 Contribution catalogue

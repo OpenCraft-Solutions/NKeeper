@@ -51,8 +51,8 @@ You need:
 
 - the .NET 10 SDK (the exact version is pinned in [`global.json`](global.json));
 - Node.js 24 LTS, 24.15 or later (see [`.nvmrc`](.nvmrc)); Node 22.22.2+ and 26+ also work. These follow the strictest requirement among the locked dependencies (currently `jsdom`);
-- Docker, for the test suite only;
-- PostgreSQL, to run the server locally, once it has a database (Phase 0, PR 3).
+- Docker, for the test suite only: the tests start PostgreSQL and other servers in containers;
+- PostgreSQL 17, to run the server locally.
 
 **Backend** (from the repository root):
 
@@ -61,10 +61,18 @@ dotnet restore NKeeper.slnx
 dotnet build NKeeper.slnx
 dotnet test NKeeper.slnx
 dotnet format NKeeper.slnx                      # fix formatting; CI runs it with --verify-no-changes
+```
+
+To run the server, give it a database in [.NET user secrets](https://learn.microsoft.com/aspnet/core/security/app-secrets), outside the repository. It creates its schema on start:
+
+```bash
+dotnet user-secrets --project core/backend/NKeeper.Server set "ConnectionStrings:NKeeper" "Host=localhost;Database=nkeeper;Username=nkeeper;Password=<yours>"
 dotnet run --project core/backend/NKeeper.Server   # http://localhost:5080
 ```
 
-NuGet versions are managed centrally in [`Directory.Packages.props`](Directory.Packages.props), and every project has a `packages.lock.json`. CI restores in locked mode, so commit the lock files whenever a dependency changes.
+It starts without plugins until one is installed. In Development you can point `Plugins:Directory` at a folder of packages you built with `nkeeper-plugin`, and `Plugins:DevelopmentTrustDirectory` at the folder holding your development key's `.trust.json` (see [plugin-security.md §4, §5.7](docs/plugin-security.md)).
+
+NuGet versions are managed centrally in [`Directory.Packages.props`](Directory.Packages.props), and every project has a `packages.lock.json`. CI restores in locked mode, so commit the lock files whenever a dependency changes. Schema changes are EF Core migrations, committed with the code: `dotnet tool restore`, then `dotnet ef migrations add <Name> --project core/backend/NKeeper.Core.Persistence --output-dir Migrations`.
 
 **Frontend** (from the repository root, which is an npm workspace):
 

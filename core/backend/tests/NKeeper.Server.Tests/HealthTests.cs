@@ -1,14 +1,15 @@
 using System.Net;
-using Microsoft.AspNetCore.Mvc.Testing;
+using NKeeper.Testing;
 
 namespace NKeeper.Server.Tests;
 
-public sealed class HealthTests(WebApplicationFactory<Program> factory) : IClassFixture<WebApplicationFactory<Program>>
+public sealed class HealthTests(PostgresFixture postgres) : IClassFixture<PostgresFixture>
 {
     [Fact]
     public async Task Liveness_answers_healthy()
     {
-        using var client = factory.CreateClient();
+        await using var server = new ServerScenario(await postgres.CreateDatabaseAsync());
+        using var client = server.Client();
 
         using var response = await client.GetAsync(new Uri("/health/live", UriKind.Relative), TestContext.Current.CancellationToken);
 

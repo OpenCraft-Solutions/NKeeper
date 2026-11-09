@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The plugin host (docs/plugin-security.md §4, §5.6, §5.7, §7, §8): checks the plugin and trust
+    directories, loads the trust configuration, verifies packages, applies pinning and dependencies,
+    and loads enabled plugins from their verified bytes. It knows no plugin by name.
+  -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <!-- LibraryImport (statx, geteuid) generates blittable marshalling code. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NKeeper.Abstractions\NKeeper.Abstractions.csproj" />
+    <ProjectReference Include="..\NKeeper.Plugins.Packaging\NKeeper.Plugins.Packaging.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="NKeeper.Plugins.Host.Tests" />
+  </ItemGroup>
+
+</Project>
