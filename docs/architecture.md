@@ -286,7 +286,7 @@ Ported from 1.x, which stores credentials the same way. Phase 1 step 5 stores th
 - **Scoping.** A credential names the services it's used with by `serviceIndexes`: positions in the same request's `services` list, so it can name a service that's new in that request. Leaving the field out, or sending `null`, means all services. An empty list means none.
 - **Responses.** A credential lists its services the same way, as positions in the response's `services`. A scope that pointed only at services since removed becomes empty, not "all".
 - Anyone who can see the host sees its credentials without their secrets, so they can choose one to connect with. Changing them needs Manage.
-- Changes are audited with the host, as part of `host.create` or `host.update`. The detail counts credentials and never includes a secret.
+- Changes are audited with the host, as part of `host.create` or `host.update`. The detail never includes a secret.
 
 **Inside core.**
 - A decrypted secret is a `Secret`:
@@ -303,7 +303,7 @@ Plugins use credentials without seeing them (D13, [plugin-security.md §12](plug
 use.MapPost("/connect", async (HostContext host, ConnectRequest request, ICredentialBroker broker) =>
 {
     var handle = await broker.ResolveSavedAsync(host, request.ServiceId, request.CredentialId);
-    var who = broker.Describe(host, request.ServiceId, handle);   // username, domain, source; never a secret
+    var who = await broker.DescribeAsync(host, request.ServiceId, handle);   // username, domain, source; never a secret
     // step 6: await connectivity.OpenSshAsync(host, request.ServiceId, handle)
 });
 ```
@@ -324,7 +324,7 @@ Passing on the user's own sign-in arrives with directory sign-in; local accounts
   - the request: a handle is dropped when the request that obtained it ends.
 
   Tying a handle to a plugin session instead arrives with sessions, in step 7. So does ending it when the user's access to the host changes.
-- Every use of a handle checks all its bindings. `Describe`, and from step 6 every use that connects, takes the host and the service again. A mismatch, an unknown handle, or an expired one is refused with `CredentialDeniedException` and audited as `credential.denied`.
+- Every use of a handle checks all its bindings. `DescribeAsync`, and from step 6 every use that connects, takes the host and the service again. A mismatch, an unknown handle, or an expired one is refused with `CredentialDeniedException` and audited as `credential.denied`.
 - Outside a plugin's own endpoint (a background job, say), the broker refuses to resolve. Credential use outside requests is designed with its first user.
 
 **The credential prompt.**
