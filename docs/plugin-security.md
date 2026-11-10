@@ -156,7 +156,8 @@ The host refuses for reasons that concern the server rather than one package:
 | `unsafe_location` | The plugin or trust directory, an ancestor, or a file in them fails the checks of §4 | every plugin |
 | `bad_trust_config` | A key file or the revocation list in the trust directory can't be used | every plugin |
 | `duplicate_id` | Two packages in the directory carry the same plugin ID | every package with that ID |
-| `load_failed` | The verified code can't be loaded: the entry type is missing, doesn't implement `IPlugin`, or its constructor or `ConfigureServices` throws | that plugin, and its dependants |
+| `load_failed` | The verified code can't be loaded: the entry type is missing, doesn't implement `IPlugin`, or its constructor, `Contribute` or `ConfigureServices` throws | that plugin, and its dependants |
+| `contribution_invalid` | A contribution breaks the rules for its kind, or takes an ID another loaded plugin already contributed ([architecture.md §7.4](architecture.md#74-services-and-service-types)) | that plugin, and its dependants |
 
 **Testing the ownership checks.** CI runs tests as an unprivileged user, who can't create root-owned directories. In Development only, `Plugins:DevelopmentOwnerUid` names the owner the checks expect instead of root. Every directory and ancestor must then be owned by root or by that user, and no group- or other-writable bit is ever allowed. Outside Development the setting is ignored and the owner is always root.
 
