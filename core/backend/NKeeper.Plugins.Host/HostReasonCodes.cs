@@ -21,6 +21,9 @@ public static class HostReasonCodes
     /// <summary>The verified code couldn't be loaded or configured.</summary>
     public const string LoadFailed = "load_failed";
 
+    /// <summary>A contribution broke its rules, or took an ID another plugin already contributed.</summary>
+    public const string ContributionInvalid = "contribution_invalid";
+
     /// <summary>The same version was seen before with a different package hash: treated as tampering.</summary>
     public const string PinMismatch = "pin_mismatch";
 

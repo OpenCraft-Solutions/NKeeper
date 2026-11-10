@@ -1,5 +1,5 @@
 /** The SDK version this build of the shell implements; plugin manifests declare a compatible range. */
-export const SDK_VERSION = '0.1.1'
+export const SDK_VERSION = '0.1.2'
 
 /** What a plugin's frontend knows about itself. Its identity comes from the server's verified manifest. */
 export interface PluginContext {

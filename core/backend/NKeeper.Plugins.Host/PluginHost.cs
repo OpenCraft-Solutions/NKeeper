@@ -26,8 +26,13 @@ public sealed class PluginHostResult
     private readonly List<PluginStatus> _statuses = [];
     private readonly List<LoadedPlugin> _loaded = [];
     private readonly List<string> _alerts = [];
+    private readonly List<ContributedServiceType> _serviceTypes = [];
 
     public IReadOnlyList<PluginStatus> Statuses => _statuses;
+
+    /// <summary>The service types the loaded plugins contributed, in load order (docs/architecture.md §7.4).</summary>
+    public IReadOnlyList<ContributedServiceType> ServiceTypes =>
+        [.. _serviceTypes.Where(t => _loaded.Exists(p => p.Manifest.Id == t.PluginId))];
 
     /// <summary>Loaded plugins, dependencies before dependants.</summary>
     public IReadOnlyList<LoadedPlugin> Loaded => _loaded;
@@ -45,6 +50,9 @@ public sealed class PluginHostResult
     internal void AddLoaded(LoadedPlugin plugin) => _loaded.Add(plugin);
 
     internal void Alert(string message) => _alerts.Add(message);
+
+    internal void AddServiceTypes(string pluginId, IEnumerable<ServiceType> types) =>
+        _serviceTypes.AddRange(types.Select(t => new ContributedServiceType(pluginId, t)));
 
     /// <summary>Marks a loaded plugin as refused, with every loaded plugin that depends on it.</summary>
     internal IReadOnlyList<string> Fail(string id, string reasonCode, string message)
@@ -132,11 +140,13 @@ public sealed class PluginHost(
     }
 
     /// <summary>
-    /// Calls each loaded plugin's <see cref="IPlugin.ConfigureServices"/>. A plugin that throws is
-    /// refused (<c>load_failed</c>) with its dependants, and the registrations it made are removed.
+    /// Calls each loaded plugin's <see cref="IPlugin.Contribute"/> and checks what it declares, then its
+    /// <see cref="IPlugin.ConfigureServices"/>. A plugin whose contributions are refused (<c>contribution_invalid</c>),
+    /// or that throws (<c>load_failed</c>), is refused with its dependants; the registrations it made are removed.
     /// </summary>
     public async Task ConfigureServicesAsync(PluginHostResult result, IServiceCollection services, IConfiguration configuration, CancellationToken cancellationToken)
     {
+        await ContributeAsync(result, configuration, cancellationToken);
         foreach (var plugin in result.Loaded.ToList())
         {
             if (!result.Loaded.Contains(plugin))
@@ -183,6 +193,61 @@ public sealed class PluginHost(
             catch (Exception ex) when (ex is not OutOfMemoryException)
             {
                 throw new PluginHostException($"Plugin {plugin.Manifest.Id} failed while mapping its endpoints; the server won't start half configured.", ex);
+            }
+        }
+    }
+
+    /// <summary>In load order, so when two plugins contribute one ID, the one that loads first keeps it.</summary>
+    private async Task ContributeAsync(PluginHostResult result, IConfiguration configuration, CancellationToken cancellationToken)
+    {
+        foreach (var plugin in result.Loaded.ToList())
+        {
+            if (!result.Loaded.Contains(plugin))
+            {
+                continue;
+            }
+
+            var id = plugin.Manifest.Id;
+            var collected = new ContributionCollector();
+            string? code = null, problem = null;
+            try
+            {
+                plugin.Instance.Contribute(collected, ContextFor(plugin, configuration));
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                logger.LogError(ex, "Plugin {PluginId} failed in Contribute", id);
+                (code, problem) = (HostReasonCodes.LoadFailed, $"Contribute threw {ex.GetType().Name}: {ex.Message}");
+            }
+
+            if (code is null)
+            {
+                var taken = result.ServiceTypes.ToDictionary(t => t.Type.Id, t => t.PluginId, StringComparer.Ordinal);
+                foreach (var type in collected.ServiceTypes)
+                {
+                    problem = ContributionRules.Check(type)
+                        ?? (taken.TryGetValue(type.Id, out var owner)
+                            ? $"The service type '{type.Id}' is already contributed by plugin {owner}."
+                            : null);
+                    if (problem is not null)
+                    {
+                        code = HostReasonCodes.ContributionInvalid;
+                        break;
+                    }
+
+                    taken[type.Id] = id;
+                }
+            }
+
+            if (code is null)
+            {
+                result.AddServiceTypes(id, collected.ServiceTypes);
+                continue;
+            }
+
+            foreach (var refused in result.Fail(id, code, problem!))
+            {
+                await audit.WriteAsync("plugin.refused", refused, code, cancellationToken);
             }
         }
     }

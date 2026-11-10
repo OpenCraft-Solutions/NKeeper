@@ -3,6 +3,8 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using NKeeper.Abstractions;
 using NKeeper.Core.Access;
 using NKeeper.Core.Persistence;
 
@@ -13,9 +15,16 @@ public static class InventoryEndpoints
     public const string VersionConflictCode = "version_conflict";
     public const string HostManageDeniedCode = "host_manage_denied";
 
-    /// <summary>Hosts, tags and access (docs/architecture.md §7).</summary>
-    public static IServiceCollection AddNKeeperInventory(this IServiceCollection services) =>
-        services.AddScoped<HostAccess>().AddScoped<HostInventory>().AddScoped<HostGrants>();
+    /// <summary>Hosts, tags, services and access (docs/architecture.md §7), with the service types the plugins contributed.</summary>
+    public static IServiceCollection AddNKeeperInventory(this IServiceCollection services, IEnumerable<ServiceType> serviceTypes)
+    {
+        var types = serviceTypes.ToList();
+        return services
+            .AddSingleton(provider => new ServiceTypeCatalog(types, provider.GetRequiredService<ILogger<ServiceTypeCatalog>>()))
+            .AddScoped<HostAccess>()
+            .AddScoped<HostInventory>()
+            .AddScoped<HostGrants>();
+    }
 
     /// <summary><c>/api/hosts</c>, and <c>/api/users/{id}/grants</c> for administrators.</summary>
     public static void MapInventoryEndpoints(this IEndpointRouteBuilder api)

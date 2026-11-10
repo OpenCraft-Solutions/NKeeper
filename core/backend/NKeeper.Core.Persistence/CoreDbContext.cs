@@ -79,6 +79,8 @@ public sealed class CoreDbContext(DbContextOptions<CoreDbContext> options)
 
     public DbSet<HostAccessGrant> HostAccessGrants => Set<HostAccessGrant>();
 
+    public DbSet<HostService> HostServices => Set<HostService>();
+
     /// <summary>Configures Npgsql for the core context, with its migration history inside the core schema.</summary>
     public static DbContextOptions<CoreDbContext> CreateOptions(string connectionString)
     {
@@ -165,7 +167,19 @@ public sealed class CoreDbContext(DbContextOptions<CoreDbContext> options)
             host.Property(h => h.Description).HasMaxLength(Host.DescriptionMaxLength);
             host.Property(h => h.Version).IsRowVersion().HasColumnName("xmin");
             host.HasMany(h => h.Tags).WithOne().HasForeignKey(t => t.HostId).OnDelete(DeleteBehavior.Cascade);
+            host.HasMany(h => h.Services).WithOne().HasForeignKey(s => s.HostId).OnDelete(DeleteBehavior.Cascade);
             host.HasIndex(h => h.Name);
+        });
+
+        builder.Entity<HostService>(service =>
+        {
+            service.ToTable("host_services");
+            service.HasKey(s => s.Id);
+            service.Property(s => s.Type).HasMaxLength(HostService.TypeMaxLength);
+            service.Property(s => s.Label).HasMaxLength(HostService.LabelMaxLength);
+            service.Property(s => s.Address).HasMaxLength(Host.HostnameMaxLength);
+            service.Property(s => s.Settings).HasColumnType("jsonb");
+            service.HasIndex(s => s.Type);
         });
 
         builder.Entity<HostTag>(tag =>

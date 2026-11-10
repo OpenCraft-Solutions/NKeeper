@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using NKeeper.Core.Access;
 using NKeeper.Core.Audit;
@@ -7,6 +9,14 @@ namespace NKeeper.Core.Inventory;
 
 public sealed record HostTagDto(string Name, string? Value);
 
+/// <summary>A service as sent: with the <see cref="Id"/> of one the host has, to keep it, or without, to add one.</summary>
+public sealed record HostServiceRequest(Guid? Id, string? Type, string? Label, int? Port, string? Address, JsonElement? Settings);
+
+/// <param name="Port">As set; null for the type's default.</param>
+/// <param name="Address">As set; null for the host's own.</param>
+/// <param name="Available">Whether an enabled plugin provides the type. When none does, the settings are as stored.</param>
+public sealed record HostServiceResponse(Guid Id, string Type, string? Label, int? Port, string? Address, JsonElement Settings, bool Available);
+
 public sealed record HostResponse(
     Guid Id,
     string Name,
@@ -14,6 +24,7 @@ public sealed record HostResponse(
     string? IpAddress,
     string? Description,
     IReadOnlyList<HostTagDto> Tags,
+    IReadOnlyList<HostServiceResponse> Services,
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset UpdatedAtUtc,
     uint Version,
@@ -32,6 +43,9 @@ public sealed class HostRequest
 
     public List<HostTagDto>? Tags { get; set; }
 
+    /// <summary>The host's services, in order. Replaces the list: services left out are removed.</summary>
+    public List<HostServiceRequest>? Services { get; set; }
+
     /// <summary>Required to update: the version the edit is based on.</summary>
     public uint? Version { get; set; }
 }
@@ -46,10 +60,11 @@ public sealed class InventoryValidationException(string field, string message) :
 public sealed class HostManageDeniedException() : Exception("You can use this host but not change it. Ask an administrator for Manage access.");
 
 /// <summary>
-/// Hosts and their tags (docs/architecture.md §7.1). Every read goes through <see cref="HostAccess"/>,
-/// so a host the user can't see is indistinguishable from one that doesn't exist. Ported from 1.x.
+/// Hosts, their tags and their services (docs/architecture.md §7.1, §7.4). Every read goes through
+/// <see cref="HostAccess"/>, so a host the user can't see is indistinguishable from one that doesn't exist.
+/// Ported from 1.x.
 /// </summary>
-public sealed class HostInventory(CoreDbContext db, HostAccess access, IAuditLog audit, TimeProvider time)
+public sealed class HostInventory(CoreDbContext db, HostAccess access, ServiceTypeCatalog serviceTypes, IAuditLog audit, TimeProvider time)
 {
     /// <summary>
     /// Every host the user can see, by name. The shell searches, groups and sorts them itself, which
@@ -57,7 +72,7 @@ public sealed class HostInventory(CoreDbContext db, HostAccess access, IAuditLog
     /// </summary>
     public async Task<List<HostResponse>> ListAsync(RequestUser user, CancellationToken cancellationToken)
     {
-        var hosts = await access.Visible(user).AsNoTracking().Include(h => h.Tags)
+        var hosts = await access.Visible(user).AsNoTracking().Include(h => h.Tags).Include(h => h.Services)
 #pragma warning disable CA1304, CA1311 // Runs as SQL: upper().
             .OrderBy(h => h.Name.ToUpper()).ThenBy(h => h.Id)
 #pragma warning restore CA1304, CA1311
@@ -70,7 +85,8 @@ public sealed class HostInventory(CoreDbContext db, HostAccess access, IAuditLog
     /// <returns>The host, or null when it doesn't exist or the user can't see it.</returns>
     public async Task<HostResponse?> GetAsync(Guid id, RequestUser user, CancellationToken cancellationToken)
     {
-        var host = await access.Visible(user).AsNoTracking().Include(h => h.Tags).FirstOrDefaultAsync(h => h.Id == id, cancellationToken);
+        var host = await access.Visible(user).AsNoTracking().Include(h => h.Tags).Include(h => h.Services).AsSplitQuery()
+            .FirstOrDefaultAsync(h => h.Id == id, cancellationToken);
         return host is null
             ? null
             : ToResponse(host, await access.GetPermissionAsync(id, user, cancellationToken) == HostPermission.Manage);
@@ -99,7 +115,7 @@ public sealed class HostInventory(CoreDbContext db, HostAccess access, IAuditLog
         }
 
         var version = request.Version ?? throw new InventoryValidationException("version", "The version of the host being edited is required.");
-        var host = await db.Hosts.Include(h => h.Tags).FirstOrDefaultAsync(h => h.Id == id, cancellationToken);
+        var host = await db.Hosts.Include(h => h.Tags).Include(h => h.Services).AsSplitQuery().FirstOrDefaultAsync(h => h.Id == id, cancellationToken);
         if (host is null)
         {
             return null;
@@ -142,7 +158,7 @@ public sealed class HostInventory(CoreDbContext db, HostAccess access, IAuditLog
             _ => throw new HostManageDeniedException(),
         };
 
-    private static void Apply(Host host, HostRequest request, Guid userId, DateTimeOffset now)
+    private void Apply(Host host, HostRequest request, Guid userId, DateTimeOffset now)
     {
         var name = TrimToNull(request.Name) ?? throw new InventoryValidationException("name", "Enter a name.");
         if (name.Length > Host.NameMaxLength)
@@ -178,7 +194,9 @@ public sealed class HostInventory(CoreDbContext db, HostAccess access, IAuditLog
         host.IpAddress = string.IsNullOrEmpty(ip) ? null : ip;
         host.Description = description;
         ApplyTags(host, request.Tags ?? []);
-        // Every edit updates the host row, so its version changes even when only its tags did.
+        ApplyServices(host, request.Services ?? []);
+
+        // Every edit updates the host row, so its version changes even when only its tags or services did.
         host.UpdatedAtUtc = now;
         host.UpdatedByUserId = userId;
     }
@@ -230,7 +248,103 @@ public sealed class HostInventory(CoreDbContext db, HostAccess access, IAuditLog
         }
     }
 
-    private static HostResponse ToResponse(Host host, bool canManage) =>
+    /// <summary>
+    /// Replaces the services (§7.4). One sent with its ID keeps it, and keeps its ID; one of a type no
+    /// enabled plugin provides may only be kept as it is.
+    /// </summary>
+    private void ApplyServices(Host host, List<HostServiceRequest> services)
+    {
+        if (services.Count > HostService.MaxPerHost)
+        {
+            throw new InventoryValidationException("services", $"A host can have at most {HostService.MaxPerHost} services.");
+        }
+
+        var existing = host.Services.ToDictionary(s => s.Id);
+        var requested = new List<HostService>();
+        for (var i = 0; i < services.Count; i++)
+        {
+            var field = $"services[{i}]";
+
+            // JSON can carry nulls the element type doesn't allow.
+            var request = services[i] ?? throw new InventoryValidationException($"{field}.type", "Choose a service type.");
+            HostService? service = null;
+            if (request.Id is { } id && (!existing.Remove(id, out service)))
+            {
+                throw new InventoryValidationException($"{field}.id", "This service isn't on the host any more. Reload and try again.");
+            }
+
+            var typeId = request.Type?.Trim() ?? string.Empty;
+
+            // A stored service of an unavailable type is kept only as it is, whatever type the request names.
+            if (service is not null && serviceTypes.Find(service.Type) is null)
+            {
+                if (service.Type != typeId || !Unchanged(service, request))
+                {
+                    throw new InventoryValidationException(field, "No enabled plugin provides this service's type, so it can only be kept as it is, or removed.");
+                }
+
+                service.Position = i;
+                requested.Add(service);
+                continue;
+            }
+
+            if (serviceTypes.Find(typeId) is not { } type)
+            {
+                throw new InventoryValidationException($"{field}.type", typeId.Length == 0 ? "Choose a service type." : $"No enabled plugin provides the service type '{typeId}'.");
+            }
+
+            var label = TrimToNull(request.Label);
+            if (label?.Length > HostService.LabelMaxLength)
+            {
+                throw new InventoryValidationException($"{field}.label", $"Use at most {HostService.LabelMaxLength} characters.");
+            }
+
+            if (request.Port is < 1 or > 65535)
+            {
+                throw new InventoryValidationException($"{field}.port", "Enter a port from 1 to 65535.");
+            }
+
+            var address = TrimToNull(request.Address);
+            if (address is not null)
+            {
+                if (NetworkAddress.TryNormalizeIp(address, out var ip))
+                {
+                    address = ip;
+                }
+                else if (address.Length > Host.HostnameMaxLength || !NetworkAddress.IsValidHostname(address))
+                {
+                    throw new InventoryValidationException($"{field}.address", "Enter a valid host name or IP address.");
+                }
+            }
+
+            var settings = ServiceTypeCatalog.Validate(type, request.Settings, $"{field}.settings");
+
+            // No preset key for a new one: EF Core treats a tracked entity with one as existing.
+            service ??= new HostService();
+            service.Position = i;
+            service.Type = type.Id;
+            service.Label = label;
+            service.Port = request.Port;
+            service.Address = address;
+            service.Settings = settings.ToJsonString();
+            service.SettingsVersion = type.SettingsVersion;
+            requested.Add(service);
+        }
+
+        host.Services.RemoveAll(s => !requested.Contains(s));
+        host.Services.AddRange(requested.Where(s => !host.Services.Contains(s)));
+    }
+
+    /// <summary>Whether a request leaves a stored service as it is: the same label, port, address and settings.</summary>
+    private static bool Unchanged(HostService service, HostServiceRequest request) =>
+        service.Label == TrimToNull(request.Label)
+        && service.Port == request.Port
+        && service.Address == TrimToNull(request.Address)
+        && JsonNode.DeepEquals(
+            JsonNode.Parse(service.Settings),
+            request.Settings is { ValueKind: not (JsonValueKind.Null or JsonValueKind.Undefined) } settings ? JsonNode.Parse(settings.GetRawText()) : new JsonObject());
+
+    private HostResponse ToResponse(Host host, bool canManage) =>
         new(
             host.Id,
             host.Name,
@@ -240,6 +354,11 @@ public sealed class HostInventory(CoreDbContext db, HostAccess access, IAuditLog
             [.. host.Tags
                 .OrderBy(t => t.Name, StringComparer.OrdinalIgnoreCase).ThenBy(t => t.Value, StringComparer.OrdinalIgnoreCase)
                 .Select(t => new HostTagDto(t.Name, t.Value.Length == 0 ? null : t.Value))],
+            [.. host.Services.OrderBy(s => s.Position).Select(s =>
+            {
+                var (settings, type) = serviceTypes.Read(s);
+                return new HostServiceResponse(s.Id, s.Type, s.Label, s.Port, s.Address, settings, type is not null);
+            })],
             host.CreatedAtUtc,
             host.UpdatedAtUtc,
             host.Version,

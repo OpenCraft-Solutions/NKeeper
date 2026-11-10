@@ -26,6 +26,9 @@ public sealed class Host
 
     public List<HostTag> Tags { get; set; } = [];
 
+    /// <summary>In <see cref="HostService.Position"/> order once loaded through the inventory.</summary>
+    public List<HostService> Services { get; set; } = [];
+
     public DateTimeOffset CreatedAtUtc { get; set; }
 
     public DateTimeOffset UpdatedAtUtc { get; set; }
@@ -52,6 +55,40 @@ public sealed class HostTag
 
     /// <summary>Empty for a tag without a value, so (host, name, value) can be unique.</summary>
     public string Value { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// A service a host offers (docs/architecture.md §7.4), of a type a plugin contributes. Its ID stays the
+/// same across edits, since credentials refer to it.
+/// </summary>
+public sealed class HostService
+{
+    public const int MaxPerHost = 50;
+    public const int TypeMaxLength = 32;
+    public const int LabelMaxLength = 100;
+
+    public Guid Id { get; set; }
+
+    public Guid HostId { get; set; }
+
+    /// <summary>Its place in the host's list, from 0.</summary>
+    public int Position { get; set; }
+
+    /// <summary>The service type's ID. Kept when no enabled plugin provides it any more.</summary>
+    public string Type { get; set; } = string.Empty;
+
+    public string? Label { get; set; }
+
+    /// <summary>Null for the type's default port.</summary>
+    public int? Port { get; set; }
+
+    /// <summary>A hostname or IP address, when the service listens somewhere other than the host; null for the host's own.</summary>
+    public string? Address { get; set; }
+
+    /// <summary>A JSON object, valid for the type's schema at <see cref="SettingsVersion"/>.</summary>
+    public string Settings { get; set; } = "{}";
+
+    public int SettingsVersion { get; set; } = 1;
 }
 
 /// <summary>

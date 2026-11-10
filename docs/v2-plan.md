@@ -1,6 +1,6 @@
 # NKeeper 2.0: audit and modular architecture plan
 
-Status: revision 5. Phase 0 is built (see [architecture.md](architecture.md)); Phase 1 is next.
+Status: revision 6. Phase 0 is built (see [architecture.md](architecture.md)); Phase 1 is under way.
 Source audited: [NKeeper 1.x](https://github.com/DHemken97/NKeeper) at commit [`04de1dc`](https://github.com/DHemken97/NKeeper/commit/04de1dc) (PR #39).
 
 > **Guiding principle.** Core provides capabilities. Plugins consume capabilities and contribute functionality. Core must never need to know which plugins exist to work correctly.
@@ -30,6 +30,10 @@ Source audited: [NKeeper 1.x](https://github.com/DHemken97/NKeeper) at commit [`
 **Revision 5 changes** (before Phase 1):
 - **Credential brokering** (D13, §4.6, [plugin-security.md §12](plugin-security.md#12-credentials)): plugins use credentials without seeing them. `ICredentialResolver`, which decrypted a credential for the plugin, becomes `ICredentialBroker`, which hands out opaque handles. Core then authenticates the connection, or writes the secret onto the wire itself. Releasing the plaintext is a declared, audited last resort.
 - Phase 1 has a delivery order (§8).
+
+**Revision 6 changes** (during Phase 1):
+- In Phase 1's delivery order, service types now come before credentials. A credential is scoped to services, and the broker resolves one for a service, so the services must exist first (§8).
+- The service-types step brings only `ServiceType` and services on hosts. `SessionType`, `HostAction` and `HealthProbe` move to the sessions step, where the `ssh` plugin first uses them (§4.2's rule).
 
 ---
 
@@ -534,19 +538,20 @@ Each phase ends in a state that builds, passes tests, **installs as a native Lin
   3. **Access:**
      - hosts and tags;
      - Use/Manage grants, `HostAccess`, `HostContext` and `IHostDirectory`, with host-scoped plugin endpoints.
-  4. **Vault and credentials:**
+  4. **Service types:**
+     - the SDK contribution `ServiceType` (settings schema and version);
+     - validation of the contributions at startup;
+     - services on hosts, and in `HostContext`;
+     - `GET /api/plugins` with contributions.
+  5. **Vault and credentials:**
      - credentials encrypted with the key ring, with per-service scoping and write-only APIs;
      - `ICredentialBroker`, handles and the core credential prompt.
-  5. **Service types:**
-     - SDK contributions `ServiceType` (settings schema and version), `SessionType` (stream), `HostAction` and `HealthProbe` (TCP);
-     - validation of the contribution graph;
-     - services on hosts;
-     - `GET /api/plugins` with contributions.
   6. **Connectivity:**
      - the trust store (TOFU);
      - `NKeeper.Connectivity.Ssh` (SSH.NET) with jump hosts, authenticated from handles;
      - real-server tests against OpenSSH in Testcontainers.
   7. **Sessions and the `ssh` plugin:**
+     - the SDK contributions `SessionType` (stream), `HostAction` and `HealthProbe` (TCP);
      - the stream session framework (limits, keep-alive, revocation on access change);
      - the terminal session and the TOFU prompt;
      - the build packs and signs the built-in plugins with the development key, and CI verifies them.

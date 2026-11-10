@@ -42,8 +42,9 @@ Each rule is enforced by a test in `core/backend/tests/NKeeper.Architecture.Test
 2. If it serves the shell (`Frontend:Root`), read `index.html` and check it: no inline script except at most one import map. Derive the Content Security Policy from the import map's hash.
 3. Migrate the core schema, then bring the key ring in line with its certificate (§6.3).
 4. Plugin host: check the plugin and trust directories, verify every package, check pins and dependencies, and load the enabled plugins from their verified bytes, each into its own `AssemblyLoadContext`.
-5. Call each loaded plugin's `ConfigureServices`. If one throws, its registrations are rolled back, and it and the plugins that depend on it are refused (`load_failed`); the others carry on. With `Plugins:RequireAllEnabledLoaded`, any enabled plugin that didn't load stops startup instead.
-6. Build the application and create the bootstrap administrator, if one is configured (§6.1). Then map core endpoints, each plugin's endpoints (`MapEndpoints`), and the shell's fallback route. A plugin that fails in `MapEndpoints` stops startup, because endpoints can't be unmapped.
+5. Call each loaded plugin's `Contribute`, in load order, and check what it declares (§7.4). A plugin whose contributions are refused (`contribution_invalid`), or whose `Contribute` throws (`load_failed`), is refused with its dependants, and contributes nothing.
+6. Call each loaded plugin's `ConfigureServices`. If one throws, its registrations are rolled back, and it and the plugins that depend on it are refused (`load_failed`); the others carry on. With `Plugins:RequireAllEnabledLoaded`, any enabled plugin that didn't load stops startup instead.
+7. Build the application and create the bootstrap administrator, if one is configured (§6.1). Then map core endpoints, each plugin's endpoints (`MapEndpoints`), and the shell's fallback route. A plugin that fails in `MapEndpoints` stops startup, because endpoints can't be unmapped.
 
 Plugin changes take effect at the next restart. So does a rebuilt shell.
 
@@ -65,8 +66,9 @@ public sealed class WakeOnLanPlugin : IPlugin
 - `PluginContext` holds the plugin's ID and version, from the verified manifest rather than the plugin's own code, and its configuration section, `Plugins:Settings:<id>`.
 - `endpoints` is a route group core created at `/api/p/<id>/`, inside core's `/api` group. Every policy in §6.4 applies to it, so a plugin can't forget one ([v2-plan.md §4.4](v2-plan.md#44-guardrails-built-into-the-sdk)).
 - `endpoints.MapHostGroup(HostPermission.Use)` (or `Manage`) gives a group at `hosts/{hostId}/` whose endpoints act on one host the user may use (or manage). See §7.3.
-- More contracts (`ServiceType`, `SessionType`, `HostAction`, `HealthProbe`, settings, audit actions) arrive with their first real users ([v2-plan.md §4.2](v2-plan.md#42-contribution-catalogue)). The SDK may change until it is frozen as v1 at the end of Phase 3.
-- **SDK versions.** A manifest declares the SDK range it supports, and a package outside the server's `SdkVersion` is refused. Within v0, an addition raises the patch number (`0.1.1` added the host scope) and a breaking change raises the minor one. So a plugin built for `>=0.1.0 <0.2.0` keeps loading, and one that uses an addition declares the version that brought it.
+- `Contribute(IPluginContributions, PluginContext)` declares what the plugin adds to core's catalogues: so far, service types (§7.4). It has an empty default, so a plugin with nothing to declare leaves it out.
+- More contracts (`SessionType`, `HostAction`, `HealthProbe`, settings, audit actions) arrive with their first real users ([v2-plan.md §4.2](v2-plan.md#42-contribution-catalogue)). The SDK may change until it is frozen as v1 at the end of Phase 3.
+- **SDK versions.** A manifest declares the SDK range it supports, and a package outside the server's `SdkVersion` is refused. Within v0, an addition raises the patch number (`0.1.1` added the host scope, `0.1.2` service types) and a breaking change raises the minor one. So a plugin built for `>=0.1.0 <0.2.0` keeps loading, and one that uses an addition declares the version that brought it.
 
 ## 5. Frontend extension point
 
@@ -121,7 +123,7 @@ Ported from 1.x, with ASP.NET Core Identity. Users, roles and sessions are table
 
 ### 6.3 The key ring
 
-- ASP.NET Core Data Protection encrypts the auth tickets and antiforgery tokens, and from step 4 the stored credentials.
+- ASP.NET Core Data Protection encrypts the auth tickets and antiforgery tokens, and from step 5 the stored credentials.
 - Its keys are kept in `core.data_protection_keys`.
 - With `DataProtection:CertificatePath` (an RSA certificate and its private key, in PEM), the keys are encrypted with that certificate, so a copy of the database alone can't decrypt them.
 - At startup, keys stored before the certificate was set are encrypted with it.
@@ -144,7 +146,7 @@ Sign-ins, failed sign-ins (with the name as typed, never the password), sign-out
 
 ## 7. Hosts and access
 
-Ported from 1.x. Phase 1 step 3 brings hosts, their tags, and who may see and change them. Services, credentials, jump hosts and hardware details join a host in the steps that use them.
+Ported from 1.x. Phase 1 step 3 brings hosts, their tags, and who may see and change them; step 4 brings their services. Credentials, jump hosts and hardware details join a host in the steps that use them.
 
 ### 7.1 Hosts
 
@@ -187,9 +189,71 @@ public void MapEndpoints(IEndpointRouteBuilder endpoints, PluginContext context)
   - a host the user can only use answers `403` with `host_manage_denied` on a `Manage` group;
   - otherwise the request carries a **`HostContext`**: the host's ID, name, hostname, IP address and tags, and the user's permission on it.
 - A route handler takes `HostContext` as a parameter. A raw request delegate calls `context.GetHostContext()`. Either way it fails outside a host group, so a plugin can't act on a host it was given by mistake.
-- `HostContext` holds no secrets. Services and credentials join it in the steps that add them. Credentials will be handles, never secrets (v2-plan.md §4.6).
+- `HostContext` holds no secrets. It carries the host's services (§7.4). Credentials join it in step 5, as handles, never secrets (v2-plan.md §4.6).
 - Plugins have no other way to reach hosts. There's no `IHostDirectory` yet: it arrives with its first user, a plugin that lists hosts (§4.2's rule).
 - The authorization sweep covers these groups too. For every host-scoped endpoint, it checks that a user without a grant gets `404`, and that a Use-only user gets `403` on a `Manage` group.
+
+### 7.4 Services and service types
+
+A host offers **services**: SSH on port 22, a web interface, a database. Core knows no kinds of service itself. Each kind is a **service type** that a plugin contributes, so adding one never changes core (v2-plan.md §6.2).
+
+```csharp
+public void Contribute(IPluginContributions contributions, PluginContext context) =>
+    contributions.AddServiceType(new ServiceType("ssh", "SSH")
+    {
+        DefaultPort = 22,
+        Settings = [ServiceSetting.Text("shell", "Shell", maxLength: 200)],
+    });
+```
+
+**Service types.**
+- A type has:
+  - an ID: lower-case letters, digits and `-`, starting with a letter, up to 32 characters;
+  - a label;
+  - an optional default port;
+  - a settings schema, and the schema's version.
+- **The settings schema** is a list of fields. Each has a key (a camel-case identifier), a label, and whether it's required. A field is one of:
+  - text, with a maximum length (at most 4000);
+  - a whole number, with an optional minimum and maximum;
+  - a yes/no switch;
+  - a choice among listed values.
+- **Schema versions.** A type starts at version 1. A type that changes its settings raises the version and gives an `Upgrade(fromVersion, settings)` function: pure, and deterministic.
+- Whether a type takes credentials, and other declarations, are added with the steps that use them, as additions to `ServiceType`.
+- **Checked at startup.** The plugin host calls each loaded plugin's `Contribute` before its `ConfigureServices`, then checks what it declared. A plugin is refused, with its dependants (plugin-security.md §5.7, `contribution_invalid`), when:
+  - an ID or field is malformed;
+  - two fields share a key;
+  - a version is below 1, or above 1 without an `Upgrade`;
+  - it contributes a type ID that another plugin, earlier in load order, already contributed.
+
+  A refused plugin registers nothing.
+- `GET /api/plugins` lists each loaded plugin's service types, with their schemas, so the shell can draw a service's settings form.
+
+**Services on a host.**
+- A service has:
+  - a type;
+  - an optional label (up to 100 characters);
+  - a port (1–65535). If it's left empty, the type's default applies;
+  - an optional address, validated like a host's hostname or IP address. It's for a service that listens somewhere other than the host itself, such as a server's management controller. If it's left empty, the host's own address applies;
+  - settings, checked against the type's schema. Unknown keys are refused, and missing optional fields stay unset.
+- A host has at most 50 services, kept in the order given.
+- Services are edited with their host: `services` in `POST` and `PUT /api/hosts`. It replaces the host's list:
+  - a service sent with its `id` keeps it (credentials will refer to services by ID, step 5);
+  - one sent without an `id` is new;
+  - one left out is removed.
+
+  It's audited with the host, as part of `host.create` or `host.update`.
+- **Stored with their version.** Settings are stored as JSON, alongside the schema version they were written with:
+  - on read, older settings are upgraded in memory with the type's `Upgrade`; reads never write (v2-plan.md §5);
+  - a save writes the current version;
+  - the startup step that rewrites old rows in batches arrives with the first type that reaches version 2.
+- **A type no enabled plugin provides** (its plugin was disabled or removed):
+  - its services are kept, and returned with `available: false` and their settings as stored;
+  - such a service may stay through an edit unchanged, or be removed;
+  - adding one, or changing one, is refused, since its settings can't be checked.
+- `HostContext` carries the host's services, in order (SDK 0.1.2):
+  - each one's ID, type, label and settings;
+  - its effective port and address, with the defaults already applied;
+  - whether its type is available.
 
 ## 8. Where to read more
 

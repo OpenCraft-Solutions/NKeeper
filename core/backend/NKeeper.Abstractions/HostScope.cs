@@ -18,8 +18,8 @@ public enum HostPermission
 public sealed record HostTag(string Name, string? Value);
 
 /// <summary>
-/// The host a host-scoped request acts on, already authorized by core (SDK 0.1.1). It holds no secrets;
-/// services and credential handles join it in later SDK versions.
+/// The host a host-scoped request acts on, already authorized by core (SDK 0.1.1; services 0.1.2). It holds
+/// no secrets; credential handles join it in a later SDK version.
 /// </summary>
 public sealed class HostContext(Guid id, string name, string? hostname, string? ipAddress, IReadOnlyList<HostTag> tags, HostPermission permission)
 {
@@ -32,6 +32,9 @@ public sealed class HostContext(Guid id, string name, string? hostname, string? 
     public string? IpAddress { get; } = ipAddress;
 
     public IReadOnlyList<HostTag> Tags { get; } = tags;
+
+    /// <summary>The host's services, in order (SDK 0.1.2).</summary>
+    public IReadOnlyList<HostService> Services { get; init; } = [];
 
     /// <summary>The user's permission on the host: at least what the endpoint's group requires.</summary>
     public HostPermission Permission { get; } = permission;
