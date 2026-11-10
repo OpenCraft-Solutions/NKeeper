@@ -18,6 +18,8 @@ public sealed class Greeting(string text)
 /// </summary>
 public sealed class HelloPlugin : IPlugin
 {
+    private const string StashKey = "NKeeper.TestPlugins.Hello.StashedHandle";
+
     /// <summary>
     /// A service type named after the plugin, so packages of this plugin under different IDs don't collide.
     /// At settings version 2: version 1 called the greeting "text".
@@ -61,10 +63,67 @@ public sealed class HelloPlugin : IPlugin
         var use = endpoints.MapHostGroup(HostPermission.Use);
         use.MapGet("/whoami", (HostContext host) => Results.Text($"{host.Name} {host.Permission}"));
         use.MapGet("/services", (HostContext host) => Results.Json(host.Services));
+
+        // Uses the broker the way a plugin would (SDK 0.1.3), and the ways one mustn't.
+        use.MapPost("/credential", async (HostContext host, CredentialProbe? probe, ICredentialBroker broker) =>
+        {
+            // The authorization sweep calls every endpoint without a body.
+            if (probe is null)
+            {
+                return Results.Text("no probe");
+            }
+
+            try
+            {
+                // A host context the plugin made up, rather than the one core gave this request.
+                var target = probe.Forged
+                    ? new HostContext(host.Id, host.Name, host.Hostname, host.IpAddress, host.Tags, host.Permission) { Services = host.Services }
+                    : host;
+                var handle = probe.Stashed
+                    ? AppDomain.CurrentDomain.GetData(StashKey) as CredentialHandle ?? throw new InvalidOperationException("Nothing stashed.")
+                    : probe.PromptReference is { } reference
+                        ? await broker.ResolvePromptAsync(target, probe.ServiceId, reference)
+                        : await broker.ResolveSavedAsync(target, probe.ServiceId, probe.CredentialId ?? Guid.Empty);
+
+                // Kept across requests, and across plugins' load contexts, for a later request to try.
+                AppDomain.CurrentDomain.SetData(StashKey, handle);
+                if (probe.Serialize)
+                {
+                    try
+                    {
+                        return Results.Text(System.Text.Json.JsonSerializer.Serialize(handle));
+                    }
+                    catch (System.Text.Json.JsonException)
+                    {
+                        return Results.Text($"unserializable {handle}");
+                    }
+                }
+
+                var description = await broker.DescribeAsync(target, probe.DescribeServiceId ?? probe.ServiceId, handle);
+                return Results.Text($"{description.Source} {description.Username} {description.Domain} {description.HasPassword} {description.HasPrivateKey}");
+            }
+            catch (CredentialDeniedException ex)
+            {
+                return Results.Text($"denied {ex.Reason}", statusCode: StatusCodes.Status403Forbidden);
+            }
+        });
         var manage = endpoints.MapHostGroup(HostPermission.Manage);
         manage.Map("/raw", context => context.Response.WriteAsync($"managing {context.GetHostContext().Name}"));
     }
 }
+
+/// <summary>What the credential endpoint is asked to do.</summary>
+/// <param name="Stashed">Use the handle an earlier request stashed, instead of resolving one.</param>
+/// <param name="Forged">Pass the broker a host context the plugin made itself.</param>
+/// <param name="Serialize">Try to write the handle as JSON.</param>
+public sealed record CredentialProbe(
+    Guid ServiceId,
+    Guid? CredentialId = null,
+    string? PromptReference = null,
+    Guid? DescribeServiceId = null,
+    bool Stashed = false,
+    bool Forged = false,
+    bool Serialize = false);
 
 /// <summary>Contributes the service type <c>hello</c> whatever its own ID: the host must refuse it when <c>hello</c> is taken.</summary>
 public sealed class DuplicateServiceTypePlugin : IPlugin

@@ -36,6 +36,7 @@ public static class IdentityServices
         services.AddDbContext<CoreDbContext>(options => CoreDbContext.Configure(options, connectionString), optionsLifetime: ServiceLifetime.Singleton);
         services.AddHttpContextAccessor();
         services.AddSingleton<IAuditLog, AuditLog>();
+        services.AddSingleton<NKeeper.Core.Credentials.IAuthSessionAccessor, CookieSessionAccessor>();
         services.AddProblemDetails();
 
         services.AddIdentity<ApplicationUser, ApplicationRole>(options =>

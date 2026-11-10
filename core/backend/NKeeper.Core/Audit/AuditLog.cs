@@ -21,6 +21,7 @@ public static class AuditActions
     public const string HostCreate = "host.create";
     public const string HostUpdate = "host.update";
     public const string HostDelete = "host.delete";
+    public const string CredentialDenied = "credential.denied";
 }
 
 /// <summary>

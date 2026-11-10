@@ -102,7 +102,7 @@ api.MapUserEndpoints();
 api.MapInventoryEndpoints();
 api.MapPluginStatus();
 app.MapPluginFrontends();
-PluginHost.MapEndpoints(plugins, api, builder.Configuration);
+PluginHost.MapEndpoints(plugins, api, builder.Configuration, (group, id) => group.WithMetadata(new NKeeper.Core.Credentials.PluginEndpointMetadata(id)));
 if (shell is not null)
 {
     app.MapShellFallback(shell);

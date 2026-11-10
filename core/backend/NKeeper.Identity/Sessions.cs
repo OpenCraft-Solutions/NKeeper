@@ -168,6 +168,12 @@ public sealed class SessionRevoker(CoreDbContext db)
 }
 
 /// <summary>The server-side session of the current request.</summary>
+/// <summary>Gives core the current auth session's key, for binding prompt references to it (docs/architecture.md §7.6).</summary>
+internal sealed class CookieSessionAccessor : NKeeper.Core.Credentials.IAuthSessionAccessor
+{
+    public string? CurrentSessionKey(HttpContext context) => CurrentSession.Key(context);
+}
+
 public static class CurrentSession
 {
     /// <summary>

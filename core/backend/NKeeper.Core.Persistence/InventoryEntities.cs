@@ -29,6 +29,9 @@ public sealed class Host
     /// <summary>In <see cref="HostService.Position"/> order once loaded through the inventory.</summary>
     public List<HostService> Services { get; set; } = [];
 
+    /// <summary>In <see cref="HostCredential.Position"/> order once loaded through the inventory.</summary>
+    public List<HostCredential> Credentials { get; set; } = [];
+
     public DateTimeOffset CreatedAtUtc { get; set; }
 
     public DateTimeOffset UpdatedAtUtc { get; set; }
@@ -89,6 +92,45 @@ public sealed class HostService
     public string Settings { get; set; } = "{}";
 
     public int SettingsVersion { get; set; } = 1;
+}
+
+/// <summary>
+/// Login details for one host (docs/architecture.md §7.5). Secrets are stored only encrypted with the key
+/// ring, bound to the credential's ID, and never returned by the API.
+/// </summary>
+public sealed class HostCredential
+{
+    public const int MaxPerHost = 50;
+    public const int LabelMaxLength = 100;
+    public const int UsernameMaxLength = 256;
+    public const int DomainMaxLength = 256;
+    public const int PasswordMaxLength = 1024;
+    public const int PrivateKeyMaxLength = 16_384;
+    public const int NotesMaxLength = 2000;
+
+    public Guid Id { get; set; }
+
+    public Guid HostId { get; set; }
+
+    /// <summary>Its place in the host's list, from 0.</summary>
+    public int Position { get; set; }
+
+    public string? Label { get; set; }
+
+    public string? Username { get; set; }
+
+    public string? Domain { get; set; }
+
+    /// <summary>The encrypted password, also the private key's passphrase. Null when not set.</summary>
+    public byte[]? ProtectedPassword { get; set; }
+
+    /// <summary>The encrypted private key. Null when not set.</summary>
+    public byte[]? ProtectedPrivateKey { get; set; }
+
+    public string? Notes { get; set; }
+
+    /// <summary>The host's services this credential is used with; null for all of them. IDs of services removed since are ignored.</summary>
+    public List<Guid>? ServiceIds { get; set; }
 }
 
 /// <summary>
