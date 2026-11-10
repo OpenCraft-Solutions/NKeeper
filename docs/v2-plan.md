@@ -552,11 +552,12 @@ Each phase ends in a state that builds, passes tests, **installs as a native Lin
      - `NKeeper.Connectivity.Ssh` (SSH.NET) with jump hosts, authenticated from handles: `IConnectivity.OpenSshAsync` (SDK 0.1.4), with commands and shells;
      - real-server tests against OpenSSH in Testcontainers.
   7. **Sessions and the `ssh` plugin:**
-     - the SDK contributions `SessionType` (stream), `HostAction` and `HealthProbe` (TCP);
+     - the SDK contribution `SessionType` (stream), SDK 0.1.5;
      - the stream session framework (limits, keep-alive, revocation on access change);
-     - the terminal session and the TOFU prompt;
+     - the session registry, which ends sessions when access changes;
+     - the `ssh` plugin: its service type and terminal session, with the TOFU prompt in-band;
      - the build packs and signs the built-in plugins with the development key, and CI verifies them.
-  8. **Shell:** sign-in, the tree with search and group-by, the host editor driven by service-type schemas, tabs, and the terminal.
+  8. **Shell:** sign-in, the tree with search and group-by, the host editor driven by service-type schemas, tabs, and the terminal. With it, the SDK contributions its menus and status need: `HostAction`, and `HealthProbe` (TCP). They moved here from step 7, since the shell is their first user.
   9. **Native install:**
      - the hardened systemd unit, nginx, PostgreSQL;
      - the root-owned plugin and trust directories;

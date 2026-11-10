@@ -20,7 +20,7 @@ How NKeeper is put together today: the parts of core, how plugins plug in, and t
 | **Shared runtime** | `core/frontend/runtime` (`@nkeeper/runtime`) | Builds the modules the shell shares with plugins, and the import map that names them. |
 | **Shell** | `core/frontend/app` | The single-page app. Loads each plugin's frontend module. |
 | **Tooling** | `tools/NKeeper.PluginTool` (`nkeeper-plugin`) | `keygen`, `pack`, `verify`. |
-| **Plugins** | `plugins/<id>/` | One folder per plugin: backend, frontend, tests. None yet; SSH arrives in Phase 1. |
+| **Plugins** | `plugins/<id>/` | One folder per plugin: backend, frontend, tests. The first is `ssh` (§7.11). |
 | **Test plugin** | `testing/plugins/NKeeper.TestPlugins.Hello` | A no-op plugin, built and packaged like a real one, used by the tests. |
 
 The rest of core in [v2-plan.md §6](v2-plan.md#6-proposed-repository-structure) (the session framework, the UI kit) arrives during Phase 1.
@@ -67,9 +67,9 @@ public sealed class WakeOnLanPlugin : IPlugin
 - `PluginContext` holds the plugin's ID and version, from the verified manifest rather than the plugin's own code, and its configuration section, `Plugins:Settings:<id>`.
 - `endpoints` is a route group core created at `/api/p/<id>/`, inside core's `/api` group. Every policy in §6.4 applies to it, so a plugin can't forget one ([v2-plan.md §4.4](v2-plan.md#44-guardrails-built-into-the-sdk)).
 - `endpoints.MapHostGroup(HostPermission.Use)` (or `Manage`) gives a group at `hosts/{hostId}/` whose endpoints act on one host the user may use (or manage). See §7.3.
-- `Contribute(IPluginContributions, PluginContext)` declares what the plugin adds to core's catalogues: so far, service types (§7.4). It has an empty default, so a plugin with nothing to declare leaves it out.
-- More contracts (`SessionType`, `HostAction`, `HealthProbe`, settings, audit actions) arrive with their first real users ([v2-plan.md §4.2](v2-plan.md#42-contribution-catalogue)). The SDK may change until it is frozen as v1 at the end of Phase 3.
-- **SDK versions.** A manifest declares the SDK range it supports, and a package outside the server's `SdkVersion` is refused. Within v0, an addition raises the patch number (`0.1.1` added the host scope, `0.1.2` service types, `0.1.3` the credential broker, `0.1.4` SSH connections) and a breaking change raises the minor one. So a plugin built for `>=0.1.0 <0.2.0` keeps loading, and one that uses an addition declares the version that brought it.
+- `Contribute(IPluginContributions, PluginContext)` declares what the plugin adds to core's catalogues: so far, service types (§7.4) and session types (§7.10). It has an empty default, so a plugin with nothing to declare leaves it out.
+- More contracts (`HostAction`, `HealthProbe`, settings, audit actions) arrive with their first real users ([v2-plan.md §4.2](v2-plan.md#42-contribution-catalogue)). The SDK may change until it is frozen as v1 at the end of Phase 3.
+- **SDK versions.** A manifest declares the SDK range it supports, and a package outside the server's `SdkVersion` is refused. Within v0, an addition raises the patch number (`0.1.1` added the host scope, `0.1.2` service types, `0.1.3` the credential broker, `0.1.4` SSH connections, `0.1.5` stream sessions) and a breaking change raises the minor one. So a plugin built for `>=0.1.0 <0.2.0` keeps loading, and one that uses an addition declares the version that brought it.
 
 ## 5. Frontend extension point
 
@@ -428,6 +428,98 @@ SFTP and port forwards join with their first users. The connection doesn't need 
 - `JumpHostUnavailable`: the user can't use the jump host, or its service or credential is gone, or it wouldn't forward.
 
 Messages name the host and port, never a secret.
+
+### 7.10 Stream sessions
+
+A terminal is a **stream session**: one WebSocket that stays open while the user works ([v2-plan.md §7.1](v2-plan.md#71-session-framework-core)). Core runs everything up to the moment the plugin's data starts flowing, so every session type gets the same checks, prompts, limits and audit. Ported from 1.x's `SessionSocket` and `SessionLimiter`. Stateful sessions (a database query window, say) arrive with their first user.
+
+**Session types (SDK 0.1.5).**
+
+```csharp
+public void Contribute(IPluginContributions contributions, PluginContext context) =>
+    contributions.AddSessionType(new SessionType("ssh", "Terminal", typeof(TerminalSessionHandler)) { ServiceTypes = ["ssh"] });
+```
+
+- A session type has:
+  - an ID (the same rules as a service type's, in its own namespace);
+  - a label;
+  - the service types it opens on: at least one;
+  - its handler type, an `IStreamSessionHandler` the plugin registers in `ConfigureServices`;
+  - whether it can go through a jump host (yes by default).
+- It's checked at startup like a service type (§7.4). A plugin is refused, with `contribution_invalid`, for a malformed ID or label, no service types, or an ID another plugin took first.
+- A service type it names may come from another plugin. When no enabled plugin provides it, the session type simply has nothing to open on.
+- `GET /api/plugins` lists each plugin's session types.
+
+**The protocol.** `GET /api/sessions/{type}`, upgraded to a WebSocket. Control messages are JSON in text frames, each with a `type`:
+
+| Direction | Message | When |
+| --- | --- | --- |
+| browser → core | `start` `{ hostId, serviceId, credentialId?, promptReference?, options? }` | first, within 15 seconds |
+| core → browser | `status` `{ status: "connecting" }` | after `start` is accepted |
+| core → browser | `hostKey` `{ hostId, serviceId, algorithm, fingerprint }` | a server presented an unknown key |
+| browser → core | `hostKeyDecision` `{ trust }` | the user's answer, within 2 minutes |
+| core → browser | `connected` | the plugin's session is open |
+| core → browser | `error` `{ code, message }` | it failed; the socket then closes |
+| core → browser | `closed` `{ reason }` | it ended after connecting |
+
+After `connected`, the plugin owns the data: binary frames, and text frames whose `type` isn't one of core's. `options` is the plugin's own (a terminal's size, say), passed to it as JSON.
+
+**What core does, in order.**
+1. **Checks the request.** The user is signed in, and the `Origin` header is the server's own, since browsers don't send antiforgery tokens with WebSockets. Otherwise `403`, before upgrading.
+2. **Checks the limit.** A user has at most 20 stream sessions open, of every type together. One more is refused with `too_many_sessions`.
+3. **Reads `start`.** It refuses:
+   - a message that isn't valid, with `bad_request`;
+   - a host the user can't use, with `host_not_found`, exactly like a missing one;
+   - a service that isn't the host's, or isn't of one of the session type's service types, with `wrong_service`;
+   - a host reached through a jump host, with `jump_host_unsupported`, when the type can't use one.
+4. **Resolves the credential**, if one is named: a saved one by `credentialId`, or a typed one by `promptReference` (§7.6). The handle is bound to the session type's plugin and to this request, which lasts as long as the session. A refusal is `credential_denied`, audited as `credential.denied`.
+5. **Opens the plugin's session**, with the `HostContext`, the service, the handle and the options: `IStreamSessionHandler.OpenAsync`. The plugin connects, through `IConnectivity`, which can't tell this request from a plugin endpoint's.
+6. **Asks about unknown keys in-band.** If opening fails with `HostKeyUnknown`, core sends `hostKey` and waits for the user. On `trust`, it trusts the key through the trust store, under the same rules as §7.7, then opens again. A jump host and its target can each ask once. Anything but `trust`, including silence, ends the session with `host_key_rejected`.
+7. **Reports other failures** with a code from the failure: `host_key_changed`, `authentication_failed`, `no_secret`, `invalid_private_key`, `unreachable`, `timeout` or `jump_host_unavailable`. Anything else the plugin throws is `failed`, with a generic message, and is logged.
+8. **Runs the session.** Core sends `connected`, registers the session (below), audits `session.open`, and calls `IStreamSession.RunAsync` with a channel for the plugin's frames. It ends when either side closes, or when core ends it.
+
+Core limits each message to 1 MB, and sends WebSocket keep-alives every 30 seconds.
+
+**Ending sessions when access changes.** Checking access only when a session opens isn't enough, since NKeeper is a gateway to privileged infrastructure (v2-plan.md §7.1). Every open session is in core's **session registry**, with its user, sign-in session, host, service and credential. Core re-checks the sessions involved:
+- at once, when:
+  - a user's grants are replaced;
+  - a host is edited (its tags, services or credentials) or deleted;
+  - a user is disabled, deleted, or loses or gains a role, or their password is reset;
+  - a user signs out;
+- and every 30 seconds, for anything else (a sign-in session that expired, say).
+
+A session is still allowed while:
+- its sign-in session is live;
+- its user is enabled and can use its host;
+- its service is still the host's;
+- its saved credential, if it used one, is still the host's.
+
+Otherwise core ends it:
+- the plugin's `RunAsync` is cancelled;
+- the browser gets `closed` with `access_revoked`;
+- the socket closes;
+- the handle and its secrets go with the request.
+
+This fixes a 1.x gap: 1.x ended sessions when a user was disabled, but not when their grants or a host's tags changed.
+
+**Audit.**
+- `session.open`: host, session type, service, and the credential (or "typed").
+- `session.close`: the reason (`closed`, `access_revoked`, `failed`) and how long it lasted.
+
+### 7.11 The `ssh` plugin
+
+The first real plugin, in `plugins/ssh/`. It's a plugin like any other: it references only the SDK, and core doesn't name it.
+- **Service type** `ssh`, port 22 by default, no settings yet.
+- **Session type** `ssh`, "Terminal", on `ssh` services:
+  - `options`: the terminal's `columns` and `rows`;
+  - it opens a shell through `IConnectivity` (§7.9), on an `xterm-256color` terminal;
+  - binary frames carry the terminal's bytes both ways, and a text frame `resize` `{ columns, rows }` resizes it.
+- **Its frontend** (the terminal tab) comes with the shell, in step 8.
+
+**Built and signed by the build.** Plugins are always signed, even in development (plugin-security.md §10):
+- building `plugins/ssh` packs it with `nkeeper-plugin` and signs it with the developer's development key. The build creates the key on first use, under `.dev/`, which git ignores;
+- the package goes to `artifacts/plugins/`, the directory to point `Plugins:Directory` at in development;
+- CI verifies the package against that run's development key.
 
 ## 8. Where to read more
 
