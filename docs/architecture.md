@@ -68,7 +68,7 @@ public sealed class WakeOnLanPlugin : IPlugin
 - `endpoints.MapHostGroup(HostPermission.Use)` (or `Manage`) gives a group at `hosts/{hostId}/` whose endpoints act on one host the user may use (or manage). See §7.3.
 - `Contribute(IPluginContributions, PluginContext)` declares what the plugin adds to core's catalogues: so far, service types (§7.4). It has an empty default, so a plugin with nothing to declare leaves it out.
 - More contracts (`SessionType`, `HostAction`, `HealthProbe`, settings, audit actions) arrive with their first real users ([v2-plan.md §4.2](v2-plan.md#42-contribution-catalogue)). The SDK may change until it is frozen as v1 at the end of Phase 3.
-- **SDK versions.** A manifest declares the SDK range it supports, and a package outside the server's `SdkVersion` is refused. Within v0, an addition raises the patch number (`0.1.1` added the host scope, `0.1.2` service types) and a breaking change raises the minor one. So a plugin built for `>=0.1.0 <0.2.0` keeps loading, and one that uses an addition declares the version that brought it.
+- **SDK versions.** A manifest declares the SDK range it supports, and a package outside the server's `SdkVersion` is refused. Within v0, an addition raises the patch number (`0.1.1` added the host scope, `0.1.2` service types, `0.1.3` the credential broker) and a breaking change raises the minor one. So a plugin built for `>=0.1.0 <0.2.0` keeps loading, and one that uses an addition declares the version that brought it.
 
 ## 5. Frontend extension point
 
@@ -146,7 +146,7 @@ Sign-ins, failed sign-ins (with the name as typed, never the password), sign-out
 
 ## 7. Hosts and access
 
-Ported from 1.x. Phase 1 step 3 brings hosts, their tags, and who may see and change them; step 4 brings their services. Credentials, jump hosts and hardware details join a host in the steps that use them.
+Ported from 1.x. Phase 1 step 3 brings hosts, their tags, and who may see and change them; step 4 brings their services, and step 5 their credentials. Jump hosts and hardware details join a host in the steps that use them.
 
 ### 7.1 Hosts
 
@@ -189,7 +189,7 @@ public void MapEndpoints(IEndpointRouteBuilder endpoints, PluginContext context)
   - a host the user can only use answers `403` with `host_manage_denied` on a `Manage` group;
   - otherwise the request carries a **`HostContext`**: the host's ID, name, hostname, IP address and tags, and the user's permission on it.
 - A route handler takes `HostContext` as a parameter. A raw request delegate calls `context.GetHostContext()`. Either way it fails outside a host group, so a plugin can't act on a host it was given by mistake.
-- `HostContext` holds no secrets. It carries the host's services (§7.4). Credentials join it in step 5, as handles, never secrets (v2-plan.md §4.6).
+- `HostContext` holds no secrets. It carries the host's services (§7.4), but never credentials: a plugin asks the broker for one and gets a handle, never a secret (§7.6).
 - Plugins have no other way to reach hosts. There's no `IHostDirectory` yet: it arrives with its first user, a plugin that lists hosts (§4.2's rule).
 - The authorization sweep covers these groups too. For every host-scoped endpoint, it checks that a user without a grant gets `404`, and that a Use-only user gets `403` on a `Manage` group.
 
@@ -255,7 +255,89 @@ public void Contribute(IPluginContributions contributions, PluginContext context
   - its effective port and address, with the defaults already applied;
   - whether its type is available.
 
-## 8. Where to read more
+### 7.5 Credentials
+
+Ported from 1.x, which stores credentials the same way. Phase 1 step 5 stores them and brokers their use (§7.6). Connecting with them is step 6.
+
+**What a credential holds.**
+- A credential belongs to one host. It has:
+  - an optional label (up to 100 characters), username (up to 256) and domain (up to 256);
+  - a password (up to 1024), which also serves as the passphrase of the private key when both are set;
+  - a private key (up to 16 KB, in PEM or OpenSSH form);
+  - notes (up to 2000).
+- A host has at most 50 credentials, kept in the order given.
+
+**Scoped to services.**
+- A credential is used with all of the host's services, or with only some of them, as in 1.x.
+- Its other services don't offer it, and the broker refuses it for them.
+
+**Secrets are write-only.**
+- Passwords and private keys are encrypted with the key ring (§6.3) before they're stored.
+- The purpose string binds each ciphertext to its credential's ID, so a ciphertext copied to another row won't decrypt.
+- No API response returns a secret, only `hasPassword` and `hasPrivateKey`.
+- An update to a secret has three states:
+  - **keep**: leave the field out;
+  - **replace**: send a new value;
+  - **clear**: send `clearPassword` or `clearPrivateKey`.
+
+**Edited with their host.**
+- Credentials are edited with their host, as `credentials` in `POST` and `PUT /api/hosts`, which replaces the list.
+- A credential sent with its `id` keeps it, and keeps its stored secrets unless the request replaces or clears them. One sent without an `id` is new, and one left out is deleted.
+- **Scoping.** A credential names the services it's used with by `serviceIndexes`: positions in the same request's `services` list, so it can name a service that's new in that request. Leaving the field out, or sending `null`, means all services. An empty list means none.
+- **Responses.** A credential lists its services the same way, as positions in the response's `services`. A scope that pointed only at services since removed becomes empty, not "all".
+- Anyone who can see the host sees its credentials without their secrets, so they can choose one to connect with. Changing them needs Manage.
+- Changes are audited with the host, as part of `host.create` or `host.update`. The detail counts credentials and never includes a secret.
+
+**Inside core.**
+- A decrypted secret is a `Secret`:
+  - it prints as `***`;
+  - it can't be serialized: the JSON converter throws;
+  - it clears its buffer when disposed.
+- A secret never leaves core, except as §7.6 allows.
+
+### 7.6 The credential broker
+
+Plugins use credentials without seeing them (D13, [plugin-security.md §12](plugin-security.md#12-credentials)). Phase 1 builds the broker and its handles. The first use of a handle, an SSH connection opened by core, comes in step 6.
+
+```csharp
+use.MapPost("/connect", async (HostContext host, ConnectRequest request, ICredentialBroker broker) =>
+{
+    var handle = await broker.ResolveSavedAsync(host, request.ServiceId, request.CredentialId);
+    var who = broker.Describe(host, request.ServiceId, handle);   // username, domain, source; never a secret
+    // step 6: await connectivity.OpenSshAsync(host, request.ServiceId, handle)
+});
+```
+
+**Resolving a credential (SDK 0.1.3).** `ICredentialBroker` resolves a credential for one service of a host the endpoint already holds as a `HostContext`. Two sources, each giving a **credential handle**:
+- **A saved credential:** `ResolveSavedAsync(host, serviceId, credentialId)`. The credential must belong to the host and be used with the service.
+- **A typed one:** `ResolvePromptAsync(host, serviceId, promptReference)`, from the core prompt below.
+
+Passing on the user's own sign-in arrives with directory sign-in; local accounts have nothing to pass on.
+
+**Handles.**
+- A handle is opaque: 128 random bits. It prints as a placeholder and can't be serialized.
+- Core keeps what the handle refers to, in memory only.
+- A handle is bound to:
+  - the user;
+  - the host and service it was resolved for;
+  - the plugin whose endpoint resolved it. Core knows the plugin from the endpoint's route group, not from anything the plugin says;
+  - the request: a handle is dropped when the request that obtained it ends.
+
+  Tying a handle to a plugin session instead arrives with sessions, in step 7. So does ending it when the user's access to the host changes.
+- Every use of a handle checks all its bindings. `Describe`, and from step 6 every use that connects, takes the host and the service again. A mismatch, an unknown handle, or an expired one is refused with `CredentialDeniedException` and audited as `credential.denied`.
+- Outside a plugin's own endpoint (a background job, say), the broker refuses to resolve. Credential use outside requests is designed with its first user.
+
+**The credential prompt.**
+- Typed credentials never pass through a plugin endpoint. The shell posts them to core: `POST /api/hosts/{hostId}/services/{serviceId}/credential-prompt`, with `username`, `domain`, `password` and `privateKey`. It needs Use on the host.
+- Core keeps the secret in memory only, and answers with a **prompt reference**:
+  - opaque, and single-use;
+  - bound to the user's auth session, the host and the service;
+  - it expires after 2 minutes.
+- An auth session holds at most 10 unused prompt references; posting another drops the oldest.
+- The shell sends the prompt reference to the plugin's endpoint, and the plugin hands it to `ResolvePromptAsync`.
+- An exchange that fails for any reason (unknown, used, expired, another session, another host or service) is refused, like an unknown handle. A reference is used up when it's exchanged, even if the exchange is refused.
+- Unused prompt references are dropped when they expire, and when their session signs out.
+
 
 - [v2-plan.md](v2-plan.md): the audit of 1.x, the core/plugin boundary, the contribution catalogue, phases and decisions.
 - [plugin-security.md](plugin-security.md): package format, signing, trust, directory checks, verification order and reason codes, loading and states.
