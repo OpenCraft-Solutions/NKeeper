@@ -90,6 +90,7 @@ if (shell is not null)
 }
 
 app.UseNKeeperIdentity();
+app.UseMiddleware<NKeeper.Core.Access.HostScopeMiddleware>();
 
 // Liveness only: the process is up and serving requests.
 app.MapGet("/health/live", () => Results.Text("Healthy")).AllowAnonymous();

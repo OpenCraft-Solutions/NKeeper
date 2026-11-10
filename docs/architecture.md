@@ -64,7 +64,9 @@ public sealed class WakeOnLanPlugin : IPlugin
 
 - `PluginContext` holds the plugin's ID and version, from the verified manifest rather than the plugin's own code, and its configuration section, `Plugins:Settings:<id>`.
 - `endpoints` is a route group core created at `/api/p/<id>/`, inside core's `/api` group. Every policy in §6.4 applies to it, so a plugin can't forget one ([v2-plan.md §4.4](v2-plan.md#44-guardrails-built-into-the-sdk)).
-- More contracts (`ServiceType`, `SessionType`, `HostAction`, `HealthProbe`, settings, audit actions) arrive with their first real users ([v2-plan.md §4.2](v2-plan.md#42-contribution-catalogue)). The SDK may change until it is frozen as v1 at the end of Phase 3. A manifest declares the SDK range it supports, and a package outside the server's `SdkVersion` is refused.
+- `endpoints.MapHostGroup(HostPermission.Use)` (or `Manage`) gives a group at `hosts/{hostId}/` whose endpoints act on one host the user may use (or manage). See §7.3.
+- More contracts (`ServiceType`, `SessionType`, `HostAction`, `HealthProbe`, settings, audit actions) arrive with their first real users ([v2-plan.md §4.2](v2-plan.md#42-contribution-catalogue)). The SDK may change until it is frozen as v1 at the end of Phase 3.
+- **SDK versions.** A manifest declares the SDK range it supports, and a package outside the server's `SdkVersion` is refused. Within v0, an addition raises the patch number (`0.1.1` added the host scope) and a breaking change raises the minor one. So a plugin built for `>=0.1.0 <0.2.0` keeps loading, and one that uses an addition declares the version that brought it.
 
 ## 5. Frontend extension point
 
@@ -167,6 +169,27 @@ Ported from 1.x. Phase 1 step 3 brings hosts, their tags, and who may see and ch
 - `HostAccess` in core is the one place that decides this. Every query for a user's hosts goes through it.
 - Administrators set a user's grants with `PUT /api/users/{id}/grants`, which replaces them all, and read them with `GET`. Access is checked on every request, so a change applies at the user's next request. It's audited as `user.grants_replace`.
 - Deleting a host deletes the grants for that host. Group grants stay, since they name tags, not hosts.
+
+### 7.3 Host-scoped plugin endpoints
+
+Host authorization is structural, not a convention ([v2-plan.md §4.4](v2-plan.md#44-guardrails-built-into-the-sdk)). A plugin acts on a host only through a group it gets from core:
+
+```csharp
+public void MapEndpoints(IEndpointRouteBuilder endpoints, PluginContext context)
+{
+    var host = endpoints.MapHostGroup(HostPermission.Use);          // /api/p/<id>/hosts/{hostId}/
+    host.MapGet("/uptime", (HostContext target) => /* … */);
+}
+```
+
+- Before any endpoint in the group runs, core checks the user's permission on the host in the route, through `HostAccess`. This is middleware, so it covers every kind of endpoint:
+  - a host the user can't see (or that doesn't exist) answers `404`;
+  - a host the user can only use answers `403` with `host_manage_denied` on a `Manage` group;
+  - otherwise the request carries a **`HostContext`**: the host's ID, name, hostname, IP address and tags, and the user's permission on it.
+- A route handler takes `HostContext` as a parameter. A raw request delegate calls `context.GetHostContext()`. Either way it fails outside a host group, so a plugin can't act on a host it was given by mistake.
+- `HostContext` holds no secrets. Services and credentials join it in the steps that add them. Credentials will be handles, never secrets (v2-plan.md §4.6).
+- Plugins have no other way to reach hosts. There's no `IHostDirectory` yet: it arrives with its first user, a plugin that lists hosts (§4.2's rule).
+- The authorization sweep covers these groups too. For every host-scoped endpoint, it checks that a user without a grant gets `404`, and that a Use-only user gets `403` on a `Manage` group.
 
 ## 8. Where to read more
 

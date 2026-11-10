@@ -28,6 +28,12 @@ public sealed class HelloPlugin : IPlugin
 
         // A raw request delegate: endpoint filters never run for these, which is why core's policies are middleware.
         endpoints.Map("/raw", context => context.Response.WriteAsync("raw"));
+
+        // Host-scoped (SDK 0.1.1): core authorizes the host before these run.
+        var use = endpoints.MapHostGroup(HostPermission.Use);
+        use.MapGet("/whoami", (HostContext host) => Results.Text($"{host.Name} {host.Permission}"));
+        var manage = endpoints.MapHostGroup(HostPermission.Manage);
+        manage.Map("/raw", context => context.Response.WriteAsync($"managing {context.GetHostContext().Name}"));
     }
 }
 
