@@ -57,6 +57,10 @@ public sealed class HostGrants(CoreDbContext db, IAuditLog audit, TimeProvider t
             .Select(group => group.OrderByDescending(g => g.Level).First())];
 
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+
+        // Replacements for one user run one at a time: otherwise two could each delete nothing and both
+        // insert, leaving the union of what they asked for.
+        await db.Database.ExecuteSqlAsync($"SELECT 1 FROM core.users WHERE id = {userId} FOR UPDATE", cancellationToken);
         await db.HostAccessGrants.Where(g => g.UserId == userId).ExecuteDeleteAsync(cancellationToken);
         db.HostAccessGrants.AddRange(grants);
         await db.SaveChangesAsync(cancellationToken);
@@ -66,8 +70,14 @@ public sealed class HostGrants(CoreDbContext db, IAuditLog audit, TimeProvider t
         return await GetAsync(userId, cancellationToken);
     }
 
-    private static HostAccessGrant Validated(HostGrantRequest request, int index, Guid userId, Guid actorId, DateTimeOffset now)
+    private static HostAccessGrant Validated(HostGrantRequest? request, int index, Guid userId, Guid actorId, DateTimeOffset now)
     {
+        // JSON can carry nulls the element type doesn't allow.
+        if (request is null)
+        {
+            throw new InventoryValidationException($"grants[{index}]", "Choose a host or a group.");
+        }
+
         var tagName = string.IsNullOrWhiteSpace(request.TagName) ? null : request.TagName.Trim();
         var tagValue = string.IsNullOrWhiteSpace(request.TagValue) ? null : request.TagValue.Trim();
         if ((request.HostId is null) == (tagName is null))
