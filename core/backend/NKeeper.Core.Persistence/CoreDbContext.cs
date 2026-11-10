@@ -81,6 +81,10 @@ public sealed class CoreDbContext(DbContextOptions<CoreDbContext> options)
 
     public DbSet<HostService> HostServices => Set<HostService>();
 
+    public DbSet<HostCredential> HostCredentials => Set<HostCredential>();
+
+    public DbSet<HostTrustedKey> HostTrustedKeys => Set<HostTrustedKey>();
+
     /// <summary>Configures Npgsql for the core context, with its migration history inside the core schema.</summary>
     public static DbContextOptions<CoreDbContext> CreateOptions(string connectionString)
     {
@@ -168,18 +172,53 @@ public sealed class CoreDbContext(DbContextOptions<CoreDbContext> options)
             host.Property(h => h.Version).IsRowVersion().HasColumnName("xmin");
             host.HasMany(h => h.Tags).WithOne().HasForeignKey(t => t.HostId).OnDelete(DeleteBehavior.Cascade);
             host.HasMany(h => h.Services).WithOne().HasForeignKey(s => s.HostId).OnDelete(DeleteBehavior.Cascade);
+            host.HasMany(h => h.Credentials).WithOne().HasForeignKey(c => c.HostId).OnDelete(DeleteBehavior.Cascade);
+            host.HasMany(h => h.TrustedKeys).WithOne().HasForeignKey(k => k.HostId).OnDelete(DeleteBehavior.Cascade);
             host.HasIndex(h => h.Name);
+
+            // Deleting the jump host, or its service or credential, clears the reference to it (§7.8).
+            host.HasOne<Host>().WithMany().HasForeignKey(h => h.JumpHostId).OnDelete(DeleteBehavior.SetNull);
+            host.HasOne<HostService>().WithMany().HasForeignKey(h => h.JumpServiceId).OnDelete(DeleteBehavior.SetNull);
+            host.HasOne<HostCredential>().WithMany().HasForeignKey(h => h.JumpCredentialId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        builder.Entity<HostTrustedKey>(key =>
+        {
+            key.ToTable("host_trusted_keys");
+            key.HasKey(k => k.Id);
+            key.Property(k => k.Kind).HasConversion<string>().HasMaxLength(32);
+            key.Property(k => k.Address).HasMaxLength(Host.HostnameMaxLength);
+            key.Property(k => k.Algorithm).HasMaxLength(HostTrustedKey.AlgorithmMaxLength);
+            key.Property(k => k.Fingerprint).HasMaxLength(HostTrustedKey.FingerprintMaxLength);
+            key.HasOne<ApplicationUser>().WithMany().HasForeignKey(k => k.TrustedByUserId).OnDelete(DeleteBehavior.SetNull);
+            key.HasIndex(k => new { k.HostId, k.Kind, k.Address, k.Port, k.Algorithm }).IsUnique();
         });
 
         builder.Entity<HostService>(service =>
         {
             service.ToTable("host_services");
             service.HasKey(s => s.Id);
+
+            // Set by the inventory before saving, so credentials in the same edit can refer to new services.
+            service.Property(s => s.Id).ValueGeneratedNever();
             service.Property(s => s.Type).HasMaxLength(HostService.TypeMaxLength);
             service.Property(s => s.Label).HasMaxLength(HostService.LabelMaxLength);
             service.Property(s => s.Address).HasMaxLength(Host.HostnameMaxLength);
             service.Property(s => s.Settings).HasColumnType("jsonb");
             service.HasIndex(s => s.Type);
+        });
+
+        builder.Entity<HostCredential>(credential =>
+        {
+            credential.ToTable("host_credentials");
+            credential.HasKey(c => c.Id);
+
+            // Set by the inventory before saving: the secrets are encrypted bound to it.
+            credential.Property(c => c.Id).ValueGeneratedNever();
+            credential.Property(c => c.Label).HasMaxLength(HostCredential.LabelMaxLength);
+            credential.Property(c => c.Username).HasMaxLength(HostCredential.UsernameMaxLength);
+            credential.Property(c => c.Domain).HasMaxLength(HostCredential.DomainMaxLength);
+            credential.Property(c => c.Notes).HasMaxLength(HostCredential.NotesMaxLength);
         });
 
         builder.Entity<HostTag>(tag =>

@@ -13,4 +13,9 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 
+  <!-- Only core creates and reads credential handles (docs/architecture.md §7.6). -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="NKeeper.Core" />
+  </ItemGroup>
+
 </Project>

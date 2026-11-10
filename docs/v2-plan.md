@@ -547,8 +547,9 @@ Each phase ends in a state that builds, passes tests, **installs as a native Lin
      - credentials encrypted with the key ring, with per-service scoping and write-only APIs;
      - `ICredentialBroker`, handles and the core credential prompt.
   6. **Connectivity:**
-     - the trust store (TOFU);
-     - `NKeeper.Connectivity.Ssh` (SSH.NET) with jump hosts, authenticated from handles;
+     - the trust store (TOFU), with the user's decision posted to core, never to a plugin;
+     - jump hosts on hosts;
+     - `NKeeper.Connectivity.Ssh` (SSH.NET) with jump hosts, authenticated from handles: `IConnectivity.OpenSshAsync` (SDK 0.1.4), with commands and shells;
      - real-server tests against OpenSSH in Testcontainers.
   7. **Sessions and the `ssh` plugin:**
      - the SDK contributions `SessionType` (stream), `HostAction` and `HealthProbe` (TCP);

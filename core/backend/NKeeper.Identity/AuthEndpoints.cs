@@ -49,11 +49,20 @@ public static class AuthEndpoints
             .RequireRateLimiting(LoginRateLimitSettings.PolicyName);
 
         // Idempotent: succeeds even when not signed in.
-        auth.MapPost("/logout", async (HttpContext context, SignInManager<ApplicationUser> signIn, IAuditLog audit) =>
+        auth.MapPost("/logout", async (HttpContext context, SignInManager<ApplicationUser> signIn, IAuditLog audit, NKeeper.Core.Credentials.CredentialPromptStore prompts, NKeeper.Core.Trust.TrustPresentationStore presentations) =>
             {
                 // Deletes the session row through the ticket store, and clears the cookie, before anything
                 // else can go wrong. The request's principal still names the user, for the audit event.
+                var sessionKey = CurrentSession.Key(context);
                 await signIn.SignOutAsync();
+
+                // The session's typed credentials and presented keys, not yet used, go with it.
+                if (sessionKey is not null)
+                {
+                    prompts.DropSession(sessionKey);
+                    presentations.DropSession(sessionKey);
+                }
+
                 if (context.User.Identity?.IsAuthenticated == true)
                 {
                     await audit.RecordAsync(new AuditEntry(AuditActions.SignOut), context.RequestAborted);

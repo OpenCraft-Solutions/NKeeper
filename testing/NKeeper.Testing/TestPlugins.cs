@@ -32,7 +32,7 @@ public static class TestPlugins
         string version = "1.0.0",
         bool builtIn = true,
         string entryType = HelloType,
-        string sdk = ">=0.1.2 <0.2.0",
+        string sdk = ">=0.1.4 <0.2.0",
         IReadOnlyDictionary<string, byte[]>? frontend = null,
         string frontendEntry = FrontendEntry,
         params (string Id, string Range)[] dependsOn)

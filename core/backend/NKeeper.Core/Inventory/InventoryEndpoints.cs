@@ -6,14 +6,27 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using NKeeper.Abstractions;
 using NKeeper.Core.Access;
+using NKeeper.Core.Credentials;
 using NKeeper.Core.Persistence;
+using NKeeper.Core.Trust;
 
 namespace NKeeper.Core.Inventory;
+
+/// <summary>A credential typed into core's prompt (docs/architecture.md §7.6).</summary>
+public sealed record CredentialPromptRequest(string? Username, string? Domain, string? Password, string? PrivateKey);
+
+/// <param name="Reference">Single-use: the shell passes it to the plugin's endpoint, which exchanges it with the broker.</param>
+public sealed record CredentialPromptResponse(string Reference, DateTimeOffset ExpiresAtUtc);
+
+/// <summary>A key the user trusts: one core presented to them (docs/architecture.md §7.7).</summary>
+public sealed record TrustKeyRequest(string? Algorithm, string? Fingerprint);
 
 public static class InventoryEndpoints
 {
     public const string VersionConflictCode = "version_conflict";
     public const string HostManageDeniedCode = "host_manage_denied";
+    public const string TrustNotPresentedCode = "trust_not_presented";
+    public const string TrustConflictCode = "trust_conflict";
 
     /// <summary>Hosts, tags, services and access (docs/architecture.md §7), with the service types the plugins contributed.</summary>
     public static IServiceCollection AddNKeeperInventory(this IServiceCollection services, IEnumerable<ServiceType> serviceTypes)
@@ -21,6 +34,14 @@ public static class InventoryEndpoints
         var types = serviceTypes.ToList();
         return services
             .AddSingleton(provider => new ServiceTypeCatalog(types, provider.GetRequiredService<ILogger<ServiceTypeCatalog>>()))
+            .AddSingleton<CredentialProtector>()
+            .AddSingleton<CredentialHandleStore>()
+            .AddSingleton<CredentialPromptStore>()
+            .AddScoped<CredentialBroker>()
+            .AddScoped<ICredentialBroker>(provider => provider.GetRequiredService<CredentialBroker>())
+            .AddScoped<NKeeper.Core.Connectivity.SshConnectionPlanner>()
+            .AddSingleton<TrustPresentationStore>()
+            .AddScoped<TrustStore>()
             .AddScoped<HostAccess>()
             .AddScoped<HostInventory>()
             .AddScoped<HostGrants>();
@@ -54,6 +75,85 @@ public static class InventoryEndpoints
         hosts.MapDelete("/{id:guid}", (Guid id, HostInventory inventory, HttpContext context) =>
             Handled(async () =>
                 await inventory.DeleteAsync(id, RequestUser.From(context.User), context.RequestAborted) ? Results.NoContent() : Results.NotFound()));
+
+        // The core credential prompt (§7.6): typed secrets come here, never to a plugin's endpoint.
+        hosts.MapPost("/{hostId:guid}/services/{serviceId:guid}/credential-prompt", async (
+                Guid hostId,
+                Guid serviceId,
+                CredentialPromptRequest? request,
+                HostAccess access,
+                CoreDbContext db,
+                CredentialPromptStore prompts,
+                IAuthSessionAccessor sessions,
+                HttpContext context) =>
+            {
+                if (await access.GetPermissionAsync(hostId, RequestUser.From(context.User), context.RequestAborted) == Access.HostPermission.None
+                    || !await db.HostServices.AnyAsync(s => s.Id == serviceId && s.HostId == hostId, context.RequestAborted))
+                {
+                    return Results.NotFound();
+                }
+
+                if (sessions.CurrentSessionKey(context) is not { } sessionKey)
+                {
+                    return Results.Unauthorized();
+                }
+
+                request ??= new CredentialPromptRequest(null, null, null, null);
+                var problem = request.Username?.Length > HostCredential.UsernameMaxLength ? ("username", HostCredential.UsernameMaxLength)
+                    : request.Domain?.Length > HostCredential.DomainMaxLength ? ("domain", HostCredential.DomainMaxLength)
+                    : request.Password?.Length > HostCredential.PasswordMaxLength ? ("password", HostCredential.PasswordMaxLength)
+                    : request.PrivateKey?.Length > HostCredential.PrivateKeyMaxLength ? ("privateKey", HostCredential.PrivateKeyMaxLength)
+                    : ((string, int)?)null;
+                if (problem is var (field, max))
+                {
+                    return Results.ValidationProblem(new Dictionary<string, string[]> { [field] = [$"Use at most {max} characters."] });
+                }
+
+                var material = new CredentialMaterial(
+                    Abstractions.CredentialSource.Prompt,
+                    null,
+                    string.IsNullOrWhiteSpace(request.Username) ? null : request.Username.Trim(),
+                    string.IsNullOrWhiteSpace(request.Domain) ? null : request.Domain.Trim(),
+                    Secret.From(request.Password),
+                    Secret.From(string.IsNullOrWhiteSpace(request.PrivateKey) ? null : request.PrivateKey.Trim()));
+                var (reference, expiresAtUtc) = prompts.Add(sessionKey, hostId, serviceId, material);
+                return Results.Ok(new CredentialPromptResponse(reference, expiresAtUtc));
+            });
+
+        // The user's trust decision (§7.7) comes to core, and only for a key core presented to them.
+        hosts.MapPost("/{hostId:guid}/services/{serviceId:guid}/trusted-keys", async (
+                Guid hostId,
+                Guid serviceId,
+                TrustKeyRequest? request,
+                HostAccess access,
+                TrustStore trust,
+                IAuthSessionAccessor sessions,
+                HttpContext context) =>
+            {
+                var user = RequestUser.From(context.User);
+                if (await access.GetPermissionAsync(hostId, user, context.RequestAborted) == Access.HostPermission.None)
+                {
+                    return Results.NotFound();
+                }
+
+                if (sessions.CurrentSessionKey(context) is not { } sessionKey)
+                {
+                    return Results.Unauthorized();
+                }
+
+                return await trust.TrustAsync(sessionKey, hostId, serviceId, request?.Algorithm ?? string.Empty, request?.Fingerprint ?? string.Empty, user.Id, context.RequestAborted) switch
+                {
+                    null => Results.NoContent(),
+                    TrustRefusal.Conflict => Coded(
+                        StatusCodes.Status409Conflict, TrustConflictCode, "Trusted meanwhile", "A different key was trusted for this server meanwhile. Reload the host and check its keys."),
+                    _ => Coded(
+                        StatusCodes.Status400BadRequest, TrustNotPresentedCode, "Not presented", "This key wasn't presented to you for this service lately. Connect again to see the server's key."),
+                };
+            });
+
+        hosts.MapDelete("/{hostId:guid}/trusted-keys/{keyId:guid}", (Guid hostId, Guid keyId, HostInventory inventory, HttpContext context) =>
+            Handled(async () =>
+                await inventory.RemoveTrustedKeyAsync(hostId, keyId, RequestUser.From(context.User), context.RequestAborted) ? Results.NoContent() : Results.NotFound()));
 
         var grants = api.MapGroup("/users/{id:guid}/grants").RequireAuthorization(policy => policy.RequireRole(SystemRoles.Administrator));
 

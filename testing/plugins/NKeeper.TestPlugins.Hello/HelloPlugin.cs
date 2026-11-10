@@ -18,6 +18,8 @@ public sealed class Greeting(string text)
 /// </summary>
 public sealed class HelloPlugin : IPlugin
 {
+    private const string StashKey = "NKeeper.TestPlugins.Hello.StashedHandle";
+
     /// <summary>
     /// A service type named after the plugin, so packages of this plugin under different IDs don't collide.
     /// At settings version 2: version 1 called the greeting "text".
@@ -61,10 +63,127 @@ public sealed class HelloPlugin : IPlugin
         var use = endpoints.MapHostGroup(HostPermission.Use);
         use.MapGet("/whoami", (HostContext host) => Results.Text($"{host.Name} {host.Permission}"));
         use.MapGet("/services", (HostContext host) => Results.Json(host.Services));
+
+        // Uses the broker the way a plugin would (SDK 0.1.3), and the ways one mustn't.
+        use.MapPost("/credential", async (HostContext host, CredentialProbe? probe, ICredentialBroker broker) =>
+        {
+            // The authorization sweep calls every endpoint without a body.
+            if (probe is null)
+            {
+                return Results.Text("no probe");
+            }
+
+            try
+            {
+                // A host context the plugin made up, rather than the one core gave this request.
+                var target = probe.Forged
+                    ? new HostContext(host.Id, host.Name, host.Hostname, host.IpAddress, host.Tags, host.Permission) { Services = host.Services }
+                    : host;
+                var handle = probe.Stashed
+                    ? AppDomain.CurrentDomain.GetData(StashKey) as CredentialHandle ?? throw new InvalidOperationException("Nothing stashed.")
+                    : probe.PromptReference is { } reference
+                        ? await broker.ResolvePromptAsync(target, probe.ServiceId, reference)
+                        : await broker.ResolveSavedAsync(target, probe.ServiceId, probe.CredentialId ?? Guid.Empty);
+
+                // Kept across requests, and across plugins' load contexts, for a later request to try.
+                AppDomain.CurrentDomain.SetData(StashKey, handle);
+                if (probe.Serialize)
+                {
+                    try
+                    {
+                        return Results.Text(System.Text.Json.JsonSerializer.Serialize(handle));
+                    }
+                    catch (System.Text.Json.JsonException)
+                    {
+                        return Results.Text($"unserializable {handle}");
+                    }
+                }
+
+                var description = await broker.DescribeAsync(target, probe.DescribeServiceId ?? probe.ServiceId, handle);
+                return Results.Text($"{description.Source} {description.Username} {description.Domain} {description.HasPassword} {description.HasPrivateKey}");
+            }
+            catch (CredentialDeniedException ex)
+            {
+                return Results.Text($"denied {ex.Reason}", statusCode: StatusCodes.Status403Forbidden);
+            }
+        });
+        // Opens an SSH connection through core (SDK 0.1.4): runs a command, or a shell.
+        use.MapPost("/ssh", async (HostContext host, SshProbe? probe, ICredentialBroker broker, IConnectivity connectivity) =>
+        {
+            if (probe is null)
+            {
+                return Results.Text("no probe");
+            }
+
+            try
+            {
+                var handle = probe.PromptReference is { } reference
+                    ? await broker.ResolvePromptAsync(host, probe.ServiceId, reference)
+                    : await broker.ResolveSavedAsync(host, probe.ServiceId, probe.CredentialId ?? Guid.Empty);
+                await using var ssh = await connectivity.OpenSshAsync(host, probe.ServiceId, handle);
+                if (!probe.Shell)
+                {
+                    var result = await ssh.RunAsync(probe.Command ?? "true");
+                    return Results.Json(new { exitStatus = result.ExitStatus, output = result.Output, error = result.Error });
+                }
+
+                await using var shell = await ssh.OpenShellAsync(new SshTerminal(Columns: 100, Rows: 30));
+                shell.Resize(120, 40);
+                await shell.Stream.WriteAsync(System.Text.Encoding.UTF8.GetBytes((probe.Command ?? "true") + "\n"));
+                await shell.Stream.FlushAsync();
+                var output = new System.Text.StringBuilder();
+                var buffer = new byte[4096];
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                while (!output.ToString().Contains(probe.Expect ?? string.Empty, StringComparison.Ordinal))
+                {
+                    var read = await shell.Stream.ReadAsync(buffer, timeout.Token);
+                    if (read == 0)
+                    {
+                        break;
+                    }
+
+                    output.Append(System.Text.Encoding.UTF8.GetString(buffer, 0, read));
+                }
+
+                return Results.Json(new { output = output.ToString() });
+            }
+            catch (SshConnectException ex)
+            {
+                return Results.Json(new { reason = ex.Reason.ToString(), message = ex.Message, presentedKey = ex.PresentedKey }, statusCode: StatusCodes.Status502BadGateway);
+            }
+            catch (CredentialDeniedException ex)
+            {
+                return Results.Text($"denied {ex.Reason}", statusCode: StatusCodes.Status403Forbidden);
+            }
+        });
+
         var manage = endpoints.MapHostGroup(HostPermission.Manage);
         manage.Map("/raw", context => context.Response.WriteAsync($"managing {context.GetHostContext().Name}"));
     }
 }
+
+/// <summary>What the credential endpoint is asked to do.</summary>
+/// <param name="Stashed">Use the handle an earlier request stashed, instead of resolving one.</param>
+/// <param name="Forged">Pass the broker a host context the plugin made itself.</param>
+/// <param name="Serialize">Try to write the handle as JSON.</param>
+public sealed record CredentialProbe(
+    Guid ServiceId,
+    Guid? CredentialId = null,
+    string? PromptReference = null,
+    Guid? DescribeServiceId = null,
+    bool Stashed = false,
+    bool Forged = false,
+    bool Serialize = false);
+
+/// <summary>What the SSH endpoint is asked to do.</summary>
+/// <param name="Shell">Run <paramref name="Command"/> in a shell, and read until <paramref name="Expect"/> appears.</param>
+public sealed record SshProbe(
+    Guid ServiceId,
+    Guid? CredentialId = null,
+    string? PromptReference = null,
+    string? Command = null,
+    bool Shell = false,
+    string? Expect = null);
 
 /// <summary>Contributes the service type <c>hello</c> whatever its own ID: the host must refuse it when <c>hello</c> is taken.</summary>
 public sealed class DuplicateServiceTypePlugin : IPlugin
