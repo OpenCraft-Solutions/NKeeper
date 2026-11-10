@@ -1,6 +1,6 @@
 # NKeeper 2.0: audit and modular architecture plan
 
-Status: revision 4, decisions recorded (§9), no code written yet.
+Status: revision 5. Phase 0 is built (see [architecture.md](architecture.md)); Phase 1 is next.
 Source audited: [NKeeper 1.x](https://github.com/DHemken97/NKeeper) at commit [`04de1dc`](https://github.com/DHemken97/NKeeper/commit/04de1dc) (PR #39).
 
 > **Guiding principle.** Core provides capabilities. Plugins consume capabilities and contribute functionality. Core must never need to know which plugins exist to work correctly.
@@ -27,6 +27,10 @@ Source audited: [NKeeper 1.x](https://github.com/DHemken97/NKeeper) at commit [`
 - **No upgrade path from 1.x for now** (D10). The `import-v1` plugin and the Phase 1 export fixture are removed. Instance transfer between 2.0 servers stays (§7.4).
 - D11 (providing guacd without Docker) and D12 (custody of the official signing key) are decided: a native guacd service first, with a container fallback; two copies of the release key.
 
+**Revision 5 changes** (before Phase 1):
+- **Credential brokering** (D13, §4.6, [plugin-security.md §12](plugin-security.md#12-credentials)): plugins use credentials without seeing them. `ICredentialResolver`, which decrypted a credential for the plugin, becomes `ICredentialBroker`, which hands out opaque handles. Core then authenticates the connection, or writes the secret onto the wire itself. Releasing the plaintext is a declared, audited last resort.
+- Phase 1 has a delivery order (§8).
+
 ---
 
 ## 1. Summary
@@ -41,7 +45,7 @@ All of it lives in one API project and one frontend feature tree. Each kind of s
 - everything that is about a *kind of thing you connect to* becomes a **plugin**: a vertical slice (backend + frontend + tests + docs) that registers through declared extension points;
 - the database-engine layer that already exists in 1.x (`IDatabaseConnector`, `IDatabaseDialect`, `DatabaseReports`, `tools.ts`) is the model. It is already a small plugin system, and 2.0 applies the same pattern everywhere.
 
-**Plugins are loaded at run time from signed packages** (decision D1). A plugin runs inside the server with access to decrypted credentials, so loading one is treated as installing code into NKeeper:
+**Plugins are loaded at run time from signed packages** (decision D1). A plugin runs inside the server, in the same process as decrypted credentials (§4.6 keeps them out of its hands, but not out of its reach), so loading one is treated as installing code into NKeeper:
 - only root on the server can install a package;
 - every file is hash-checked and the package signature verified before any code loads;
 - an NKeeper administrator can only enable what root installed.
@@ -155,8 +159,8 @@ Largest hotspots: `WorkspacePage.tsx` (1,264 lines), `HostManager.cs` (937), `Gu
 
 Core does **not** know about any *service type*: no SSH terminal, SQL Server or Zabbix. It knows SSH only as a **transport**, the way it knows TCP. It does know how to:
 
-- load a host the user may see, and decrypt a credential for one service of it;
-- open a TCP or SSH connection to a host, through its jump host if it has one;
+- load a host the user may see, and **use** a credential for one service of it on a plugin's behalf, without handing the secret over (§4.6);
+- open a TCP or SSH connection to a host, through its jump host if it has one, already authenticated;
 - pin and check a key or certificate;
 - run a long-lived session (WebSocket or keep-alive REST) with limits and cleanup;
 - record an audit event, store settings, run a background job, schedule a health check.
@@ -249,12 +253,12 @@ Every other row below is added in the phase that ports its first real user, and 
 
 ### 4.3 Core services a plugin may consume
 
-`IHostDirectory` (HostAccess-filtered reads, never a raw DbSet) · `ICredentialResolver` (decrypts one credential for one service, enforces per-service scoping and sign-in pass-through rules) · `IConnectivity` (`OpenTcp`, `OpenSsh`, `RunScript`, `ForwardPort`, all jump-aware) · `ITrustStore` (`DecideAsync` for keys and certs) · `ISessionHost` · `IAuditLog` · `ISettingsStore<T>` · `IJobRunner` · `IDiagnostics` · `TimeProvider`.
+`IHostDirectory` (HostAccess-filtered reads, never a raw DbSet) · `ICredentialBroker` (chooses the credential for one service, enforcing per-service scoping, prompts and sign-in pass-through, and hands the plugin an opaque handle, never the secret; §4.6) · `IConnectivity` (`OpenTcp`, `OpenSsh`, `RunScript`, `ForwardPort`, all jump-aware, authenticated by core from a credential handle) · `ITrustStore` (`DecideAsync` for keys and certs) · `ISessionHost` · `IAuditLog` · `ISettingsStore<T>` · `IJobRunner` · `IDiagnostics` · `TimeProvider`.
 
 ### 4.4 Guardrails built into the SDK
 
 - Plugin routes live in a core-created route group, so **authentication, antiforgery, account-status, instance-lock and problem-details are applied by construction**, and a plugin cannot forget them.
-- Plugins get credentials only through `ICredentialResolver`, which checks host visibility, service scoping and audit in one place.
+- **Plugins use credentials without seeing them** (§4.6). Core authenticates the connection, or writes the secret onto the wire itself; releasing a plaintext secret is a last resort the manifest must declare. Host visibility, service scoping and audit are checked in one place, the broker.
 - Startup validates the contribution graph and fails fast on: duplicate IDs, a missing dependency, a menu action that opens an unknown session type, an audit action used but not declared, or a settings schema that doesn't match.
 - A **contract test** (one shared test) runs every plugin's manifest through those checks in CI.
 - **Host authorization is structural, not a convention.** The frontend menu is never an authorization mechanism. A host-scoped plugin endpoint declares the permission it needs (`Use` or `Manage`, later a capability). Core loads the host through `HostAccess` and passes the endpoint an authorized `HostContext`. Plugins have no other way to get a host or its credentials. A host the user can't see answers 404, exactly as in 1.x.
@@ -266,11 +270,28 @@ Every other row below is added in the phase that ports its first real user, and 
 
 | Kind | Meaning | Example |
 | --- | --- | --- |
-| **Infrastructure** | core capability, always present | `IConnectivity` (SSH/TCP, jump hosts), pinned `HttpClient`, `ITrustStore`, `ICredentialResolver` |
+| **Infrastructure** | core capability, always present | `IConnectivity` (SSH/TCP, jump hosts), pinned `HttpClient`, `ITrustStore`, `ICredentialBroker` |
 | **Hard plugin dependency** (`dependsOn`) | can't work without it; startup refuses to enable otherwise | `db-mssql` → `db-core`; `kvm` → `virt-core`; `migration` → `storage` (disk tracing) |
 | **Capability provider / consumer** | a plugin implements an interface that another plugin's registry consumes. Providers are optional: zero, one or many may be enabled. | `kvm` and `proxmox` register `IGuestProvider` with `virt-core`; `migration` asks the registry for movers and never names a hypervisor. `web` provides `IWebSessionLauncher`, which `idrac` (HTML5 console) and `proxmox` (node web UI) use when present and hide those actions when not. |
 
 Proxmox's API and iDRAC's Redfish use the core pinned `HttpClient`, so they are infrastructure, not dependencies on `web`. The only link to `web` is opening a browser session through its proxy, and that link is an optional capability. Adding a hypervisor means a new `IGuestProvider` plugin, with no change to `virt-core` or `migration`.
+
+### 4.6 Credentials: core uses them, plugins don't see them
+
+A plugin asks core to **use** a credential, not to hand it over (D13). The rules are in [plugin-security.md §12](plugin-security.md#12-credentials). In short:
+
+- **The broker chooses.** `ICredentialBroker` decides which credential applies to one service of an authorized host: a saved one (with per-service scoping, as in 1.x `usedWith`), one the user typed into a prompt, or the user's own sign-in (pass-through). It returns an opaque **credential handle**. A handle is bound to the user, the host, the service, the plugin, and the request or plugin session it serves, and it expires with them.
+- **Secrets never pass through plugin endpoints.** A credential prompt is a core component (`@nkeeper/sdk`) that posts to a core endpoint. The browser gets a single-use prompt reference, and the plugin's endpoint hands that to the broker, which exchanges it for a handle.
+- **Core uses the handle, in this order of preference:**
+  1. **Core opens the connection.** The plugin gets it already authenticated:
+     - an SSH connection (exec, shell, SFTP, port forwards) from `IConnectivity`;
+     - an HTTP client that core authenticates per request (Redfish, Proxmox, Zabbix);
+     - later, a database connection that core opens and whose driver then forgets the password.
+  2. **Core writes the secret onto the wire.** The plugin builds the message with a placeholder, and core substitutes the secret as the bytes leave. This fits guacd's connect instruction (RDP, VNC) and Telnet auto-login.
+  3. **The plaintext is released**, as a last resort. A plugin may ask for this only if its manifest declares it, administrators see that before enabling the plugin, and every release is audited as `credential.reveal`.
+- **Core audits every use.** A session's credential is recorded in `session.open`. Any other use (a scan, a job, a brokered HTTP call) is recorded as `credential.use`, written by core, not by the plugin.
+
+This limits accidental leaks (logs, serialization, error messages), keeps credential policy and audit in one place, and keeps the API usable by out-of-process plugins later (Phase 8), which could only ever be passed handles. It is **not** a defence against a malicious plugin running in process: such a plugin can read the server's memory. That case is covered by trusting signers (D1), not by this API.
 
 ---
 
@@ -501,6 +522,39 @@ Each phase ends in a state that builds, passes tests, **installs as a native Lin
 - The authorization sweep test (§4.4) goes in now, while there are few endpoints.
 - Port the 1.x tests for auth, access, inventory, jump hosts, key ring and SSH sessions.
 - **Exit:** a deployable build in which you can sign in, add hosts and open SSH terminals (also through a jump host). This is usable for daily SSH work.
+- **Delivery order.** Each step is one pull request, or a few, and each leaves `main` working:
+  1. **Design:** credential brokering (§4.6, D13, plugin-security.md §12) and this order.
+  2. **Identity:**
+     - the key ring: Data Protection keys in the database, encrypted with a certificate kept outside it, as in 1.x. The auth tickets and antiforgery tokens need it first;
+     - users, local sign-in with the 1.x password rules, bootstrap admin;
+     - the server-side auth session store, cookies and antiforgery, rate limits;
+     - core's policies on the plugin route group;
+     - the authorization sweep test, started here;
+     - the audit log (`IAuditLog`), grown from Phase 0's plugin audit events, so sign-ins and sign-outs are recorded from the start.
+  3. **Access:**
+     - hosts and tags;
+     - Use/Manage grants, `HostAccess`, `HostContext` and `IHostDirectory`, with host-scoped plugin endpoints.
+  4. **Vault and credentials:**
+     - credentials encrypted with the key ring, with per-service scoping and write-only APIs;
+     - `ICredentialBroker`, handles and the core credential prompt.
+  5. **Service types:**
+     - SDK contributions `ServiceType` (settings schema and version), `SessionType` (stream), `HostAction` and `HealthProbe` (TCP);
+     - validation of the contribution graph;
+     - services on hosts;
+     - `GET /api/plugins` with contributions.
+  6. **Connectivity:**
+     - the trust store (TOFU);
+     - `NKeeper.Connectivity.Ssh` (SSH.NET) with jump hosts, authenticated from handles;
+     - real-server tests against OpenSSH in Testcontainers.
+  7. **Sessions and the `ssh` plugin:**
+     - the stream session framework (limits, keep-alive, revocation on access change);
+     - the terminal session and the TOFU prompt;
+     - the build packs and signs the built-in plugins with the development key, and CI verifies them.
+  8. **Shell:** sign-in, the tree with search and group-by, the host editor driven by service-type schemas, tabs, and the terminal.
+  9. **Native install:**
+     - the hardened systemd unit, nginx, PostgreSQL;
+     - the root-owned plugin and trust directories;
+     - `setup.sh` for Debian/Ubuntu and RHEL-family.
 
 ### Phase 2: Prove different plugin shapes
 - **web**: stateful session kind, separate `nkw-*` origins and middleware, a service type without credentials, plugin settings (base domain), `IWebSessionLauncher` capability.
@@ -572,6 +626,7 @@ Decided on 2026-11-09 unless marked open. Changing one is a design change: updat
 | D10 | Migration from 1.x | **Not now.** | No `import-v1` plugin and no 1.x fixture. Can be added later as a plugin. |
 | D11 | How is guacd provided without Docker? Distributions don't ship guacd 1.6, which is why 1.x's native mode still ran it in a container. | **Native service first:**<br>- the installer builds guacd 1.6 from source against the distribution's FreeRDP and libvncserver;<br>- it runs as its own unprivileged systemd service, listening on `127.0.0.1` only.<br>**If that doesn't work** reliably on a supported distribution, guacd alone runs in a container (Podman), as the one "absolutely required" exception to D8. | Proven in Phase 2: a build on each supported distribution family in CI, then an RDP session end to end. The fallback is decided per distribution family, from those results. |
 | D12 | How is the official plugin signing key held and rotated? | **Two copies of one dedicated release key:**<br>- one as a secret of a protected GitHub Actions environment, which requires maintainer approval for each release;<br>- one offline backup held by the maintainer.<br>Each release embeds the current public key and the next one, for rotation. | The maintainer generates the key locally with `NKeeper.PluginTool keygen --release`. It is never generated by automation and never committed. Until the first release, all builds use development keys, which production servers refuse. |
+| D13 | How much of a credential does a plugin see? | **As little as possible:** core uses the credential for the plugin, in this order of preference:<br>1. it opens the connection;<br>2. it writes the secret onto the wire;<br>3. only as a declared, audited last resort, it releases the plaintext. | §4.6, [plugin-security.md §12](plugin-security.md#12-credentials). Decided 2026-11-09, ahead of Phase 1. SSH uses the first tier. RDP/VNC and Telnet use the second. Nothing planned so far needs the third. |
 
 
 ---
