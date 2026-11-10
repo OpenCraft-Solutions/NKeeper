@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The ssh plugin (docs/architecture.md §7.11). It references only the SDK, without copying it (§7.1).
+    Building it packs and signs it with the developer's development key, as every built-in plugin is
+    (plugin-security.md §10): the key is created under .dev/keys on first use, and the package goes to
+    artifacts/plugins, the directory to point Plugins:Directory at in development.
+  -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <NKeeperRoot>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', '..', '..', '..'))</NKeeperRoot>
+    <NKeeperDevelopmentKeys>$(NKeeperRoot).dev/keys/</NKeeperDevelopmentKeys>
+    <NKeeperPluginPackages>$(NKeeperRoot)artifacts/plugins/</NKeeperPluginPackages>
+    <NKeeperPluginTool>$(NKeeperRoot)tools/NKeeper.PluginTool/bin/$(Configuration)/$(TargetFramework)/nkeeper-plugin.dll</NKeeperPluginTool>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\core\backend\NKeeper.Abstractions\NKeeper.Abstractions.csproj" Private="false" ExcludeAssets="runtime" />
+  </ItemGroup>
+
+  <Target Name="PackNKeeperPlugin" AfterTargets="Build" Condition="'$(NKeeperPackPlugins)' != 'false'">
+    <PropertyGroup>
+      <NKeeperPackStaging>$(MSBuildProjectDirectory)/$(IntermediateOutputPath)package/</NKeeperPackStaging>
+      <NKeeperPacked>$(MSBuildProjectDirectory)/$(IntermediateOutputPath)packed/</NKeeperPacked>
+    </PropertyGroup>
+    <!-- Builds the packaging tool here rather than referencing it: a plugin references only the SDK. -->
+    <MSBuild Projects="$(NKeeperRoot)tools/NKeeper.PluginTool/NKeeper.PluginTool.csproj" Targets="Build" />
+    <Exec Condition="!Exists('$(NKeeperDevelopmentKeys)dev.private.pem')"
+          Command="dotnet &quot;$(NKeeperPluginTool)&quot; keygen --out &quot;$(NKeeperDevelopmentKeys).&quot; --name dev --comment &quot;local development key&quot;" />
+    <RemoveDir Directories="$(NKeeperPackStaging);$(NKeeperPacked)" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(NKeeperPackStaging)" />
+    <Exec Command="dotnet &quot;$(NKeeperPluginTool)&quot; pack --manifest &quot;$(MSBuildProjectDirectory)/nkeeper-plugin.json&quot; --backend &quot;$(NKeeperPackStaging).&quot; --key &quot;$(NKeeperDevelopmentKeys)dev.private.pem&quot; --out &quot;$(NKeeperPacked).&quot;" />
+    <ItemGroup>
+      <NKeeperPackage Include="$(NKeeperPacked)*.nkp" />
+    </ItemGroup>
+    <Copy SourceFiles="@(NKeeperPackage)" DestinationFolder="$(NKeeperPluginPackages)" />
+  </Target>
+
+</Project>

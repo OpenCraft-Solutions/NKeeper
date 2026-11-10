@@ -112,6 +112,7 @@ public static class StreamSessionEndpoints
 internal sealed class StreamSessionRunner(HttpContext context, SessionSocket socket, string pluginId, SessionType sessionType, string authSessionKey)
 {
     private const int MaxKeyPrompts = 2;
+    private static readonly TimeSpan StopGrace = TimeSpan.FromSeconds(10);
     private readonly IServiceProvider _services = context.RequestServices;
     private readonly ILogger _logger = context.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger<StreamSessionRunner>();
 
@@ -166,7 +167,19 @@ internal sealed class StreamSessionRunner(HttpContext context, SessionSocket soc
         var reason = SessionEndReasons.Closed;
         try
         {
-            await session.RunAsync(channel, stop.Token);
+            var run = session.RunAsync(channel, stop.Token);
+
+            // A plugin that doesn't stop when told is given a few seconds, then left behind, so it can't hold the session open.
+            await Task.WhenAny(run, Task.Delay(Timeout.Infinite, stop.Token)).ContinueWith(_ => { }, TaskScheduler.Default);
+            if (!run.IsCompleted && await Task.WhenAny(run, Task.Delay(StopGrace, CancellationToken.None)) != run)
+            {
+                _logger.LogWarning("Session {SessionId} of type {SessionType} didn't stop within {Grace}; leaving it behind", open.Id, sessionType.Id, StopGrace);
+                _ = run.ContinueWith(t => t.Exception, TaskScheduler.Default);
+            }
+            else
+            {
+                await run;
+            }
         }
         catch (OperationCanceledException) when (stop.IsCancellationRequested)
         {

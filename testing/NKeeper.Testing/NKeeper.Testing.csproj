@@ -18,10 +18,13 @@
       trusted platform assemblies, or it would count as shared (§7.1) and load in the default context.
     -->
     <ProjectReference Include="..\plugins\NKeeper.TestPlugins.Hello\NKeeper.TestPlugins.Hello.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\plugins\ssh\backend\NKeeper.Plugins.Ssh.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <ItemGroup>
     <AssemblyMetadata Include="HelloPluginPath" Value="$(MSBuildThisFileDirectory)../plugins/NKeeper.TestPlugins.Hello/bin/$(Configuration)/$(TargetFramework)/NKeeper.TestPlugins.Hello.dll" />
+    <AssemblyMetadata Include="SshPluginPath" Value="$(MSBuildThisFileDirectory)../../plugins/ssh/backend/bin/$(Configuration)/$(TargetFramework)/NKeeper.Plugins.Ssh.dll" />
+    <AssemblyMetadata Include="SshPluginManifest" Value="$(MSBuildThisFileDirectory)../../plugins/ssh/backend/nkeeper-plugin.json" />
   </ItemGroup>
 
 </Project>

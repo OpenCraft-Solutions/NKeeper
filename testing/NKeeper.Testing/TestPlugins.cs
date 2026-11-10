@@ -54,6 +54,16 @@ public static class TestPlugins
         return PackageBuilder.Build(Encoding.UTF8.GetBytes(manifest), files, key);
     }
 
+    /// <summary>The ssh plugin (plugins/ssh), packaged from its own manifest and build output, signed with <paramref name="key"/>.</summary>
+    public static BuiltPackage SshPackage(PluginSigningKey key)
+    {
+        string Metadata(string name) => typeof(TestPlugins).Assembly.GetCustomAttributes<AssemblyMetadataAttribute>().Single(a => a.Key == name).Value!;
+        return PackageBuilder.Build(
+            File.ReadAllBytes(Metadata("SshPluginManifest")),
+            new Dictionary<string, byte[]> { ["backend/NKeeper.Plugins.Ssh.dll"] = File.ReadAllBytes(Metadata("SshPluginPath")) },
+            key);
+    }
+
     /// <summary>Writes a package into <paramref name="directory"/> and returns its path.</summary>
     public static string WriteTo(this BuiltPackage package, string directory)
     {

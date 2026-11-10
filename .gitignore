@@ -45,3 +45,6 @@ Thumbs.db
 
 # --- Docker ---
 docker-compose.override.yml
+
+# --- Local development keys (plugin signing) ---
+.dev/
