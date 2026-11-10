@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using NKeeper.Plugins.Host;
 using NKeeper.Plugins.Packaging;
@@ -77,6 +78,9 @@ internal sealed class ServerScenario : IAsyncDisposable
     /// <summary>Extra settings for the server, applied before it starts.</summary>
     public Dictionary<string, string?> Settings { get; } = new(StringComparer.Ordinal);
 
+    /// <summary>Service changes for the server, applied after its own registrations, before it starts.</summary>
+    public Action<IServiceCollection>? TestServices { get; set; }
+
     /// <summary>Starts the server (once) and returns a client for it, which keeps cookies unless told not to.</summary>
     public HttpClient Client(bool handleCookies = true)
     {
@@ -106,6 +110,11 @@ internal sealed class ServerScenario : IAsyncDisposable
             if (OperatingSystem.IsLinux())
             {
                 web.UseSetting("Plugins:DevelopmentOwnerUid", new LinuxFileSystem().EffectiveUserId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            }
+
+            if (TestServices is not null)
+            {
+                web.ConfigureTestServices(TestServices);
             }
         });
         return _factory.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = handleCookies, AllowAutoRedirect = false });
