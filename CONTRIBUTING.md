@@ -63,12 +63,18 @@ dotnet test NKeeper.slnx
 dotnet format NKeeper.slnx                      # fix formatting; CI runs it with --verify-no-changes
 ```
 
-To run the server, give it a database in [.NET user secrets](https://learn.microsoft.com/aspnet/core/security/app-secrets), outside the repository. It creates its schema on start:
+To run the server, give it a database and a first administrator in [.NET user secrets](https://learn.microsoft.com/aspnet/core/security/app-secrets), outside the repository. It creates its schema, and the administrator, on start:
 
 ```bash
 dotnet user-secrets --project core/backend/NKeeper.Server set "ConnectionStrings:NKeeper" "Host=localhost;Database=nkeeper;Username=nkeeper;Password=<yours>"
+dotnet user-secrets --project core/backend/NKeeper.Server set "BootstrapAdmin:Enabled" "true"
+dotnet user-secrets --project core/backend/NKeeper.Server set "BootstrapAdmin:UserName" "admin"
+dotnet user-secrets --project core/backend/NKeeper.Server set "BootstrapAdmin:Email" "admin@example.com"
+dotnet user-secrets --project core/backend/NKeeper.Server set "BootstrapAdmin:Password" "<at least 12 characters>"
 dotnet run --project core/backend/NKeeper.Server   # http://localhost:5080
 ```
+
+In Development, `appsettings.Development.json` lets the session cookie work over plain `http://localhost` (`Authentication:RequireSecureCookies`); everywhere else it requires HTTPS. See [architecture.md §6](docs/architecture.md#6-identity-and-request-policies) for sign-in, sessions and the key ring.
 
 It starts without plugins until one is installed. In Development you can point `Plugins:Directory` at a folder of packages you built with `nkeeper-plugin`, and `Plugins:DevelopmentTrustDirectory` at the folder holding your development key's `.trust.json` (see [plugin-security.md §4, §5.7](docs/plugin-security.md)).
 

@@ -12,14 +12,23 @@ public sealed class Greeting(string text)
     public string Text { get; } = text;
 }
 
-/// <summary>The well-behaved test plugin: one service and <c>GET /api/p/&lt;id&gt;/ping</c>.</summary>
+/// <summary>
+/// The well-behaved test plugin: one service, and endpoints of each kind core's policies must cover,
+/// under <c>/api/p/&lt;id&gt;/</c>.
+/// </summary>
 public sealed class HelloPlugin : IPlugin
 {
     public void ConfigureServices(IServiceCollection services, PluginContext context) =>
         services.AddSingleton(new Greeting($"pong from {context.Id} {context.Version}"));
 
-    public void MapEndpoints(IEndpointRouteBuilder endpoints, PluginContext context) =>
+    public void MapEndpoints(IEndpointRouteBuilder endpoints, PluginContext context)
+    {
         endpoints.MapGet("/ping", (Greeting greeting) => Results.Text(greeting.Text));
+        endpoints.MapPost("/echo", (Greeting greeting) => Results.Text("echo"));
+
+        // A raw request delegate: endpoint filters never run for these, which is why core's policies are middleware.
+        endpoints.Map("/raw", context => context.Response.WriteAsync("raw"));
+    }
 }
 
 /// <summary>Not a plugin: the host must refuse it as an entry type.</summary>

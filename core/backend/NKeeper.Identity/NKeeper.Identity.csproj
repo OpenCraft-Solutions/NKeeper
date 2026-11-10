@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Identity (docs/architecture.md §6): accounts and sign-in, server-side sessions, the key ring, and
+    the request policies on everything under /api, plugin routes included.
+  -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NKeeper.Core\NKeeper.Core.csproj" />
+    <ProjectReference Include="..\NKeeper.Core.Persistence\NKeeper.Core.Persistence.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="NKeeper.Server.Tests" />
+  </ItemGroup>
+
+</Project>

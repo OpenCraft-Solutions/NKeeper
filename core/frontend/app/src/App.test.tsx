@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react'
-import { definePlugin } from '@nkeeper/sdk'
+import userEvent from '@testing-library/user-event'
+import { api, definePlugin } from '@nkeeper/sdk'
 import { describe, expect, it, vi } from 'vitest'
 import { App } from './App'
 import { loadPluginFrontends, type PluginStatus } from './plugins'
@@ -87,6 +88,92 @@ describe('App', () => {
     expect(await screen.findByText('hello (built in)')).toBeInTheDocument()
     expect(screen.getByText('Active')).toBeInTheDocument()
     expect(screen.getByText('Refused (hash_mismatch)')).toBeInTheDocument()
+  })
+
+  it('asks a signed-out user to sign in, then lists the plugins', async () => {
+    let signedIn = false
+    const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/auth/antiforgery') {
+        return Response.json({ token: 'token-1', headerName: 'X-XSRF-TOKEN' })
+      }
+      if (url === '/api/auth/login' && init?.method === 'POST') {
+        signedIn = true
+        return Response.json({ id: 'u1', userName: 'admin', email: null, roles: ['Administrator'], mustChangePassword: false })
+      }
+      return signedIn
+        ? Response.json([status({ frontendEntry: null })])
+        : Response.json({ status: 401, title: 'Sign-in required' }, { status: 401, headers: { 'Content-Type': 'application/problem+json' } })
+    })
+    vi.stubGlobal('fetch', fetch)
+    const user = userEvent.setup()
+
+    render(<App />)
+    await user.type(await screen.findByLabelText('User name or email'), 'admin')
+    await user.type(screen.getByLabelText('Password'), 'Admin-Passw0rd-1')
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
+
+    expect(await screen.findByText('hello (built in)')).toBeInTheDocument()
+    const login = fetch.mock.calls.find(([url]) => url === '/api/auth/login')!
+    expect(JSON.parse(login[1]!.body as string)).toEqual({ userNameOrEmail: 'admin', password: 'Admin-Passw0rd-1', rememberMe: false })
+    expect((login[1]!.headers as Record<string, string>)['X-XSRF-TOKEN']).toBe('token-1')
+  })
+
+  it('shows why a sign-in failed and keeps the form', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/auth/antiforgery') {
+        return Response.json({ token: 'token-1', headerName: 'X-XSRF-TOKEN' })
+      }
+      const detail = url === '/api/auth/login' ? 'The user name or password is incorrect.' : 'Sign in to continue.'
+      return Response.json({ status: 401, detail }, { status: 401, headers: { 'Content-Type': 'application/problem+json' } })
+    }))
+    const user = userEvent.setup()
+
+    render(<App />)
+    await user.type(await screen.findByLabelText('User name or email'), 'admin')
+    await user.type(screen.getByLabelText('Password'), 'wrong-password-1')
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('The user name or password is incorrect.')
+    expect(screen.getByLabelText('Password')).toHaveValue('')
+  })
+
+  it('stays signed in, and says so, when signing out fails', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/auth/antiforgery') {
+        return Response.json({ token: 'token-1', headerName: 'X-XSRF-TOKEN' })
+      }
+      if (url === '/api/auth/logout') {
+        return Response.json({ status: 503, detail: 'The server is unavailable.' }, { status: 503, headers: { 'Content-Type': 'application/problem+json' } })
+      }
+      return Response.json([status({ frontendEntry: null })])
+    }))
+    const user = userEvent.setup()
+
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: 'Sign out' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('The server is unavailable.')
+    expect(screen.getByText('hello (built in)')).toBeInTheDocument()
+    expect(screen.queryByRole('form', { name: 'Sign in' })).not.toBeInTheDocument()
+  })
+
+  it('keeps the sign-in form when the session ends while plugins are still loading', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) =>
+      url === '/api/plugins'
+        ? Response.json([status()])
+        : Response.json({ status: 401 }, { status: 401, headers: { 'Content-Type': 'application/problem+json' } }),
+    ))
+    // The plugin's activation calls the API and gets a 401: the session ended meanwhile.
+    const importer = vi.fn(async () => ({
+      default: definePlugin({ id: 'hello', activate: async () => { await api.get('/api/p/hello/ping').catch(() => undefined) } }),
+    }))
+
+    render(<App importer={importer} />)
+
+    expect(await screen.findByRole('form', { name: 'Sign in' })).toBeInTheDocument()
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(screen.getByRole('form', { name: 'Sign in' })).toBeInTheDocument()
+    expect(screen.queryByText('hello (built in)')).not.toBeInTheDocument()
   })
 
   it('names the product', () => {

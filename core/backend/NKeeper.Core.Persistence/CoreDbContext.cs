@@ -1,3 +1,7 @@
+using System.Text;
+using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
 
@@ -27,15 +31,21 @@ public sealed class InstalledPlugin
     public DateTimeOffset UpdatedAtUtc { get; set; }
 }
 
-/// <summary>One audit event. Phase 0 records plugin events; Phase 1 adds users, sessions and the rest.</summary>
+/// <summary>One audit event: plugin events, sign-ins, and from Phase 1 on everything core records.</summary>
 public sealed class AuditEvent
 {
     public long Id { get; set; }
 
     public DateTimeOffset OccurredAtUtc { get; set; }
 
-    /// <summary>Who did it; <c>system</c> for the server itself.</summary>
+    /// <summary>Who did it: a user name, the name as typed for a failed sign-in, or <c>system</c> for the server itself.</summary>
     public string Actor { get; set; } = string.Empty;
+
+    /// <summary>The account that did it, when there is one.</summary>
+    public Guid? UserId { get; set; }
+
+    /// <summary>The client's address, for events caused by a request.</summary>
+    public string? ClientAddress { get; set; }
 
     /// <summary>What happened, e.g. <c>plugin.refused</c>.</summary>
     public string Action { get; set; } = string.Empty;
@@ -46,8 +56,12 @@ public sealed class AuditEvent
     public string Detail { get; set; } = string.Empty;
 }
 
-/// <summary>The core schema. Plugins get their own contexts and schemas later; they never see this one.</summary>
-public sealed class CoreDbContext(DbContextOptions<CoreDbContext> options) : DbContext(options)
+/// <summary>
+/// The core schema: plugin records, the audit log, accounts and sessions, and the Data Protection
+/// keys. Plugins get their own contexts and schemas later; they never see this one.
+/// </summary>
+public sealed class CoreDbContext(DbContextOptions<CoreDbContext> options)
+    : IdentityDbContext<ApplicationUser, ApplicationRole, Guid>(options), IDataProtectionKeyContext
 {
     public const string Schema = "core";
 
@@ -55,17 +69,28 @@ public sealed class CoreDbContext(DbContextOptions<CoreDbContext> options) : DbC
 
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
 
+    public DbSet<AuthSession> AuthSessions => Set<AuthSession>();
+
+    public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
+
     /// <summary>Configures Npgsql for the core context, with its migration history inside the core schema.</summary>
-    public static DbContextOptions<CoreDbContext> CreateOptions(string connectionString) =>
-        new DbContextOptionsBuilder<CoreDbContext>()
-            .UseNpgsql(connectionString, npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", Schema))
-            .Options;
-
-    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    public static DbContextOptions<CoreDbContext> CreateOptions(string connectionString)
     {
-        modelBuilder.HasDefaultSchema(Schema);
+        var builder = new DbContextOptionsBuilder<CoreDbContext>();
+        Configure(builder, connectionString);
+        return builder.Options;
+    }
 
-        modelBuilder.Entity<InstalledPlugin>(plugin =>
+    /// <summary>The same configuration, for <c>AddDbContext</c>.</summary>
+    public static void Configure(DbContextOptionsBuilder builder, string connectionString) =>
+        builder.UseNpgsql(connectionString, npgsql => npgsql.MigrationsHistoryTable("__EFMigrationsHistory", Schema));
+
+    protected override void OnModelCreating(ModelBuilder builder)
+    {
+        base.OnModelCreating(builder);
+        builder.HasDefaultSchema(Schema);
+
+        builder.Entity<InstalledPlugin>(plugin =>
         {
             plugin.ToTable("installed_plugins");
             plugin.HasKey(p => p.Id);
@@ -81,7 +106,7 @@ public sealed class CoreDbContext(DbContextOptions<CoreDbContext> options) : DbC
             plugin.Property(p => p.UpdatedAtUtc).HasColumnName("updated_at_utc");
         });
 
-        modelBuilder.Entity<AuditEvent>(audit =>
+        builder.Entity<AuditEvent>(audit =>
         {
             audit.ToTable("audit_events");
             audit.HasKey(a => a.Id);
@@ -91,9 +116,66 @@ public sealed class CoreDbContext(DbContextOptions<CoreDbContext> options) : DbC
             audit.Property(a => a.Action).HasColumnName("action").HasMaxLength(64);
             audit.Property(a => a.Target).HasColumnName("target").HasMaxLength(256);
             audit.Property(a => a.Detail).HasColumnName("detail");
+            audit.Property(a => a.ClientAddress).HasMaxLength(64);
             audit.HasIndex(a => a.OccurredAtUtc);
             audit.HasIndex(a => new { a.Action, a.OccurredAtUtc });
+            audit.HasIndex(a => new { a.UserId, a.OccurredAtUtc });
         });
+
+        builder.Entity<ApplicationUser>(user =>
+        {
+            user.ToTable("users");
+            user.Property(u => u.UserName).HasMaxLength(256);
+        });
+        builder.Entity<ApplicationRole>().ToTable("roles");
+        builder.Entity<IdentityUserRole<Guid>>().ToTable("user_roles");
+        builder.Entity<IdentityUserClaim<Guid>>().ToTable("user_claims");
+        builder.Entity<IdentityUserLogin<Guid>>().ToTable("user_logins");
+        builder.Entity<IdentityUserToken<Guid>>().ToTable("user_tokens");
+        builder.Entity<IdentityRoleClaim<Guid>>().ToTable("role_claims");
+        if (builder.Model.FindEntityType(typeof(IdentityUserPasskey<Guid>)) is not null)
+        {
+            builder.Entity<IdentityUserPasskey<Guid>>().ToTable("user_passkeys");
+        }
+
+        builder.Entity<AuthSession>(session =>
+        {
+            session.ToTable("auth_sessions");
+            session.HasKey(s => s.Id);
+            session.HasOne<ApplicationUser>().WithMany().HasForeignKey(s => s.UserId).OnDelete(DeleteBehavior.Cascade);
+            session.HasIndex(s => s.UserId);
+            session.HasIndex(s => s.ExpiresAtUtc);
+        });
+
+        builder.Entity<DataProtectionKey>().ToTable("data_protection_keys");
+
+        // One naming style for the whole schema: snake_case columns, Identity's own tables included.
+        foreach (var entity in builder.Model.GetEntityTypes())
+        {
+            foreach (var property in entity.GetProperties())
+            {
+                property.SetColumnName(SnakeCase(property.Name));
+            }
+        }
+    }
+
+    /// <summary><c>PackageSha256</c> → <c>package_sha256</c>, <c>OccurredAtUtc</c> → <c>occurred_at_utc</c>.</summary>
+    internal static string SnakeCase(string name)
+    {
+        var result = new StringBuilder(name.Length + 8);
+        for (var i = 0; i < name.Length; i++)
+        {
+            var c = name[i];
+            if (char.IsUpper(c) && i > 0 && (char.IsLower(name[i - 1]) || char.IsDigit(name[i - 1])
+                || (i + 1 < name.Length && char.IsLower(name[i + 1]) && char.IsUpper(name[i - 1]))))
+            {
+                result.Append('_');
+            }
+
+            result.Append(char.ToLowerInvariant(c));
+        }
+
+        return result.ToString();
     }
 }
 
