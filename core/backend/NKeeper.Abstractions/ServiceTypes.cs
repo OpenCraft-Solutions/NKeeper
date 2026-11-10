@@ -8,6 +8,9 @@ public interface IPluginContributions
 {
     /// <summary>Contributes a kind of service hosts can offer (docs/architecture.md §7.4).</summary>
     void AddServiceType(ServiceType serviceType);
+
+    /// <summary>Contributes a kind of session users open on a service (docs/architecture.md §7.10, SDK 0.1.5).</summary>
+    void AddSessionType(SessionType sessionType);
 }
 
 /// <summary>
