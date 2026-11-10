@@ -95,6 +95,7 @@ app.MapGet("/health/live", () => Results.Text("Healthy")).AllowAnonymous();
 // Everything under /api needs a sign-in unless it opts out, plugin routes included (architecture.md §6.4).
 var api = app.MapGroup("/api");
 api.MapAuthEndpoints();
+api.MapUserEndpoints();
 api.MapPluginStatus();
 app.MapPluginFrontends();
 PluginHost.MapEndpoints(plugins, api, builder.Configuration);

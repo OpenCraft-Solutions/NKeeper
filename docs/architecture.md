@@ -102,6 +102,11 @@ Ported from 1.x, with ASP.NET Core Identity. Users, roles and sessions are table
 - Every failure looks the same to the caller: an unknown account, a wrong password, a disabled or locked account all give `401` with `invalid_credentials`, after comparable time.
 - The `Administrator` role is the only system role. Access to hosts comes from grants, in Phase 1 step 3.
 - **Bootstrap administrator.** `BootstrapAdmin:Enabled` with a user name, email and password creates the first administrator at startup, once. An account that already exists is left alone. Outside Development it also needs `BootstrapAdmin:AllowOutsideDevelopment`, which the installer sets for the first start.
+- **User administration** (`/api/users`, administrators only) lists, creates, edits, disables and deletes accounts, and resets passwords. As in 1.x, it can't lock everyone out:
+  - administrators can't demote, disable or delete themselves;
+  - one active administrator always remains.
+- **A user's sessions end** when their access is cut (disabled, or no longer an administrator), when their role changes (roles are carried in the session), when an administrator resets their password, and when the account is deleted.
+- **Changing one's own password** (`POST /api/account/password`) needs the current password, and is rate limited like sign-in. It's allowed while a password change is required, and signs out the account's other sessions; this one continues.
 
 ### 6.2 Sessions
 
@@ -129,11 +134,11 @@ These apply to everything under `/api`, plugin routes included. They are middlew
 | Signed in | Required, except on `/api/auth/antiforgery`, `/api/auth/login` and `/api/auth/logout` | `401` |
 | Antiforgery | Every request other than `GET`, `HEAD`, `OPTIONS` or `TRACE` carries the token from `GET /api/auth/antiforgery` in the header it names (`X-XSRF-TOKEN`). The token is bound to the user, so the client fetches a new one after signing in or out | `400` with `csrf_token_invalid` |
 | Account status | §6.2 | `401`, or `403` with `password_change_required` |
-| Sign-in rate | 10 attempts a minute per client address | `429` with `rate_limited` and `Retry-After` |
+| Sign-in rate | 10 attempts a minute per client address, for sign-in and for changing one's password | `429` with `rate_limited` and `Retry-After` |
 
 Outside `/api`, the shell's files and pages, `/runtime/`, and `/health/live` need no sign-in. Plugin frontend files under `/plugins/` do.
 
-Sign-ins, failed sign-ins (with the name as typed, never the password) and sign-outs are written to `core.audit_events`.
+Sign-ins, failed sign-ins (with the name as typed, never the password), sign-outs, and every change to an account (`user.create`, `user.update`, `user.password_reset`, `user.delete`, `account.password_change`) are written to `core.audit_events`.
 
 ## 7. Where to read more
 

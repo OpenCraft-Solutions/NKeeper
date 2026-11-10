@@ -12,6 +12,11 @@ public static class AuditActions
     public const string SignIn = "auth.sign_in";
     public const string SignInFailed = "auth.sign_in_failed";
     public const string SignOut = "auth.sign_out";
+    public const string UserCreate = "user.create";
+    public const string UserUpdate = "user.update";
+    public const string UserCredentialReset = "user.password_reset";
+    public const string UserDelete = "user.delete";
+    public const string AccountCredentialChange = "account.password_change";
 }
 
 /// <summary>

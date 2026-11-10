@@ -63,6 +63,7 @@ public static class IdentityServices
         services.AddScoped<CredentialValidator>();
         services.AddScoped<BootstrapAdministrator>();
         services.AddScoped<SessionRevoker>();
+        services.AddScoped<UserAdministration>();
 
         services.AddAntiforgery(options =>
         {
