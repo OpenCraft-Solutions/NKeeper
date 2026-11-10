@@ -72,6 +72,7 @@ public sealed class HostTests(PostgresFixture postgres) : IClassFixture<Postgres
     [InlineData("""{"name":"web01","ipAddress":"192.0.2.300"}""", "ipAddress")]
     [InlineData("""{"name":"web01","ipAddress":"192.0.2.10","tags":[{"name":"env:prod"}]}""", "tags[0].name")]
     [InlineData("""{"name":"web01","ipAddress":"192.0.2.10","tags":[{"name":" "}]}""", "tags[0].name")]
+    [InlineData("""{"name":"web01","ipAddress":"192.0.2.10","tags":[null]}""", "tags[0].name")]
     public async Task An_invalid_host_reports_the_field(string body, string field)
     {
         await using var server = new ServerScenario(await postgres.CreateDatabaseAsync());
@@ -81,6 +82,21 @@ public sealed class HostTests(PostgresFixture postgres) : IClassFixture<Postgres
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Contains(field, (await response.ProblemAsync()).GetProperty("errors").EnumerateObject().Select(p => p.Name));
+    }
+
+    [Fact]
+    public async Task A_host_takes_up_to_100_distinct_tags_ignoring_case_duplicates()
+    {
+        await using var server = new ServerScenario(await postgres.CreateDatabaseAsync());
+        using var admin = await server.SignedInClientAsync();
+        var hundred = Enumerable.Range(0, 100).Select(i => new { name = $"t{i}" }).ToList();
+
+        using var full = await admin.SendWithTokenAsync(HttpMethod.Post, "/api/hosts", new { name = "web01", ipAddress = "192.0.2.10", tags = hundred.Append(new { name = "T0" }) });
+        using var over = await admin.SendWithTokenAsync(HttpMethod.Post, "/api/hosts", new { name = "web02", ipAddress = "192.0.2.11", tags = hundred.Append(new { name = "t100" }) });
+
+        Assert.Equal(HttpStatusCode.Created, full.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, over.StatusCode);
+        Assert.Contains("tags", (await over.ProblemAsync()).GetProperty("errors").EnumerateObject().Select(p => p.Name));
     }
 
     [Fact]
@@ -229,6 +245,7 @@ public sealed class HostTests(PostgresFixture postgres) : IClassFixture<Postgres
     [InlineData("""[{"hostId":"00000000-0000-0000-0000-000000000001","tagName":"env","level":"use"}]""")]
     [InlineData("""[{"hostId":"00000000-0000-0000-0000-000000000001","level":"use"}]""")]
     [InlineData("""[{"tagName":"env"}]""")]
+    [InlineData("""[null]""")]
     public async Task Invalid_grants_are_refused(string body)
     {
         await using var server = new ServerScenario(await postgres.CreateDatabaseAsync());

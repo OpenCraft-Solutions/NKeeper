@@ -187,10 +187,14 @@ public sealed class HostInventory(CoreDbContext db, HostAccess access, IAuditLog
     private static void ApplyTags(Host host, List<HostTagDto> tags)
     {
         var requested = new List<(string Name, string Value)>();
+
+        // Names can't hold a colon, so "name:value" identifies a tag; case is ignored.
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         for (var i = 0; i < tags.Count; i++)
         {
-            var name = tags[i].Name?.Trim() ?? string.Empty;
-            var value = tags[i].Value?.Trim() ?? string.Empty;
+            // JSON can carry nulls the element type doesn't allow; a null tag has no name.
+            var name = tags[i]?.Name?.Trim() ?? string.Empty;
+            var value = tags[i]?.Value?.Trim() ?? string.Empty;
             if (name.Length == 0)
             {
                 throw new InventoryValidationException($"tags[{i}].name", "Enter a tag name.");
@@ -206,15 +210,15 @@ public sealed class HostInventory(CoreDbContext db, HostAccess access, IAuditLog
                 throw new InventoryValidationException($"tags[{i}].value", $"Tag values are at most {HostTag.ValueMaxLength} characters.");
             }
 
-            if (!requested.Any(t => string.Equals(t.Name, name, StringComparison.OrdinalIgnoreCase) && string.Equals(t.Value, value, StringComparison.OrdinalIgnoreCase)))
+            if (seen.Add($"{name}:{value}"))
             {
+                if (requested.Count == Host.MaxTags)
+                {
+                    throw new InventoryValidationException("tags", $"A host can have at most {Host.MaxTags} tags.");
+                }
+
                 requested.Add((name, value));
             }
-        }
-
-        if (requested.Count > Host.MaxTags)
-        {
-            throw new InventoryValidationException("tags", $"A host can have at most {Host.MaxTags} tags.");
         }
 
         // Unchanged rows stay, so their IDs are stable; the rest are removed and added.

@@ -42,7 +42,7 @@ public static class UserEndpoints
                 await users.DeleteAsync(id, context.User.UserId(), context.RequestAborted) ? Results.NoContent() : Results.NotFound()));
 
         // Verifies the current password, so it's rate limited like sign-in.
-        api.MapPost("/account/password", (ChangePasswordRequest? request, UserAdministration users, UserManager<ApplicationUser> accounts, HttpContext context) =>
+        api.MapPost("/account/password", (ChangePasswordRequest? request, UserAdministration users, UserManager<ApplicationUser> accounts, SignInManager<ApplicationUser> signIn, HttpContext context) =>
                 Validated(async () =>
                 {
                     if (await accounts.GetUserAsync(context.User) is not { } user)
@@ -51,6 +51,10 @@ public static class UserEndpoints
                     }
 
                     await users.ChangeOwnPasswordAsync(user, request ?? new ChangePasswordRequest(), CurrentSession.Key(context), context.RequestAborted);
+
+                    // The change gave the account a new security stamp. Reissue this session with it, in place,
+                    // or Identity's next stamp check would sign this browser out too.
+                    await signIn.RefreshSignInAsync(user);
                     return Results.NoContent();
                 }))
             .RequireRateLimiting(LoginRateLimitSettings.PolicyName)
