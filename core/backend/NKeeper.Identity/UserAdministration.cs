@@ -194,7 +194,7 @@ public sealed partial class UserAdministration(
         await users.ResetAccessFailedCountAsync(user);
         Check(await users.UpdateAsync(user), "password");
         await EndSessionsAsync(id, cancellationToken);
-        await audit.RecordAsync(new AuditEntry(AuditActions.UserPasswordReset, id.ToString(), user.UserName!), cancellationToken);
+        await audit.RecordAsync(new AuditEntry(AuditActions.UserCredentialReset, id.ToString(), user.UserName!), cancellationToken);
         return true;
     }
 
@@ -240,7 +240,7 @@ public sealed partial class UserAdministration(
         user.MustChangePassword = false;
         Check(await users.UpdateAsync(user), "newPassword");
         await sessions.RevokeAllAsync(user.Id, cancellationToken, exceptSessionKey: keepSessionKey);
-        await audit.RecordAsync(new AuditEntry(AuditActions.AccountPasswordChange, user.Id.ToString()), cancellationToken);
+        await audit.RecordAsync(new AuditEntry(AuditActions.AccountCredentialChange, user.Id.ToString()), cancellationToken);
     }
 
     private async Task EndSessionsAsync(Guid userId, CancellationToken cancellationToken)
