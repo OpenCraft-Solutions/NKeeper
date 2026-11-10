@@ -17,6 +17,10 @@ public static class AuditActions
     public const string UserCredentialReset = "user.password_reset";
     public const string UserDelete = "user.delete";
     public const string AccountCredentialChange = "account.password_change";
+    public const string UserGrantsReplace = "user.grants_replace";
+    public const string HostCreate = "host.create";
+    public const string HostUpdate = "host.update";
+    public const string HostDelete = "host.delete";
 }
 
 /// <summary>

@@ -73,6 +73,12 @@ public sealed class CoreDbContext(DbContextOptions<CoreDbContext> options)
 
     public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
 
+    public DbSet<Host> Hosts => Set<Host>();
+
+    public DbSet<HostTag> HostTags => Set<HostTag>();
+
+    public DbSet<HostAccessGrant> HostAccessGrants => Set<HostAccessGrant>();
+
     /// <summary>Configures Npgsql for the core context, with its migration history inside the core schema.</summary>
     public static DbContextOptions<CoreDbContext> CreateOptions(string connectionString)
     {
@@ -149,10 +155,47 @@ public sealed class CoreDbContext(DbContextOptions<CoreDbContext> options)
 
         builder.Entity<DataProtectionKey>().ToTable("data_protection_keys");
 
+        builder.Entity<Host>(host =>
+        {
+            host.ToTable("hosts");
+            host.HasKey(h => h.Id);
+            host.Property(h => h.Name).HasMaxLength(Host.NameMaxLength);
+            host.Property(h => h.Hostname).HasMaxLength(Host.HostnameMaxLength);
+            host.Property(h => h.IpAddress).HasMaxLength(Host.IpAddressMaxLength);
+            host.Property(h => h.Description).HasMaxLength(Host.DescriptionMaxLength);
+            host.Property(h => h.Version).IsRowVersion().HasColumnName("xmin");
+            host.HasMany(h => h.Tags).WithOne().HasForeignKey(t => t.HostId).OnDelete(DeleteBehavior.Cascade);
+            host.HasIndex(h => h.Name);
+        });
+
+        builder.Entity<HostTag>(tag =>
+        {
+            tag.ToTable("host_tags");
+            tag.HasKey(t => t.Id);
+            tag.Property(t => t.Name).HasMaxLength(HostTag.NameMaxLength);
+            tag.Property(t => t.Value).HasMaxLength(HostTag.ValueMaxLength);
+            tag.HasIndex(t => new { t.HostId, t.Name, t.Value }).IsUnique();
+            tag.HasIndex(t => t.Name);
+        });
+
+        builder.Entity<HostAccessGrant>(grant =>
+        {
+            grant.ToTable("host_access_grants");
+            grant.HasKey(g => g.Id);
+            grant.Property(g => g.TagName).HasMaxLength(HostTag.NameMaxLength);
+            grant.Property(g => g.TagValue).HasMaxLength(HostTag.ValueMaxLength);
+            grant.Property(g => g.Level).HasConversion<string>().HasMaxLength(16);
+            grant.HasOne<ApplicationUser>().WithMany().HasForeignKey(g => g.UserId).OnDelete(DeleteBehavior.Cascade);
+            grant.HasOne<Host>().WithMany().HasForeignKey(g => g.HostId).OnDelete(DeleteBehavior.Cascade);
+            grant.HasIndex(g => g.UserId);
+            grant.ToTable(t => t.HasCheckConstraint("ck_host_access_grants_target", "(host_id IS NULL) <> (tag_name IS NULL)"));
+        });
+
         // One naming style for the whole schema: snake_case columns, Identity's own tables included.
+        // Npgsql's row version is PostgreSQL's xmin system column, which keeps its name.
         foreach (var entity in builder.Model.GetEntityTypes())
         {
-            foreach (var property in entity.GetProperties())
+            foreach (var property in entity.GetProperties().Where(p => p.GetColumnName() != "xmin"))
             {
                 property.SetColumnName(SnakeCase(property.Name));
             }

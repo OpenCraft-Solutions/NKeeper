@@ -13,7 +13,7 @@ How NKeeper is put together today: the parts of core, how plugins plug in, and t
 | **Packaging** | `core/backend/NKeeper.Plugins.Packaging` | The `.nkp` format, trust and signature verification: bytes in, a result out. No I/O of its own. |
 | **Plugin host** | `core/backend/NKeeper.Plugins.Host` | Directory and trust checks, pinning, dependency resolution, one load context per plugin, enable state. |
 | **Persistence** | `core/backend/NKeeper.Core.Persistence` | `CoreDbContext` (schema `core`), its migrations, and the stores the host writes plugin records and audit events to. |
-| **Kernel** | `core/backend/NKeeper.Core` | Core services every feature uses. Today: the audit log. |
+| **Kernel** | `core/backend/NKeeper.Core` | Core services every feature uses. Today: the audit log, hosts and access (§7). |
 | **Identity** | `core/backend/NKeeper.Identity` | Accounts, sign-in, server-side sessions, the key ring and the request policies (§6). |
 | **Server** | `core/backend/NKeeper.Server` | The composition root: startup order, `GET /api/plugins`, plugin frontend files, and the shell with its security policy. |
 | **Shared runtime** | `core/frontend/runtime` (`@nkeeper/runtime`) | Builds the modules the shell shares with plugins, and the import map that names them. |
@@ -140,7 +140,35 @@ Outside `/api`, the shell's files and pages, `/runtime/`, and `/health/live` nee
 
 Sign-ins, failed sign-ins (with the name as typed, never the password), sign-outs, and every change to an account (`user.create`, `user.update`, `user.password_reset`, `user.delete`, `account.password_change`) are written to `core.audit_events`.
 
-## 7. Where to read more
+## 7. Hosts and access
+
+Ported from 1.x. Phase 1 step 3 brings hosts, their tags, and who may see and change them. Services, credentials, jump hosts and hardware details join a host in the steps that use them.
+
+### 7.1 Hosts
+
+- A host has:
+  - a name (up to 200 characters);
+  - a hostname (RFC 1123, underscores tolerated, up to 253 characters), an IP address (IPv4 or IPv6, stored in canonical form), or both. At least one is required;
+  - an optional description (up to 4000 characters);
+  - tags.
+- **Tags** are a name (up to 64 characters, no colon, since `name:value` is the search syntax) and an optional value (up to 255). A host may carry one name with several values. Duplicates that differ only in case are dropped, keeping the first spelling. A host has at most 100 tags.
+- **Only administrators create hosts.** Changing or deleting one needs Manage access to it (§7.2).
+- **Edits can't silently overwrite each other.** Each host has a version (PostgreSQL's `xmin`). An update sends the version it was based on, and a stale one is refused with `409` and `version_conflict`.
+- Creating, changing and deleting a host are audited (`host.create`, `host.update`, `host.delete`).
+
+### 7.2 Access
+
+- Administrators see and manage every host.
+- Other users see only the hosts they're granted. A grant gives one of two levels: **Use** (see the host and connect to it) or **Manage** (also change and delete it). It covers either:
+  - **one host**; or
+  - **a group**: every host with a tag of that name (and, optionally, that value), compared without case. Group grants follow the tags, so a host tagged later is included at once.
+- When grants overlap, the highest level applies.
+- A host the user can't see answers `404`, exactly as if it didn't exist, so nothing is learned about hosts outside one's grants. A host the user can use but not manage answers `403` with `host_manage_denied` to a change.
+- `HostAccess` in core is the one place that decides this. Every query for a user's hosts goes through it.
+- Administrators set a user's grants with `PUT /api/users/{id}/grants`, which replaces them all, and read them with `GET`. Access is checked on every request, so a change applies at the user's next request. It's audited as `user.grants_replace`.
+- Deleting a host deletes the grants for that host. Group grants stay, since they name tags, not hosts.
+
+## 8. Where to read more
 
 - [v2-plan.md](v2-plan.md): the audit of 1.x, the core/plugin boundary, the contribution catalogue, phases and decisions.
 - [plugin-security.md](plugin-security.md): package format, signing, trust, directory checks, verification order and reason codes, loading and states.

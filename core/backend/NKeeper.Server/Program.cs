@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using NKeeper.Abstractions;
+using NKeeper.Core.Inventory;
 using NKeeper.Core.Persistence;
 using NKeeper.Identity;
 using NKeeper.Plugins.Host;
@@ -71,6 +72,7 @@ await pluginHost.ConfigureServicesAsync(plugins, builder.Services, builder.Confi
 
 // Core's services are registered after the plugins', so a plugin can't replace them.
 builder.Services.AddNKeeperIdentity(builder.Configuration, connectionString, keyRing);
+builder.Services.AddNKeeperInventory();
 builder.Services.AddSingleton(plugins);
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.ConfigureHttpJsonOptions(options =>
@@ -96,6 +98,7 @@ app.MapGet("/health/live", () => Results.Text("Healthy")).AllowAnonymous();
 var api = app.MapGroup("/api");
 api.MapAuthEndpoints();
 api.MapUserEndpoints();
+api.MapInventoryEndpoints();
 api.MapPluginStatus();
 app.MapPluginFrontends();
 PluginHost.MapEndpoints(plugins, api, builder.Configuration);
