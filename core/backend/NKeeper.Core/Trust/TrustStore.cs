@@ -73,16 +73,16 @@ public sealed class TrustStore(CoreDbContext db, TrustPresentationStore presenta
     }
 
     /// <summary>Audits a presented key that differs from the trusted one. Core never replaces it by itself.</summary>
-    public async Task MismatchAsync(TrustEndpoint endpoint, string algorithm, string trusted, string presented, CancellationToken cancellationToken)
+    public async Task MismatchAsync(TrustEndpoint endpoint, string algorithm, string knownFingerprint, string presentedFingerprint, CancellationToken cancellationToken)
     {
         logger.LogWarning(
-            "The {Kind} {Algorithm} of host {HostId} at {Address}:{Port} changed: trusted {Trusted}, presented {Presented}",
-            endpoint.Kind, algorithm, endpoint.HostId, HostInventory.Endpoint(endpoint.Address), endpoint.Port, trusted, presented);
+            "The {Kind} {Algorithm} of host {HostId} at {Address}:{Port} changed: trusted {KnownFingerprint}, presented {PresentedFingerprint}",
+            endpoint.Kind, algorithm, endpoint.HostId, HostInventory.Endpoint(endpoint.Address), endpoint.Port, knownFingerprint, presentedFingerprint);
         await audit.RecordAsync(
             new AuditEntry(
                 AuditActions.TrustMismatch,
                 endpoint.HostId.ToString(),
-                $"{KindName(endpoint.Kind)} {algorithm} at {HostInventory.Endpoint(endpoint.Address)}:{endpoint.Port}: trusted SHA256:{trusted}, presented SHA256:{presented}"),
+                $"{KindName(endpoint.Kind)} {algorithm} at {HostInventory.Endpoint(endpoint.Address)}:{endpoint.Port}: trusted SHA256:{knownFingerprint}, presented SHA256:{presentedFingerprint}"),
             cancellationToken);
     }
 

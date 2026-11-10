@@ -89,8 +89,8 @@ public sealed class SshConnectivity(SshConnectionPlanner planner, TrustStore tru
                         $"The SSH host key of {who} ({where}) isn't trusted yet. Check its fingerprint, SHA256:{unknown.Fingerprint}, and trust it to connect.",
                         new PresentedHostKey(end.Trust.HostId, end.Trust.ServiceId, unknown.Algorithm, unknown.Fingerprint));
                 case { Verdict: TrustVerdict.Changed } changed:
-                    var trusted = end.KnownKeys.First(k => k.Algorithm == changed.Algorithm).Fingerprint;
-                    await trust.MismatchAsync(end.Trust, changed.Algorithm, trusted, changed.Fingerprint, CancellationToken.None);
+                    var knownFingerprint = end.KnownKeys.First(k => k.Algorithm == changed.Algorithm).Fingerprint;
+                    await trust.MismatchAsync(end.Trust, changed.Algorithm, knownFingerprint, changed.Fingerprint, CancellationToken.None);
                     throw new SshConnectException(
                         SshConnectFailure.HostKeyChanged,
                         $"The SSH host key of {who} ({where}) has changed since it was trusted. This happens when a server is reinstalled, "
