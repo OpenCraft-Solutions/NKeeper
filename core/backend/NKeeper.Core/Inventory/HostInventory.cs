@@ -274,14 +274,11 @@ public sealed class HostInventory(CoreDbContext db, HostAccess access, ServiceTy
             }
 
             var typeId = request.Type?.Trim() ?? string.Empty;
-            if (serviceTypes.Find(typeId) is not { } type)
-            {
-                if (service is null || service.Type != typeId)
-                {
-                    throw new InventoryValidationException($"{field}.type", typeId.Length == 0 ? "Choose a service type." : $"No enabled plugin provides the service type '{typeId}'.");
-                }
 
-                if (!Unchanged(service, request))
+            // A stored service of an unavailable type is kept only as it is, whatever type the request names.
+            if (service is not null && serviceTypes.Find(service.Type) is null)
+            {
+                if (service.Type != typeId || !Unchanged(service, request))
                 {
                     throw new InventoryValidationException(field, "No enabled plugin provides this service's type, so it can only be kept as it is, or removed.");
                 }
@@ -289,6 +286,11 @@ public sealed class HostInventory(CoreDbContext db, HostAccess access, ServiceTy
                 service.Position = i;
                 requested.Add(service);
                 continue;
+            }
+
+            if (serviceTypes.Find(typeId) is not { } type)
+            {
+                throw new InventoryValidationException($"{field}.type", typeId.Length == 0 ? "Choose a service type." : $"No enabled plugin provides the service type '{typeId}'.");
             }
 
             var label = TrimToNull(request.Label);

@@ -138,10 +138,13 @@ public sealed class ServiceTests(PostgresFixture postgres) : IClassFixture<Postg
 
         var changed = $$"""[{ "id": "{{serviceId}}", "type": "gone", "label": "New", "settings": {"anything":[1,2]} }]""";
         using var refused = await SendRawAsync(admin, HttpMethod.Put, $"/api/hosts/{Id(host)}", HostBody(changed, version: version));
+        var retyped = $$"""[{ "id": "{{serviceId}}", "type": "hello", "label": "Old", "settings": { "greeting": "hi" } }]""";
+        using var overwritten = await SendRawAsync(admin, HttpMethod.Put, $"/api/hosts/{Id(host)}", HostBody(retyped, version: version));
         using var added = await SendRawAsync(admin, HttpMethod.Post, "/api/hosts", HostBody("""[{ "type": "gone", "settings": {} }]""", name: "web02"));
         using var removed = await SendRawAsync(admin, HttpMethod.Put, $"/api/hosts/{Id(host)}", HostBody("[]", version: version));
 
         Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, overwritten.StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, added.StatusCode);
         removed.EnsureSuccessStatusCode();
         Assert.Empty((await removed.Content.ReadFromJsonAsync<JsonElement>(Token)).GetProperty("services").EnumerateArray());

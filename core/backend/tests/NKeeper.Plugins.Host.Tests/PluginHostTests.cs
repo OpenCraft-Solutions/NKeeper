@@ -345,6 +345,9 @@ public sealed class PluginHostTests : IDisposable
     [InlineData("length")]
     [InlineData("range")]
     [InlineData("choices")]
+    [InlineData("null-settings")]
+    [InlineData("id-newline")]
+    [InlineData("key-newline")]
     public async Task A_plugin_contributing_an_invalid_service_type_is_refused_and_registers_nothing(string rule)
     {
         _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "broken", entryType: TestPlugins.InvalidServiceTypeType));

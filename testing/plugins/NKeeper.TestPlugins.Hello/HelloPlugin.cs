@@ -94,6 +94,9 @@ public sealed class InvalidServiceTypePlugin : IPlugin
             "length" => new ServiceType("fine", "Fine") { Settings = [ServiceSetting.Text("a", "A", maxLength: 5000)] },
             "range" => new ServiceType("fine", "Fine") { Settings = [ServiceSetting.Number("a", "A", minimum: 5, maximum: 1)] },
             "choices" => new ServiceType("fine", "Fine") { Settings = [ServiceSetting.Choice("a", "A", [])] },
+            "null-settings" => new ServiceType("fine", "Fine") { Settings = null! },
+            "id-newline" => new ServiceType("fine\n", "Fine"),
+            "key-newline" => new ServiceType("fine", "Fine") { Settings = [ServiceSetting.Switch("a\n", "A")] },
             _ => new ServiceType("Not An Id", "Bad"),
         });
 

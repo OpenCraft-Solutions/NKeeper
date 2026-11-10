@@ -52,8 +52,13 @@ public static partial class ContributionRules
             return $"Service type '{type.Id}' is at settings version {type.SettingsVersion} but has no Upgrade for older settings.";
         }
 
+        if (type.Settings is null)
+        {
+            return $"Service type '{type.Id}' has no settings list; use an empty one for none.";
+        }
+
         var keys = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var setting in type.Settings ?? [])
+        foreach (var setting in type.Settings)
         {
             if (setting is null)
             {
@@ -94,9 +99,10 @@ public static partial class ContributionRules
         return null;
     }
 
-    [GeneratedRegex("^[a-z][a-z0-9-]{0,31}$")]
+    // \z, not $: in .NET, $ also matches before a final newline.
+    [GeneratedRegex(@"^[a-z][a-z0-9-]{0,31}\z")]
     private static partial Regex TypeId();
 
-    [GeneratedRegex("^[a-z][A-Za-z0-9]{0,63}$")]
+    [GeneratedRegex(@"^[a-z][A-Za-z0-9]{0,63}\z")]
     private static partial Regex SettingKey();
 }
