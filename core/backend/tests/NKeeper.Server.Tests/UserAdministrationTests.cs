@@ -1,7 +1,9 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using NKeeper.Core.Audit;
 using NKeeper.Core.Persistence;
 using NKeeper.Testing;
@@ -91,6 +93,65 @@ public sealed class UserAdministrationTests(PostgresFixture postgres) : IClassFi
         Assert.Equal(HttpStatusCode.NoContent, changed.StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await laptop.GetAsync(new Uri(AnyEndpoint, UriKind.Relative), Token)).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await phone.GetAsync(new Uri(AnyEndpoint, UriKind.Relative), Token)).StatusCode);
+    }
+
+    [Fact]
+    public async Task The_session_that_changed_its_password_passes_the_next_security_stamp_check()
+    {
+        await using var server = new ServerScenario(await postgres.CreateDatabaseAsync())
+        {
+            // Check the stamp on every request, rather than every 30 minutes.
+            TestServices = services => services.Configure<SecurityStampValidatorOptions>(o => o.ValidationInterval = TimeSpan.Zero),
+        };
+        await server.CreateUserAsync("bob", BobPassword);
+        using var bob = await SignInAsync(server, "bob", BobPassword);
+
+        using var changed = await bob.SendWithTokenAsync(HttpMethod.Post, "/api/account/password", new { currentPassword = BobPassword, newPassword = "Bob-New-Passw0rd" });
+
+        Assert.Equal(HttpStatusCode.NoContent, changed.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await bob.GetAsync(new Uri(AnyEndpoint, UriKind.Relative), Token)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await bob.GetAsync(new Uri(AnyEndpoint, UriKind.Relative), Token)).StatusCode);
+    }
+
+    [Fact]
+    public async Task Two_administrators_demoting_each_other_at_once_leave_one_administrator()
+    {
+        await using var server = new ServerScenario(await postgres.CreateDatabaseAsync());
+        Guid adminId;
+        using (var admin = await server.SignedInClientAsync())
+        {
+            adminId = (await admin.GetFromJsonAsync<JsonElement>("/api/auth/me", Token)).GetProperty("id").GetGuid();
+        }
+
+        // Three rounds: each signs in twice, and sign-in is rate limited to 10 a minute.
+        for (var round = 0; round < 3; round++)
+        {
+            var name = $"alice{round}";
+            var aliceId = await server.CreateUserAsync(name, BobPassword);
+            await server.AddToAdministratorsAsync(name);
+            using var alice = await SignInAsync(server, name, BobPassword);
+            using var me = await server.SignedInClientAsync();
+
+            var demoteAlice = me.SendWithTokenAsync(HttpMethod.Put, $"/api/users/{aliceId}", new { email = $"{name}@example.com", role = "user" });
+            var demoteAdmin = alice.SendWithTokenAsync(HttpMethod.Put, $"/api/users/{adminId}", new { email = ServerScenario.AdminEmail, role = "user" });
+            using var first = await demoteAlice;
+            using var second = await demoteAdmin;
+
+            int administrators;
+            using (var scope = server.Services.CreateScope())
+            {
+                var accounts = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+                administrators = (await accounts.GetUsersInRoleAsync(SystemRoles.Administrator)).Count(u => !u.IsDisabled);
+            }
+
+            Assert.True(administrators >= 1, $"Round {round}: {(int)first.StatusCode} and {(int)second.StatusCode} left no administrator.");
+
+            if (administrators == 1 && !first.IsSuccessStatusCode)
+            {
+                // Alice won: make the bootstrap administrator one again for the next round.
+                await server.AddToAdministratorsAsync(ServerScenario.AdminUserName);
+            }
+        }
     }
 
     [Fact]

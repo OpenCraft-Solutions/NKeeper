@@ -87,6 +87,12 @@ public sealed partial class UserAdministration(
 {
     public const int MaxPasswordLength = 512;
 
+    /// <summary>
+    /// The Postgres advisory lock that changes able to remove an administrator hold from their check to
+    /// their commit, so two administrators can't demote, disable or delete each other at once and leave none.
+    /// </summary>
+    private const long AdministratorsLock = 0x4E4B_4144_4D49_4E53; // "NKADMINS"
+
     public async Task<List<UserResponse>> ListAsync(CancellationToken cancellationToken)
     {
         var admins = await AdministratorIdsAsync(cancellationToken);
@@ -125,10 +131,15 @@ public sealed partial class UserAdministration(
         return (await GetAsync(user.Id, cancellationToken))!;
     }
 
-    public async Task<UserResponse?> UpdateAsync(Guid id, UpdateUserRequest request, Guid actorId, CancellationToken cancellationToken)
+    public Task<UserResponse?> UpdateAsync(Guid id, UpdateUserRequest request, Guid actorId, CancellationToken cancellationToken)
     {
         var email = ValidEmail(request.Email);
         var role = request.Role ?? throw new AccountValidationException("role", "Choose a role.");
+        return WithAdministratorsLockAsync(() => UpdateLockedAsync(id, request, email, role, actorId, cancellationToken), cancellationToken);
+    }
+
+    private async Task<UserResponse?> UpdateLockedAsync(Guid id, UpdateUserRequest request, string email, UserRole role, Guid actorId, CancellationToken cancellationToken)
+    {
         var user = await users.FindByIdAsync(id.ToString());
         if (user is null)
         {
@@ -198,7 +209,10 @@ public sealed partial class UserAdministration(
         return true;
     }
 
-    public async Task<bool> DeleteAsync(Guid id, Guid actorId, CancellationToken cancellationToken)
+    public Task<bool> DeleteAsync(Guid id, Guid actorId, CancellationToken cancellationToken) =>
+        WithAdministratorsLockAsync(() => DeleteLockedAsync(id, actorId, cancellationToken), cancellationToken);
+
+    private async Task<bool> DeleteLockedAsync(Guid id, Guid actorId, CancellationToken cancellationToken)
     {
         var user = await users.FindByIdAsync(id.ToString());
         if (user is null)
@@ -249,6 +263,19 @@ public sealed partial class UserAdministration(
         // session framework exists (Phase 1 step 7).
         logger.LogInformation("Ending the sessions of user {UserId}.", userId);
         await sessions.RevokeAllAsync(userId, cancellationToken);
+    }
+
+    /// <summary>
+    /// Runs <paramref name="operation"/> in one transaction holding <see cref="AdministratorsLock"/>. The
+    /// account store and <see cref="SessionRevoker"/> share this request's context, so their writes are in it.
+    /// </summary>
+    private async Task<T> WithAdministratorsLockAsync<T>(Func<Task<T>> operation, CancellationToken cancellationToken)
+    {
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await db.Database.ExecuteSqlAsync($"SELECT pg_advisory_xact_lock({AdministratorsLock})", cancellationToken);
+        var result = await operation();
+        await transaction.CommitAsync(cancellationToken);
+        return result;
     }
 
     private async Task EnsureAnotherActiveAdministratorAsync(Guid exceptUserId, string field, CancellationToken cancellationToken)
