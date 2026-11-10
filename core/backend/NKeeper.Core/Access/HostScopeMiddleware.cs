@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using NKeeper.Abstractions;
+using NKeeper.Core.Inventory;
 using NKeeper.Core.Persistence;
 
 namespace NKeeper.Core.Access;
@@ -14,7 +15,7 @@ public sealed class HostScopeMiddleware(RequestDelegate next)
 {
     public const string HostManageDeniedCode = "host_manage_denied";
 
-    public async Task InvokeAsync(HttpContext context, HostAccess access, CoreDbContext db)
+    public async Task InvokeAsync(HttpContext context, HostAccess access, CoreDbContext db, ServiceTypeCatalog serviceTypes)
     {
         if (context.GetEndpoint()?.Metadata.GetMetadata<HostScopeMetadata>() is not { } scope)
         {
@@ -50,7 +51,8 @@ public sealed class HostScopeMiddleware(RequestDelegate next)
             return;
         }
 
-        var host = await db.Hosts.AsNoTracking().Include(h => h.Tags).FirstOrDefaultAsync(h => h.Id == hostId, context.RequestAborted);
+        var host = await db.Hosts.AsNoTracking().Include(h => h.Tags).Include(h => h.Services).AsSplitQuery()
+            .FirstOrDefaultAsync(h => h.Id == hostId, context.RequestAborted);
         if (host is null)
         {
             // Deleted since the check.
@@ -64,7 +66,24 @@ public sealed class HostScopeMiddleware(RequestDelegate next)
             host.Hostname,
             host.IpAddress,
             [.. host.Tags.OrderBy(t => t.Name, StringComparer.OrdinalIgnoreCase).Select(t => new Abstractions.HostTag(t.Name, t.Value.Length == 0 ? null : t.Value))],
-            permission == Access.HostPermission.Manage ? Abstractions.HostPermission.Manage : Abstractions.HostPermission.Use));
+            permission == Access.HostPermission.Manage ? Abstractions.HostPermission.Manage : Abstractions.HostPermission.Use)
+        {
+            Services = [.. host.Services.OrderBy(s => s.Position).Select(s => ServiceFor(host, s, serviceTypes))],
+        });
         await next(context);
+    }
+
+    /// <summary>A service as plugins see it: the defaults applied, and the settings in the type's current version.</summary>
+    private static Abstractions.HostService ServiceFor(Host host, Persistence.HostService service, ServiceTypeCatalog serviceTypes)
+    {
+        var (settings, type) = serviceTypes.Read(service);
+        return new Abstractions.HostService(
+            service.Id,
+            service.Type,
+            service.Label,
+            service.Port ?? type?.DefaultPort,
+            service.Address ?? host.IpAddress ?? host.Hostname,
+            settings,
+            type is not null);
     }
 }

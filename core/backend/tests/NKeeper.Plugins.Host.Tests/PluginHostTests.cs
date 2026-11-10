@@ -306,6 +306,79 @@ public sealed class PluginHostTests : IDisposable
         AssertRefused(result, "hello-dependant", HostReasonCodes.Dependency);
     }
 
+    // ---- Contributions (architecture.md §7.4) ----
+
+    [Fact]
+    public async Task The_service_types_of_loaded_plugins_are_collected()
+    {
+        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey));
+
+        var (result, _) = await ConfigureAsync();
+
+        var type = Assert.Single(result.ServiceTypes);
+        Assert.Equal(("hello", "hello", 7, 2), (type.PluginId, type.Type.Id, type.Type.DefaultPort, type.Type.SettingsVersion));
+    }
+
+    [Fact]
+    public async Task A_plugin_contributing_a_taken_service_type_is_refused_with_its_dependants()
+    {
+        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey));
+        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "copycat", entryType: TestPlugins.DuplicateServiceTypeType, dependsOn: ("hello", ">=1.0.0")));
+        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "copycat-dependant", dependsOn: ("copycat", ">=1.0.0")));
+
+        var (result, services) = await ConfigureAsync();
+
+        AssertRefused(result, "copycat", HostReasonCodes.ContributionInvalid);
+        AssertRefused(result, "copycat-dependant", HostReasonCodes.Dependency);
+        Assert.Equal(["hello"], result.ServiceTypes.Select(t => t.PluginId));
+        Assert.DoesNotContain(services, s => s.ImplementationInstance?.GetType().GetProperty("Text")?.GetValue(s.ImplementationInstance) is "must not be registered");
+        Assert.Contains(_scenario.Audit.Events, e => e.Action == "plugin.refused" && e.Target == "copycat" && e.Detail == HostReasonCodes.ContributionInvalid);
+    }
+
+    [Theory]
+    [InlineData("id")]
+    [InlineData("label")]
+    [InlineData("port")]
+    [InlineData("version")]
+    [InlineData("key")]
+    [InlineData("twice")]
+    [InlineData("length")]
+    [InlineData("range")]
+    [InlineData("choices")]
+    public async Task A_plugin_contributing_an_invalid_service_type_is_refused_and_registers_nothing(string rule)
+    {
+        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "broken", entryType: TestPlugins.InvalidServiceTypeType));
+
+        var (result, services) = await ConfigureAsync(("Plugins:Settings:broken:Break", rule));
+
+        AssertRefused(result, "broken", HostReasonCodes.ContributionInvalid);
+        Assert.Empty(result.ServiceTypes);
+        Assert.Empty(services);
+    }
+
+    [Fact]
+    public async Task A_plugin_whose_contribute_throws_is_refused_and_registers_nothing()
+    {
+        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, entryType: TestPlugins.ThrowingContributeType));
+
+        var (result, services) = await ConfigureAsync();
+
+        AssertRefused(result, "hello", HostReasonCodes.LoadFailed);
+        Assert.Empty(services);
+    }
+
+    private async Task<(PluginHostResult Result, ServiceCollection Services)> ConfigureAsync(params (string Key, string Value)[] settings)
+    {
+        var host = _scenario.Host();
+        var result = await host.LoadAsync(TestContext.Current.CancellationToken);
+        var services = new ServiceCollection();
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(settings.Select(s => new KeyValuePair<string, string?>(s.Key, s.Value)))
+            .Build();
+        await host.ConfigureServicesAsync(result, services, configuration, TestContext.Current.CancellationToken);
+        return (result, services);
+    }
+
     // ---- Dependencies (§5.6) ----
 
     [Fact]

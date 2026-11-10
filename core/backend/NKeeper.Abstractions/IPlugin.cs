@@ -23,6 +23,14 @@ public sealed record PluginContext(string Id, string Version, IConfiguration Con
 /// </remarks>
 public interface IPlugin
 {
+    /// <summary>
+    /// Declares what the plugin adds to core's catalogues, such as service types (SDK 0.1.2). Called once,
+    /// before <see cref="ConfigureServices"/>. A plugin whose contributions break a rule is refused.
+    /// </summary>
+    void Contribute(IPluginContributions contributions, PluginContext context)
+    {
+    }
+
     /// <summary>Registers the plugin's services. Called once, before the application is built.</summary>
     void ConfigureServices(IServiceCollection services, PluginContext context);
 

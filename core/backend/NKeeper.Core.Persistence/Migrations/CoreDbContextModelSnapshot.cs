@@ -490,6 +490,59 @@ namespace NKeeper.Core.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("NKeeper.Core.Persistence.HostService", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Address")
+                        .HasMaxLength(253)
+                        .HasColumnType("character varying(253)")
+                        .HasColumnName("address");
+
+                    b.Property<Guid>("HostId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("host_id");
+
+                    b.Property<string>("Label")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("label");
+
+                    b.Property<int?>("Port")
+                        .HasColumnType("integer")
+                        .HasColumnName("port");
+
+                    b.Property<int>("Position")
+                        .HasColumnType("integer")
+                        .HasColumnName("position");
+
+                    b.Property<string>("Settings")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("settings");
+
+                    b.Property<int>("SettingsVersion")
+                        .HasColumnType("integer")
+                        .HasColumnName("settings_version");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("type");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("HostId");
+
+                    b.HasIndex("Type");
+
+                    b.ToTable("host_services", "core");
+                });
+
             modelBuilder.Entity("NKeeper.Core.Persistence.HostTag", b =>
                 {
                     b.Property<Guid>("Id")
@@ -654,6 +707,15 @@ namespace NKeeper.Core.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("NKeeper.Core.Persistence.HostService", b =>
+                {
+                    b.HasOne("NKeeper.Core.Persistence.Host", null)
+                        .WithMany("Services")
+                        .HasForeignKey("HostId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("NKeeper.Core.Persistence.HostTag", b =>
                 {
                     b.HasOne("NKeeper.Core.Persistence.Host", null)
@@ -665,6 +727,8 @@ namespace NKeeper.Core.Persistence.Migrations
 
             modelBuilder.Entity("NKeeper.Core.Persistence.Host", b =>
                 {
+                    b.Navigation("Services");
+
                     b.Navigation("Tags");
                 });
 #pragma warning restore 612, 618

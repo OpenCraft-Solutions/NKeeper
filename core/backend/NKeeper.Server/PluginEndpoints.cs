@@ -1,16 +1,17 @@
 using Microsoft.Net.Http.Headers;
+using NKeeper.Abstractions;
 using NKeeper.Plugins.Host;
 using NKeeper.Plugins.Packaging;
 
 namespace NKeeper.Server;
 
 /// <summary>
-/// One plugin in <c>GET /api/plugins</c>. Until identity arrives (Phase 1) the endpoint is unauthenticated,
-/// so it carries no free-text messages, which can name server paths; administrators see those in the
-/// logs and audit trail meanwhile.
+/// One plugin in <c>GET /api/plugins</c>, which any signed-in user may read. So it carries no free-text
+/// messages, which can name server paths; administrators see those in the logs and audit trail.
 /// </summary>
 /// <param name="FrontendEntry">The URL of the frontend entry module, for a loaded plugin that has a frontend.</param>
 /// <param name="FrontendEntrySha256">The entry module's SHA-256, for checking it if browsers gain module integrity for import().</param>
+/// <param name="ServiceTypes">For a loaded plugin, the service types it contributed (docs/architecture.md §7.4).</param>
 public sealed record PluginStatusResponse(
     string Id,
     string? Version,
@@ -20,7 +21,38 @@ public sealed record PluginStatusResponse(
     string? PackageSha256,
     string? KeyId,
     string? FrontendEntry = null,
-    string? FrontendEntrySha256 = null);
+    string? FrontendEntrySha256 = null,
+    IReadOnlyList<ServiceTypeResponse>? ServiceTypes = null);
+
+/// <summary>A service type, with the schema the shell draws a service's settings form from.</summary>
+public sealed record ServiceTypeResponse(string Id, string Label, int? DefaultPort, int SettingsVersion, IReadOnlyList<ServiceSettingResponse> Settings)
+{
+    public static ServiceTypeResponse From(ServiceType type) =>
+        new(type.Id, type.Label, type.DefaultPort, type.SettingsVersion, [.. type.Settings.Select(ServiceSettingResponse.From)]);
+}
+
+/// <param name="Choices">For a choice, its values; otherwise null.</param>
+public sealed record ServiceSettingResponse(
+    string Key,
+    string Label,
+    ServiceSettingKind Kind,
+    bool Required,
+    int? MaxLength,
+    long? Minimum,
+    long? Maximum,
+    IReadOnlyList<string>? Choices)
+{
+    public static ServiceSettingResponse From(ServiceSetting setting) =>
+        new(
+            setting.Key,
+            setting.Label,
+            setting.Kind,
+            setting.Required,
+            setting.MaxLength,
+            setting.Minimum,
+            setting.Maximum,
+            setting.Kind == ServiceSettingKind.Choice ? setting.Choices : null);
+}
 
 internal static class PluginEndpoints
 {
@@ -65,7 +97,8 @@ internal static class PluginEndpoints
                     s.PackageSha256,
                     s.KeyId,
                     entry is null || s.PackageSha256 is null ? null : FrontendBase(loaded!, s.PackageSha256) + EscapePath(entry[PackageFormat.FrontendFolder.Length..]),
-                    entry is null ? null : Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(loaded!.Files[entry].Span)));
+                    entry is null ? null : Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(loaded!.Files[entry].Span)),
+                    loaded is null ? null : [.. plugins.ServiceTypes.Where(t => t.PluginId == s.Id).Select(t => ServiceTypeResponse.From(t.Type))]);
             })
             .ToList());
 

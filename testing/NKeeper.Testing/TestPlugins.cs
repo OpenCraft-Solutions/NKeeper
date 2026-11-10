@@ -11,6 +11,9 @@ public static class TestPlugins
     public const string NotAPluginType = "NKeeper.TestPlugins.Hello.NotAPlugin";
     public const string ThrowingConstructorType = "NKeeper.TestPlugins.Hello.ThrowingConstructorPlugin";
     public const string ThrowingConfigureType = "NKeeper.TestPlugins.Hello.ThrowingConfigurePlugin";
+    public const string ThrowingContributeType = "NKeeper.TestPlugins.Hello.ThrowingContributePlugin";
+    public const string DuplicateServiceTypeType = "NKeeper.TestPlugins.Hello.DuplicateServiceTypePlugin";
+    public const string InvalidServiceTypeType = "NKeeper.TestPlugins.Hello.InvalidServiceTypePlugin";
     public const string EntryAssembly = "backend/NKeeper.TestPlugins.Hello.dll";
     public const string FrontendEntry = "frontend/index.js";
 
@@ -29,7 +32,7 @@ public static class TestPlugins
         string version = "1.0.0",
         bool builtIn = true,
         string entryType = HelloType,
-        string sdk = ">=0.1.1 <0.2.0",
+        string sdk = ">=0.1.2 <0.2.0",
         IReadOnlyDictionary<string, byte[]>? frontend = null,
         string frontendEntry = FrontendEntry,
         params (string Id, string Range)[] dependsOn)

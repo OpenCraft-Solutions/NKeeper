@@ -72,7 +72,7 @@ await pluginHost.ConfigureServicesAsync(plugins, builder.Services, builder.Confi
 
 // Core's services are registered after the plugins', so a plugin can't replace them.
 builder.Services.AddNKeeperIdentity(builder.Configuration, connectionString, keyRing);
-builder.Services.AddNKeeperInventory();
+builder.Services.AddNKeeperInventory(plugins.ServiceTypes.Select(t => t.Type));
 builder.Services.AddSingleton(plugins);
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.ConfigureHttpJsonOptions(options =>
