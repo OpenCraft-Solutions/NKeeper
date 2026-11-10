@@ -27,7 +27,7 @@ Implementation details that don't contradict the documents don't need a doc chan
 
 - Core must never refer to a specific service type, plugin or product.
 - A plugin may depend only on `NKeeper.Abstractions` (the SDK) and on plugins listed in its manifest. It never depends on core internals.
-- Plugins get hosts and credentials only through the core services that enforce access (`IHostDirectory`, `ICredentialResolver`, host-scoped endpoints). Never through the database directly.
+- Plugins get hosts only through the core services that enforce access (`IHostDirectory`, host-scoped endpoints), never through the database directly. They use credentials through handles from `ICredentialBroker`, without seeing the secret ([v2-plan.md §4.6](docs/v2-plan.md#46-credentials-core-uses-them-plugins-dont-see-them)).
 
 ### Tests
 

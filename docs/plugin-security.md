@@ -26,6 +26,7 @@ NKeeper loads plugins at run time from signed packages. A plugin runs **inside**
 | Take over an NKeeper administrator account | Can enable or disable plugins root already installed, and nothing more. Every change is audited. (§9) |
 | Craft a malicious ZIP (path traversal, duplicate entries, decompression bombs) | Strict package parser with limits, applied to every entry, the signature metadata included, before anything is decompressed or authenticated. Paths are normalized and validated before use. (§5.2) |
 | Swap files between verification and loading | Not possible: verification and loading use the same in-memory bytes. (§7) |
+| Learn a credential through a plugin's mistake (a log line, an error message, a serialized object) | Plugins use credentials without seeing them. Core authenticates the connection, or writes the secret onto the wire itself. Plaintext release is declared in the manifest and audited. (§12) |
 | Get a signed package that is itself malicious (a trusted publisher goes bad) | Out of scope for in-process loading, so only trust keys you would trust with the vault. Key scoping limits the damage, and keys and packages can be revoked. (§6.3) |
 | Root on the NKeeper server | Out of scope. Root can replace NKeeper itself. |
 
@@ -309,3 +310,58 @@ Every refusal path has a test that builds a real package and expects that exact 
   - running as root in production.
 - **Frontend:** the served Content Security Policy allows the import map by its hash, and blocks any other inline script.
 - **Positive paths:** a valid package loads; disabled stays unloaded; an update with the same key loads and is audited.
+
+## 12. Credentials
+
+Decision D13 ([v2-plan.md §4.6](v2-plan.md#46-credentials-core-uses-them-plugins-dont-see-them)): a plugin uses credentials without seeing them. Phase 1 builds the first tier for SSH. The other tiers are built with their first users, to these rules.
+
+### 12.1 Handles
+
+- `ICredentialBroker` resolves the credential for one service of a host, from a `HostContext` the endpoint already holds. It applies the same rules as 1.x: per-service scoping, prompts, sign-in pass-through, and services that take no login. It returns a **credential handle**.
+- A handle is opaque: 128 random bits, with nothing derivable from it. Core keeps what it refers to.
+- A handle is bound to:
+  - the user, host and service it was resolved for;
+  - the plugin it was issued to, through that plugin's own instance of the broker;
+  - its lifetime: the request that obtained it, or the plugin session (a terminal, say) that request opened, when the plugin ties it to one. It expires when that lifetime ends, when the user signs out, and when the user's access to the host changes.
+- Core refuses a handle used outside any of these bindings, and audits the refusal as `credential.denied`.
+- Handles are never written to the database, and never sent to the browser.
+
+### 12.2 Prompted secrets
+
+- The credential prompt is a core component in `@nkeeper/sdk`. It posts to a core endpoint, never to a plugin's.
+- Core holds the typed secret in memory only, in the user's auth session. It is never persisted.
+- The browser gets back a **prompt reference**, not a handle. A prompt reference is:
+  - opaque and single-use;
+  - bound to the user's auth session, the host and the service;
+  - short-lived: it expires after 2 minutes if unused.
+- The browser passes the prompt reference to the plugin's endpoint. That endpoint gives it to the broker, which exchanges it, once, for a handle bound to the plugin and to the request or the session it opens. The secret moves from the prompt reference to the handle, never through the plugin.
+- An unused prompt reference, and its secret, are dropped when it expires, and at sign-out.
+
+### 12.3 Using a handle
+
+1. **Authenticated connection.** Core opens the connection, checks the host key or certificate against the trust store, authenticates, and returns the connected object:
+   - `IConnectivity.OpenSshAsync` (exec, shell, SFTP, forwards, through jump hosts);
+   - an authenticated `HttpClient`. Core's handler sends a **private copy** of each request with the credential added, and the plugin's own request is never changed. The response the plugin gets refers back to the plugin's request (`RequestMessage`), so neither carries the credential. Redirects to another origin don't keep it, and error messages are built without it;
+   - later, a database connection opened by core with `Persist Security Info=false`.
+2. **Secret on the wire.** The plugin builds the outgoing message with a typed placeholder, not a string. Core's writer replaces the placeholder with the secret as it writes to the socket. The message the plugin holds, logs or keeps never contains it.
+3. **Released plaintext** (a last resort). Rules:
+   - Only a plugin whose manifest declares it may ask. The declaration is added to the manifest format with the first plugin that needs it; until then, no plugin can obtain a plaintext secret.
+   - The declaration is shown on the plugins page and in `GET /api/plugins`, before an administrator enables the plugin.
+   - Each release is audited as `credential.reveal`, with the plugin, user, host and service.
+   - The secret is returned in a buffer the plugin clears once it's done.
+
+Inside core, a secret is a type that prints as `***` and refuses to be serialized. Tests check that no secret appears in log output, responses, audit events or exception messages.
+
+### 12.4 What this protects against, and what it doesn't
+
+It protects against a plugin's **mistakes**: a secret logged, serialized, echoed in an error, or kept longer than needed. It keeps the choice of credential, its scoping and its audit in one place.
+
+It does **not** contain a malicious plugin running in process. Such a plugin can read anything in the server's memory, the vault's keys included (§2). Against that, the defences are signing and trust (§5, §6) and, for untrusted code, running it out of process (Phase 8), where only handles would ever cross the boundary.
+
+### 12.5 Tests (with each tier)
+
+- A handle used by another user, for another host or service, by another plugin, after it expired, or after access to the host was revoked: refused and audited.
+- A prompt reference works once, only for its own auth session, host and service, and not after it expires or after sign-out. Its secret never reaches a plugin endpoint.
+- No secret appears in captured logs, API responses, audit events or exception messages, across the SSH paths (password, private key and passphrase, jump host).
+- With the authenticated `HttpClient`: the credential is absent from the plugin's request, from `response.RequestMessage`, from logged HTTP requests and responses, from error messages, and from a redirect to another origin.
+- A plugin without the declaration can't obtain a plaintext secret (from the third tier on).
