@@ -413,6 +413,18 @@ namespace NKeeper.Core.Persistence.Migrations
                         .HasColumnType("character varying(45)")
                         .HasColumnName("ip_address");
 
+                    b.Property<Guid?>("JumpCredentialId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("jump_credential_id");
+
+                    b.Property<Guid?>("JumpHostId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("jump_host_id");
+
+                    b.Property<Guid?>("JumpServiceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("jump_service_id");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -434,6 +446,12 @@ namespace NKeeper.Core.Persistence.Migrations
                         .HasColumnName("xmin");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("JumpCredentialId");
+
+                    b.HasIndex("JumpHostId");
+
+                    b.HasIndex("JumpServiceId");
 
                     b.HasIndex("Name");
 
@@ -629,6 +647,63 @@ namespace NKeeper.Core.Persistence.Migrations
                     b.ToTable("host_tags", "core");
                 });
 
+            modelBuilder.Entity("NKeeper.Core.Persistence.HostTrustedKey", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Address")
+                        .IsRequired()
+                        .HasMaxLength(253)
+                        .HasColumnType("character varying(253)")
+                        .HasColumnName("address");
+
+                    b.Property<string>("Algorithm")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("algorithm");
+
+                    b.Property<string>("Fingerprint")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("fingerprint");
+
+                    b.Property<Guid>("HostId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("host_id");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("kind");
+
+                    b.Property<int>("Port")
+                        .HasColumnType("integer")
+                        .HasColumnName("port");
+
+                    b.Property<DateTimeOffset>("TrustedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("trusted_at_utc");
+
+                    b.Property<Guid?>("TrustedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("trusted_by_user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TrustedByUserId");
+
+                    b.HasIndex("HostId", "Kind", "Address", "Port", "Algorithm")
+                        .IsUnique();
+
+                    b.ToTable("host_trusted_keys", "core");
+                });
+
             modelBuilder.Entity("NKeeper.Core.Persistence.InstalledPlugin", b =>
                 {
                     b.Property<string>("Id")
@@ -746,6 +821,24 @@ namespace NKeeper.Core.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("NKeeper.Core.Persistence.Host", b =>
+                {
+                    b.HasOne("NKeeper.Core.Persistence.HostCredential", null)
+                        .WithMany()
+                        .HasForeignKey("JumpCredentialId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("NKeeper.Core.Persistence.Host", null)
+                        .WithMany()
+                        .HasForeignKey("JumpHostId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("NKeeper.Core.Persistence.HostService", null)
+                        .WithMany()
+                        .HasForeignKey("JumpServiceId")
+                        .OnDelete(DeleteBehavior.SetNull);
+                });
+
             modelBuilder.Entity("NKeeper.Core.Persistence.HostAccessGrant", b =>
                 {
                     b.HasOne("NKeeper.Core.Persistence.Host", null)
@@ -787,6 +880,20 @@ namespace NKeeper.Core.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("NKeeper.Core.Persistence.HostTrustedKey", b =>
+                {
+                    b.HasOne("NKeeper.Core.Persistence.Host", null)
+                        .WithMany("TrustedKeys")
+                        .HasForeignKey("HostId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("NKeeper.Core.Persistence.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("TrustedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+                });
+
             modelBuilder.Entity("NKeeper.Core.Persistence.Host", b =>
                 {
                     b.Navigation("Credentials");
@@ -794,6 +901,8 @@ namespace NKeeper.Core.Persistence.Migrations
                     b.Navigation("Services");
 
                     b.Navigation("Tags");
+
+                    b.Navigation("TrustedKeys");
                 });
 #pragma warning restore 612, 618
         }

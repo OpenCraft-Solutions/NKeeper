@@ -32,6 +32,20 @@ public sealed class Host
     /// <summary>In <see cref="HostCredential.Position"/> order once loaded through the inventory.</summary>
     public List<HostCredential> Credentials { get; set; } = [];
 
+    /// <summary>
+    /// The host this one is reached through (docs/architecture.md §7.8). It can't have a jump host of its own.
+    /// Cleared when it's deleted.
+    /// </summary>
+    public Guid? JumpHostId { get; set; }
+
+    /// <summary>The jump host's service to connect to it on. Null once that service is removed.</summary>
+    public Guid? JumpServiceId { get; set; }
+
+    /// <summary>The jump host's credential to sign in to it with. Null once that credential is removed.</summary>
+    public Guid? JumpCredentialId { get; set; }
+
+    public List<HostTrustedKey> TrustedKeys { get; set; } = [];
+
     public DateTimeOffset CreatedAtUtc { get; set; }
 
     public DateTimeOffset UpdatedAtUtc { get; set; }
@@ -166,4 +180,42 @@ public enum HostAccessLevel
 
     /// <summary>Also change and delete it.</summary>
     Manage,
+}
+
+/// <summary>What kind of identity a trusted key is (docs/architecture.md §7.7).</summary>
+public enum TrustedKeyKind
+{
+    /// <summary>An SSH server's host key.</summary>
+    SshHostKey,
+}
+
+/// <summary>
+/// A server identity a user chose to trust (docs/architecture.md §7.7): one per host, kind, endpoint, port
+/// and algorithm.
+/// </summary>
+public sealed class HostTrustedKey
+{
+    public const int AlgorithmMaxLength = 64;
+    public const int FingerprintMaxLength = 128;
+
+    public Guid Id { get; set; }
+
+    public Guid HostId { get; set; }
+
+    public TrustedKeyKind Kind { get; set; }
+
+    /// <summary>The service's own address it was trusted for; empty for the host itself.</summary>
+    public string Address { get; set; } = string.Empty;
+
+    public int Port { get; set; }
+
+    /// <summary>For an SSH host key, its algorithm, e.g. <c>ssh-ed25519</c>.</summary>
+    public string Algorithm { get; set; } = string.Empty;
+
+    /// <summary>SHA-256, as unpadded base64 the way OpenSSH prints it (without <c>SHA256:</c>).</summary>
+    public string Fingerprint { get; set; } = string.Empty;
+
+    public DateTimeOffset TrustedAtUtc { get; set; }
+
+    public Guid? TrustedByUserId { get; set; }
 }

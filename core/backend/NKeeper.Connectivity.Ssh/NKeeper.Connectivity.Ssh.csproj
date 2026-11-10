@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Connectivity (docs/architecture.md §7.9): SSH connections core opens and authenticates for plugins,
+    checked against the trust store, through jump hosts. Infrastructure: no endpoints, no service type.
+  -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="SSH.NET" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NKeeper.Abstractions\NKeeper.Abstractions.csproj" />
+    <ProjectReference Include="..\NKeeper.Core\NKeeper.Core.csproj" />
+  </ItemGroup>
+
+</Project>

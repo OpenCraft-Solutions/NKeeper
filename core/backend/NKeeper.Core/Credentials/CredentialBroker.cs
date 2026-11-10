@@ -70,7 +70,15 @@ public sealed class CredentialBroker(
             : Issue(caller, host, serviceId, material);
     }
 
-    public async Task<CredentialDescription> DescribeAsync(HostContext host, Guid serviceId, CredentialHandle handle, CancellationToken cancellationToken = default)
+    public async Task<CredentialDescription> DescribeAsync(HostContext host, Guid serviceId, CredentialHandle handle, CancellationToken cancellationToken = default) =>
+        (await UseAsync(host, serviceId, handle, cancellationToken)).Entry.Material.Describe();
+
+    /// <summary>
+    /// Checks a handle for a use: called from a plugin's endpoint, with this request's host context, for one of
+    /// its services, and every binding of the handle matching (docs/architecture.md §7.6). Refusals are audited.
+    /// </summary>
+    /// <exception cref="CredentialDeniedException">Any check failed.</exception>
+    internal async Task<(string PluginId, Guid UserId, CredentialHandleEntry Entry)> UseAsync(HostContext host, Guid serviceId, CredentialHandle handle, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(handle);
         var caller = await AllowedAsync(host, serviceId, cancellationToken);
@@ -80,7 +88,7 @@ public sealed class CredentialBroker(
             && entry.ServiceId == serviceId
             && entry.PluginId == caller.PluginId
             && entry.RequestId == Tokens.RequestId(caller.Context)
-            ? entry.Material.Describe()
+            ? (caller.PluginId, caller.UserId, entry)
             : throw await DenyAsync(caller, host, serviceId, CredentialDenial.HandleInvalid, "This credential handle isn't valid here.", cancellationToken);
     }
 

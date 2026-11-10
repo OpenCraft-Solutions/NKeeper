@@ -83,6 +83,8 @@ public sealed class CoreDbContext(DbContextOptions<CoreDbContext> options)
 
     public DbSet<HostCredential> HostCredentials => Set<HostCredential>();
 
+    public DbSet<HostTrustedKey> HostTrustedKeys => Set<HostTrustedKey>();
+
     /// <summary>Configures Npgsql for the core context, with its migration history inside the core schema.</summary>
     public static DbContextOptions<CoreDbContext> CreateOptions(string connectionString)
     {
@@ -171,7 +173,25 @@ public sealed class CoreDbContext(DbContextOptions<CoreDbContext> options)
             host.HasMany(h => h.Tags).WithOne().HasForeignKey(t => t.HostId).OnDelete(DeleteBehavior.Cascade);
             host.HasMany(h => h.Services).WithOne().HasForeignKey(s => s.HostId).OnDelete(DeleteBehavior.Cascade);
             host.HasMany(h => h.Credentials).WithOne().HasForeignKey(c => c.HostId).OnDelete(DeleteBehavior.Cascade);
+            host.HasMany(h => h.TrustedKeys).WithOne().HasForeignKey(k => k.HostId).OnDelete(DeleteBehavior.Cascade);
             host.HasIndex(h => h.Name);
+
+            // Deleting the jump host, or its service or credential, clears the reference to it (§7.8).
+            host.HasOne<Host>().WithMany().HasForeignKey(h => h.JumpHostId).OnDelete(DeleteBehavior.SetNull);
+            host.HasOne<HostService>().WithMany().HasForeignKey(h => h.JumpServiceId).OnDelete(DeleteBehavior.SetNull);
+            host.HasOne<HostCredential>().WithMany().HasForeignKey(h => h.JumpCredentialId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        builder.Entity<HostTrustedKey>(key =>
+        {
+            key.ToTable("host_trusted_keys");
+            key.HasKey(k => k.Id);
+            key.Property(k => k.Kind).HasConversion<string>().HasMaxLength(32);
+            key.Property(k => k.Address).HasMaxLength(Host.HostnameMaxLength);
+            key.Property(k => k.Algorithm).HasMaxLength(HostTrustedKey.AlgorithmMaxLength);
+            key.Property(k => k.Fingerprint).HasMaxLength(HostTrustedKey.FingerprintMaxLength);
+            key.HasOne<ApplicationUser>().WithMany().HasForeignKey(k => k.TrustedByUserId).OnDelete(DeleteBehavior.SetNull);
+            key.HasIndex(k => new { k.HostId, k.Kind, k.Address, k.Port, k.Algorithm }).IsUnique();
         });
 
         builder.Entity<HostService>(service =>

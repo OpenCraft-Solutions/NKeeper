@@ -5,6 +5,7 @@ using NKeeper.Core.Access;
 using NKeeper.Core.Audit;
 using NKeeper.Core.Credentials;
 using NKeeper.Core.Persistence;
+using NKeeper.Core.Trust;
 
 namespace NKeeper.Core.Inventory;
 
@@ -46,6 +47,15 @@ public sealed record HostCredentialResponse(
     string? Notes,
     IReadOnlyList<int>? ServiceIndexes);
 
+/// <summary>The host one is reached through (docs/architecture.md §7.8), with the service and credential to reach it with.</summary>
+/// <param name="ServiceId">Null in a response once the jump host's service was removed.</param>
+/// <param name="CredentialId">Null in a response once the jump host's credential was removed.</param>
+public sealed record HostJumpDto(Guid HostId, Guid? ServiceId, Guid? CredentialId);
+
+/// <summary>A server identity trusted for the host (docs/architecture.md §7.7).</summary>
+/// <param name="Address">The service's own address it was trusted for; null for the host itself.</param>
+public sealed record HostTrustedKeyResponse(Guid Id, string Kind, string? Address, int Port, string Algorithm, string Fingerprint, DateTimeOffset TrustedAtUtc);
+
 public sealed record HostResponse(
     Guid Id,
     string Name,
@@ -55,6 +65,8 @@ public sealed record HostResponse(
     IReadOnlyList<HostTagDto> Tags,
     IReadOnlyList<HostServiceResponse> Services,
     IReadOnlyList<HostCredentialResponse> Credentials,
+    HostJumpDto? Jump,
+    IReadOnlyList<HostTrustedKeyResponse> TrustedKeys,
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset UpdatedAtUtc,
     uint Version,
@@ -78,6 +90,9 @@ public sealed class HostRequest
 
     /// <summary>The host's credentials, in order. Replaces the list: credentials left out are deleted.</summary>
     public List<HostCredentialRequest>? Credentials { get; set; }
+
+    /// <summary>The host to reach this one through; null for none. Its service and credential are required.</summary>
+    public HostJumpDto? Jump { get; set; }
 
     /// <summary>Required to update: the version the edit is based on.</summary>
     public uint? Version { get; set; }
@@ -105,7 +120,7 @@ public sealed class HostInventory(CoreDbContext db, HostAccess access, ServiceTy
     /// </summary>
     public async Task<List<HostResponse>> ListAsync(RequestUser user, CancellationToken cancellationToken)
     {
-        var hosts = await access.Visible(user).AsNoTracking().Include(h => h.Tags).Include(h => h.Services).Include(h => h.Credentials)
+        var hosts = await access.Visible(user).AsNoTracking().Include(h => h.Tags).Include(h => h.Services).Include(h => h.Credentials).Include(h => h.TrustedKeys)
 #pragma warning disable CA1304, CA1311 // Runs as SQL: upper().
             .OrderBy(h => h.Name.ToUpper()).ThenBy(h => h.Id)
 #pragma warning restore CA1304, CA1311
@@ -118,7 +133,7 @@ public sealed class HostInventory(CoreDbContext db, HostAccess access, ServiceTy
     /// <returns>The host, or null when it doesn't exist or the user can't see it.</returns>
     public async Task<HostResponse?> GetAsync(Guid id, RequestUser user, CancellationToken cancellationToken)
     {
-        var host = await access.Visible(user).AsNoTracking().Include(h => h.Tags).Include(h => h.Services).Include(h => h.Credentials).AsSplitQuery()
+        var host = await access.Visible(user).AsNoTracking().Include(h => h.Tags).Include(h => h.Services).Include(h => h.Credentials).Include(h => h.TrustedKeys).AsSplitQuery()
             .FirstOrDefaultAsync(h => h.Id == id, cancellationToken);
         return host is null
             ? null
@@ -131,6 +146,7 @@ public sealed class HostInventory(CoreDbContext db, HostAccess access, ServiceTy
         var now = time.GetUtcNow();
         var host = new Host { Id = Guid.NewGuid(), CreatedAtUtc = now, CreatedByUserId = user.Id };
         Apply(host, request, user.Id, now);
+        await ApplyJumpAsync(host, request.Jump, user, cancellationToken);
         db.Hosts.Add(host);
         await db.SaveChangesAsync(cancellationToken);
         await audit.RecordAsync(new AuditEntry(AuditActions.HostCreate, host.Id.ToString(), host.Name), cancellationToken);
@@ -156,6 +172,7 @@ public sealed class HostInventory(CoreDbContext db, HostAccess access, ServiceTy
 
         db.Entry(host).Property(h => h.Version).OriginalValue = version;
         Apply(host, request, user.Id, time.GetUtcNow());
+        await ApplyJumpAsync(host, request.Jump, user, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         await audit.RecordAsync(new AuditEntry(AuditActions.HostUpdate, id.ToString(), host.Name), cancellationToken);
 
@@ -180,6 +197,80 @@ public sealed class HostInventory(CoreDbContext db, HostAccess access, ServiceTy
 
         await audit.RecordAsync(new AuditEntry(AuditActions.HostDelete, id.ToString(), name ?? string.Empty), cancellationToken);
         return true;
+    }
+
+    /// <summary>Forgets a trusted key (§7.7), so the next connection asks again.</summary>
+    /// <returns>False when the host or the key doesn't exist, or the user can't see the host.</returns>
+    /// <exception cref="HostManageDeniedException">The user can see the host but not change it.</exception>
+    public async Task<bool> RemoveTrustedKeyAsync(Guid hostId, Guid keyId, RequestUser user, CancellationToken cancellationToken)
+    {
+        if (!await RequireManageAsync(hostId, user, cancellationToken))
+        {
+            return false;
+        }
+
+        var key = await db.HostTrustedKeys.AsNoTracking().FirstOrDefaultAsync(k => k.Id == keyId && k.HostId == hostId, cancellationToken);
+        if (key is null || await db.HostTrustedKeys.Where(k => k.Id == keyId && k.HostId == hostId).ExecuteDeleteAsync(cancellationToken) == 0)
+        {
+            return false;
+        }
+
+        await audit.RecordAsync(
+            new AuditEntry(AuditActions.TrustRemove, hostId.ToString(), $"{key.Kind} {key.Algorithm} SHA256:{key.Fingerprint} at {Endpoint(key.Address)}:{key.Port}"),
+            cancellationToken);
+        return true;
+    }
+
+    /// <summary>How an audit detail names a trusted key's endpoint.</summary>
+    internal static string Endpoint(string address) => address.Length == 0 ? "the host" : address;
+
+    /// <summary>
+    /// Sets or clears the jump host (§7.8). A jump that's sent unchanged isn't checked again, so an edit by
+    /// someone who can't see the jump host, or after its service or credential was removed, keeps it.
+    /// </summary>
+    private async Task ApplyJumpAsync(Host host, HostJumpDto? jump, RequestUser user, CancellationToken cancellationToken)
+    {
+        if (jump is null)
+        {
+            host.JumpHostId = host.JumpServiceId = host.JumpCredentialId = null;
+            return;
+        }
+
+        if (jump.HostId == host.JumpHostId && jump.ServiceId == host.JumpServiceId && jump.CredentialId == host.JumpCredentialId)
+        {
+            return;
+        }
+
+        if (jump.HostId == host.Id)
+        {
+            throw new InventoryValidationException("jump.hostId", "A host can't be its own jump host.");
+        }
+
+        var target = await access.Visible(user).AsNoTracking().Include(h => h.Services).Include(h => h.Credentials).AsSplitQuery()
+            .FirstOrDefaultAsync(h => h.Id == jump.HostId, cancellationToken)
+            ?? throw new InventoryValidationException("jump.hostId", "Choose a jump host you can use.");
+        if (target.JumpHostId is not null)
+        {
+            throw new InventoryValidationException("jump.hostId", $"“{target.Name}” is reached through a jump host itself, and jump hosts can't be chained.");
+        }
+
+        if (await db.Hosts.AnyAsync(h => h.JumpHostId == host.Id, cancellationToken))
+        {
+            throw new InventoryValidationException("jump.hostId", "Other hosts are reached through this one, so it can't have a jump host itself.");
+        }
+
+        var service = target.Services.FirstOrDefault(s => s.Id == jump.ServiceId)
+            ?? throw new InventoryValidationException("jump.serviceId", $"Choose one of “{target.Name}”'s services to reach it on.");
+        var credential = target.Credentials.FirstOrDefault(c => c.Id == jump.CredentialId)
+            ?? throw new InventoryValidationException("jump.credentialId", $"Choose one of “{target.Name}”'s credentials to sign in to it with.");
+        if (credential.ServiceIds is { } scope && !scope.Contains(service.Id))
+        {
+            throw new InventoryValidationException("jump.credentialId", "This credential isn't used with that service. Edit the jump host to use it with that service too.");
+        }
+
+        host.JumpHostId = target.Id;
+        host.JumpServiceId = service.Id;
+        host.JumpCredentialId = credential.Id;
     }
 
     /// <returns>False when the host isn't visible; throws when it's visible but can't be changed.</returns>
@@ -513,6 +604,11 @@ public sealed class HostInventory(CoreDbContext db, HostAccess access, ServiceTy
                 return new HostServiceResponse(s.Id, s.Type, s.Label, s.Port, s.Address, settings, type is not null);
             })],
             [.. host.Credentials.OrderBy(c => c.Position).Select(c => ToResponse(c, services))],
+            host.JumpHostId is { } jumpHostId ? new HostJumpDto(jumpHostId, host.JumpServiceId, host.JumpCredentialId) : null,
+            [.. host.TrustedKeys
+                .OrderBy(k => k.Address, StringComparer.Ordinal).ThenBy(k => k.Port).ThenBy(k => k.Algorithm, StringComparer.Ordinal)
+                .Select(k => new HostTrustedKeyResponse(
+                    k.Id, TrustStore.KindName(k.Kind), k.Address.Length == 0 ? null : k.Address, k.Port, k.Algorithm, k.Fingerprint, k.TrustedAtUtc))],
             host.CreatedAtUtc,
             host.UpdatedAtUtc,
             host.Version,

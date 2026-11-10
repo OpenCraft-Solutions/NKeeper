@@ -107,6 +107,56 @@ public sealed class HelloPlugin : IPlugin
                 return Results.Text($"denied {ex.Reason}", statusCode: StatusCodes.Status403Forbidden);
             }
         });
+        // Opens an SSH connection through core (SDK 0.1.4): runs a command, or a shell.
+        use.MapPost("/ssh", async (HostContext host, SshProbe? probe, ICredentialBroker broker, IConnectivity connectivity) =>
+        {
+            if (probe is null)
+            {
+                return Results.Text("no probe");
+            }
+
+            try
+            {
+                var handle = probe.PromptReference is { } reference
+                    ? await broker.ResolvePromptAsync(host, probe.ServiceId, reference)
+                    : await broker.ResolveSavedAsync(host, probe.ServiceId, probe.CredentialId ?? Guid.Empty);
+                await using var ssh = await connectivity.OpenSshAsync(host, probe.ServiceId, handle);
+                if (!probe.Shell)
+                {
+                    var result = await ssh.RunAsync(probe.Command ?? "true");
+                    return Results.Json(new { exitStatus = result.ExitStatus, output = result.Output, error = result.Error });
+                }
+
+                await using var shell = await ssh.OpenShellAsync(new SshTerminal(Columns: 100, Rows: 30));
+                shell.Resize(120, 40);
+                await shell.Stream.WriteAsync(System.Text.Encoding.UTF8.GetBytes((probe.Command ?? "true") + "\n"));
+                await shell.Stream.FlushAsync();
+                var output = new System.Text.StringBuilder();
+                var buffer = new byte[4096];
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                while (!output.ToString().Contains(probe.Expect ?? string.Empty, StringComparison.Ordinal))
+                {
+                    var read = await shell.Stream.ReadAsync(buffer, timeout.Token);
+                    if (read == 0)
+                    {
+                        break;
+                    }
+
+                    output.Append(System.Text.Encoding.UTF8.GetString(buffer, 0, read));
+                }
+
+                return Results.Json(new { output = output.ToString() });
+            }
+            catch (SshConnectException ex)
+            {
+                return Results.Json(new { reason = ex.Reason.ToString(), message = ex.Message, presentedKey = ex.PresentedKey }, statusCode: StatusCodes.Status502BadGateway);
+            }
+            catch (CredentialDeniedException ex)
+            {
+                return Results.Text($"denied {ex.Reason}", statusCode: StatusCodes.Status403Forbidden);
+            }
+        });
+
         var manage = endpoints.MapHostGroup(HostPermission.Manage);
         manage.Map("/raw", context => context.Response.WriteAsync($"managing {context.GetHostContext().Name}"));
     }
@@ -124,6 +174,16 @@ public sealed record CredentialProbe(
     bool Stashed = false,
     bool Forged = false,
     bool Serialize = false);
+
+/// <summary>What the SSH endpoint is asked to do.</summary>
+/// <param name="Shell">Run <paramref name="Command"/> in a shell, and read until <paramref name="Expect"/> appears.</param>
+public sealed record SshProbe(
+    Guid ServiceId,
+    Guid? CredentialId = null,
+    string? PromptReference = null,
+    string? Command = null,
+    bool Shell = false,
+    string? Expect = null);
 
 /// <summary>Contributes the service type <c>hello</c> whatever its own ID: the host must refuse it when <c>hello</c> is taken.</summary>
 public sealed class DuplicateServiceTypePlugin : IPlugin

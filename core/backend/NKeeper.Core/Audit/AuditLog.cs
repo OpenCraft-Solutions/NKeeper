@@ -22,6 +22,10 @@ public static class AuditActions
     public const string HostUpdate = "host.update";
     public const string HostDelete = "host.delete";
     public const string CredentialDenied = "credential.denied";
+    public const string CredentialUse = "credential.use";
+    public const string TrustAdd = "trust.add";
+    public const string TrustRemove = "trust.remove";
+    public const string TrustMismatch = "trust.mismatch";
 }
 
 /// <summary>

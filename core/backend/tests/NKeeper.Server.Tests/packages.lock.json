@@ -558,15 +558,6 @@
         "resolved": "1.4.2",
         "contentHash": "yjj+3zgz8zgXpiiC3ZdF/iyTBbz2fFvMxZFEBPUcwZjIvXOf37Ylm+K58hqMfIBt5JgU/Z2uoUS67JmTLe973A=="
       },
-      "SSH.NET": {
-        "type": "Transitive",
-        "resolved": "2026.0.0",
-        "contentHash": "Yu9dirPq8l3oaat0+OQ7K0nUf5MmYltpia5UGqsApTG4zTPvBC1cxbNnC3NERij26dUST0A3Ef1QdHSn5ArbWQ==",
-        "dependencies": {
-          "BouncyCastle.Cryptography": "2.7.0",
-          "Microsoft.Extensions.Logging.Abstractions": "8.0.3"
-        }
-      },
       "System.Diagnostics.EventLog": {
         "type": "Transitive",
         "resolved": "10.0.13",
@@ -659,6 +650,14 @@
       "nkeeper.abstractions": {
         "type": "Project"
       },
+      "nkeeper.connectivity.ssh": {
+        "type": "Project",
+        "dependencies": {
+          "NKeeper.Abstractions": "[2.0.0-dev, )",
+          "NKeeper.Core": "[2.0.0-dev, )",
+          "SSH.NET": "[2026.0.0, )"
+        }
+      },
       "nkeeper.core": {
         "type": "Project",
         "dependencies": {
@@ -695,6 +694,7 @@
         "type": "Project",
         "dependencies": {
           "NKeeper.Abstractions": "[2.0.0-dev, )",
+          "NKeeper.Connectivity.Ssh": "[2.0.0-dev, )",
           "NKeeper.Core": "[2.0.0-dev, )",
           "NKeeper.Core.Persistence": "[2.0.0-dev, )",
           "NKeeper.Identity": "[2.0.0-dev, )",
@@ -764,6 +764,16 @@
           "Microsoft.EntityFrameworkCore": "[10.0.4, 11.0.0)",
           "Microsoft.EntityFrameworkCore.Relational": "[10.0.4, 11.0.0)",
           "Npgsql": "10.0.3"
+        }
+      },
+      "SSH.NET": {
+        "type": "CentralTransitive",
+        "requested": "[2026.0.0, )",
+        "resolved": "2026.0.0",
+        "contentHash": "Yu9dirPq8l3oaat0+OQ7K0nUf5MmYltpia5UGqsApTG4zTPvBC1cxbNnC3NERij26dUST0A3Ef1QdHSn5ArbWQ==",
+        "dependencies": {
+          "BouncyCastle.Cryptography": "2.7.0",
+          "Microsoft.Extensions.Logging.Abstractions": "8.0.3"
         }
       },
       "Testcontainers.PostgreSql": {
