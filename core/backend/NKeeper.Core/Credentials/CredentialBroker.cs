@@ -16,6 +16,15 @@ public sealed class PluginEndpointMetadata(string pluginId)
     public string PluginId { get; } = pluginId;
 }
 
+/// <summary>Marks core's stream session endpoint (docs/architecture.md §7.10). Not in the SDK.</summary>
+public sealed class SessionEndpointMetadata;
+
+/// <summary>On core's stream session endpoint: the plugin whose session type is being opened.</summary>
+public sealed class SessionPluginFeature(string pluginId)
+{
+    public string PluginId { get; } = pluginId;
+}
+
 /// <summary>Reads the current auth session's key. Identity provides it; core can't depend on Identity.</summary>
 public interface IAuthSessionAccessor
 {
@@ -99,7 +108,7 @@ public sealed class CredentialBroker(
     {
         ArgumentNullException.ThrowIfNull(host);
         var context = http.HttpContext;
-        var plugin = context?.GetEndpoint()?.Metadata.GetMetadata<PluginEndpointMetadata>()?.PluginId;
+        var plugin = CallerPlugin(context);
         var userId = Guid.TryParse(context?.User.FindFirstValue(ClaimTypes.NameIdentifier), out var id) ? id : (Guid?)null;
         var caller = new Caller(context!, plugin ?? string.Empty, userId ?? Guid.Empty);
 
@@ -115,6 +124,17 @@ public sealed class CredentialBroker(
         }
 
         return caller;
+    }
+
+    /// <summary>
+    /// The plugin this request acts for: a plugin's own endpoint names it in core's metadata, and core's stream
+    /// session endpoint (§7.10) in a feature it sets for the session type's plugin. Nothing a plugin says counts.
+    /// </summary>
+    private static string? CallerPlugin(HttpContext? context)
+    {
+        var metadata = context?.GetEndpoint()?.Metadata;
+        return metadata?.GetMetadata<PluginEndpointMetadata>()?.PluginId
+            ?? (metadata?.GetMetadata<SessionEndpointMetadata>() is null ? null : context!.Features.Get<SessionPluginFeature>()?.PluginId);
     }
 
     private async Task<CredentialDeniedException> DenyAsync(Caller caller, HostContext host, Guid serviceId, CredentialDenial reason, string message, CancellationToken cancellationToken)

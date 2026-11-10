@@ -51,28 +51,35 @@ public sealed class HostScopeMiddleware(RequestDelegate next)
             return;
         }
 
-        var host = await db.Hosts.AsNoTracking().Include(h => h.Tags).Include(h => h.Services).AsSplitQuery()
-            .FirstOrDefaultAsync(h => h.Id == hostId, context.RequestAborted);
-        if (host is null)
+        if (await LoadAsync(db, serviceTypes, hostId, permission, context.RequestAborted) is not { } host)
         {
             // Deleted since the check.
             await Results.Problem(statusCode: StatusCodes.Status404NotFound, title: "Not found").ExecuteAsync(context);
             return;
         }
 
-        context.Features.Set(new HostContext(
-            host.Id,
-            host.Name,
-            host.Hostname,
-            host.IpAddress,
-            [.. host.Tags.OrderBy(t => t.Name, StringComparer.OrdinalIgnoreCase).Select(t => new Abstractions.HostTag(t.Name, t.Value.Length == 0 ? null : t.Value))],
-            permission == Access.HostPermission.Manage ? Abstractions.HostPermission.Manage : Abstractions.HostPermission.Use)
-        {
-            Services = [.. host.Services.OrderBy(s => s.Position).Select(s => ServiceFor(host, s, serviceTypes))],
-        });
+        context.Features.Set(host);
         await next(context);
     }
 
+    /// <summary>The host as plugins see it, for a user with <paramref name="permission"/> on it; null when it's gone.</summary>
+    public static async Task<HostContext?> LoadAsync(CoreDbContext db, ServiceTypeCatalog serviceTypes, Guid hostId, Access.HostPermission permission, CancellationToken cancellationToken)
+    {
+        var host = await db.Hosts.AsNoTracking().Include(h => h.Tags).Include(h => h.Services).AsSplitQuery()
+            .FirstOrDefaultAsync(h => h.Id == hostId, cancellationToken);
+        return host is null
+            ? null
+            : new HostContext(
+                host.Id,
+                host.Name,
+                host.Hostname,
+                host.IpAddress,
+                [.. host.Tags.OrderBy(t => t.Name, StringComparer.OrdinalIgnoreCase).Select(t => new Abstractions.HostTag(t.Name, t.Value.Length == 0 ? null : t.Value))],
+                permission == Access.HostPermission.Manage ? Abstractions.HostPermission.Manage : Abstractions.HostPermission.Use)
+            {
+                Services = [.. host.Services.OrderBy(s => s.Position).Select(s => ServiceFor(host, s, serviceTypes))],
+            };
+    }
     /// <summary>A service as plugins see it: the defaults applied, and the settings in the type's current version.</summary>
     private static Abstractions.HostService ServiceFor(Host host, Persistence.HostService service, ServiceTypeCatalog serviceTypes)
     {

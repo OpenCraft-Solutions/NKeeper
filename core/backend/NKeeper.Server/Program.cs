@@ -6,6 +6,7 @@ using NKeeper.Abstractions;
 using NKeeper.Connectivity.Ssh;
 using NKeeper.Core.Inventory;
 using NKeeper.Core.Persistence;
+using NKeeper.Core.Sessions;
 using NKeeper.Identity;
 using NKeeper.Plugins.Host;
 using NKeeper.Plugins.Packaging;
@@ -75,6 +76,7 @@ await pluginHost.ConfigureServicesAsync(plugins, builder.Services, builder.Confi
 builder.Services.AddNKeeperIdentity(builder.Configuration, connectionString, keyRing);
 builder.Services.AddNKeeperInventory(plugins.ServiceTypes.Select(t => t.Type));
 builder.Services.AddNKeeperSshConnectivity();
+builder.Services.AddNKeeperSessions(plugins.SessionTypes.Select(t => (t.PluginId, t.Type)));
 builder.Services.AddSingleton(plugins);
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.ConfigureHttpJsonOptions(options =>
@@ -91,6 +93,7 @@ if (shell is not null)
     app.UseShell(shell);
 }
 
+app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = StreamSessionEndpoints.KeepAliveInterval });
 app.UseNKeeperIdentity();
 app.UseMiddleware<NKeeper.Core.Access.HostScopeMiddleware>();
 
@@ -102,6 +105,7 @@ var api = app.MapGroup("/api");
 api.MapAuthEndpoints();
 api.MapUserEndpoints();
 api.MapInventoryEndpoints();
+api.MapStreamSessions();
 api.MapPluginStatus();
 app.MapPluginFrontends();
 PluginHost.MapEndpoints(plugins, api, builder.Configuration, (group, id) => group.WithMetadata(new NKeeper.Core.Credentials.PluginEndpointMetadata(id)));
