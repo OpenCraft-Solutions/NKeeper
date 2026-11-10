@@ -14,9 +14,9 @@ public static class AuditActions
     public const string SignOut = "auth.sign_out";
     public const string UserCreate = "user.create";
     public const string UserUpdate = "user.update";
-    public const string UserPasswordReset = "user.password_reset";
+    public const string UserCredentialReset = "user.password_reset";
     public const string UserDelete = "user.delete";
-    public const string AccountPasswordChange = "account.password_change";
+    public const string AccountCredentialChange = "account.password_change";
     public const string UserGrantsReplace = "user.grants_replace";
     public const string HostCreate = "host.create";
     public const string HostUpdate = "host.update";
