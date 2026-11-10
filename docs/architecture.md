@@ -13,7 +13,8 @@ How NKeeper is put together today: the parts of core, how plugins plug in, and t
 | **Packaging** | `core/backend/NKeeper.Plugins.Packaging` | The `.nkp` format, trust and signature verification: bytes in, a result out. No I/O of its own. |
 | **Plugin host** | `core/backend/NKeeper.Plugins.Host` | Directory and trust checks, pinning, dependency resolution, one load context per plugin, enable state. |
 | **Persistence** | `core/backend/NKeeper.Core.Persistence` | `CoreDbContext` (schema `core`), its migrations, and the stores the host writes plugin records and audit events to. |
-| **Kernel** | `core/backend/NKeeper.Core` | Core services every feature uses. Today: the audit log, hosts and access (§7). |
+| **Kernel** | `core/backend/NKeeper.Core` | Core services every feature uses. Today: the audit log, hosts and access, services, credentials and the trust store (§7). |
+| **Connectivity** | `core/backend/NKeeper.Connectivity.Ssh` | `IConnectivity` over SSH.NET: connections that core opens and authenticates, checked against the trust store, through jump hosts (§7.9). No endpoints, no service type. |
 | **Identity** | `core/backend/NKeeper.Identity` | Accounts, sign-in, server-side sessions, the key ring and the request policies (§6). |
 | **Server** | `core/backend/NKeeper.Server` | The composition root: startup order, `GET /api/plugins`, plugin frontend files, and the shell with its security policy. |
 | **Shared runtime** | `core/frontend/runtime` (`@nkeeper/runtime`) | Builds the modules the shell shares with plugins, and the import map that names them. |
@@ -22,7 +23,7 @@ How NKeeper is put together today: the parts of core, how plugins plug in, and t
 | **Plugins** | `plugins/<id>/` | One folder per plugin: backend, frontend, tests. None yet; SSH arrives in Phase 1. |
 | **Test plugin** | `testing/plugins/NKeeper.TestPlugins.Hello` | A no-op plugin, built and packaged like a real one, used by the tests. |
 
-The rest of core in [v2-plan.md §6](v2-plan.md#6-proposed-repository-structure) (`NKeeper.Core`, `NKeeper.Identity`, `NKeeper.Connectivity.Ssh`, the UI kit) arrives from Phase 1.
+The rest of core in [v2-plan.md §6](v2-plan.md#6-proposed-repository-structure) (the session framework, the UI kit) arrives during Phase 1.
 
 ## 2. Dependency rules
 
@@ -68,7 +69,7 @@ public sealed class WakeOnLanPlugin : IPlugin
 - `endpoints.MapHostGroup(HostPermission.Use)` (or `Manage`) gives a group at `hosts/{hostId}/` whose endpoints act on one host the user may use (or manage). See §7.3.
 - `Contribute(IPluginContributions, PluginContext)` declares what the plugin adds to core's catalogues: so far, service types (§7.4). It has an empty default, so a plugin with nothing to declare leaves it out.
 - More contracts (`SessionType`, `HostAction`, `HealthProbe`, settings, audit actions) arrive with their first real users ([v2-plan.md §4.2](v2-plan.md#42-contribution-catalogue)). The SDK may change until it is frozen as v1 at the end of Phase 3.
-- **SDK versions.** A manifest declares the SDK range it supports, and a package outside the server's `SdkVersion` is refused. Within v0, an addition raises the patch number (`0.1.1` added the host scope, `0.1.2` service types, `0.1.3` the credential broker) and a breaking change raises the minor one. So a plugin built for `>=0.1.0 <0.2.0` keeps loading, and one that uses an addition declares the version that brought it.
+- **SDK versions.** A manifest declares the SDK range it supports, and a package outside the server's `SdkVersion` is refused. Within v0, an addition raises the patch number (`0.1.1` added the host scope, `0.1.2` service types, `0.1.3` the credential broker, `0.1.4` SSH connections) and a breaking change raises the minor one. So a plugin built for `>=0.1.0 <0.2.0` keeps loading, and one that uses an addition declares the version that brought it.
 
 ## 5. Frontend extension point
 
@@ -146,7 +147,7 @@ Sign-ins, failed sign-ins (with the name as typed, never the password), sign-out
 
 ## 7. Hosts and access
 
-Ported from 1.x. Phase 1 step 3 brings hosts, their tags, and who may see and change them; step 4 brings their services, and step 5 their credentials. Jump hosts and hardware details join a host in the steps that use them.
+Ported from 1.x. Phase 1 step 3 brings hosts, their tags, and who may see and change them; step 4 brings their services, step 5 their credentials, and step 6 their jump hosts and trusted keys. Hardware details join a host in the steps that use them.
 
 ### 7.1 Hosts
 
@@ -257,7 +258,7 @@ public void Contribute(IPluginContributions contributions, PluginContext context
 
 ### 7.5 Credentials
 
-Ported from 1.x, which stores credentials the same way. Phase 1 step 5 stores them and brokers their use (§7.6). Connecting with them is step 6.
+Ported from 1.x, which stores credentials the same way. Phase 1 step 5 stores them and brokers their use (§7.6), and core connects with them (§7.9).
 
 **What a credential holds.**
 - A credential belongs to one host. It has:
@@ -297,14 +298,14 @@ Ported from 1.x, which stores credentials the same way. Phase 1 step 5 stores th
 
 ### 7.6 The credential broker
 
-Plugins use credentials without seeing them (D13, [plugin-security.md §12](plugin-security.md#12-credentials)). Phase 1 builds the broker and its handles. The first use of a handle, an SSH connection opened by core, comes in step 6.
+Plugins use credentials without seeing them (D13, [plugin-security.md §12](plugin-security.md#12-credentials)). The first use of a handle is an SSH connection that core opens (§7.9).
 
 ```csharp
-use.MapPost("/connect", async (HostContext host, ConnectRequest request, ICredentialBroker broker) =>
+use.MapPost("/connect", async (HostContext host, ConnectRequest request, ICredentialBroker broker, IConnectivity connectivity) =>
 {
     var handle = await broker.ResolveSavedAsync(host, request.ServiceId, request.CredentialId);
     var who = await broker.DescribeAsync(host, request.ServiceId, handle);   // username, domain, source; never a secret
-    // step 6: await connectivity.OpenSshAsync(host, request.ServiceId, handle)
+    await using var ssh = await connectivity.OpenSshAsync(host, request.ServiceId, handle);   // §7.9
 });
 ```
 
@@ -324,7 +325,7 @@ Passing on the user's own sign-in arrives with directory sign-in; local accounts
   - the request: a handle is dropped when the request that obtained it ends.
 
   Tying a handle to a plugin session instead arrives with sessions, in step 7. So does ending it when the user's access to the host changes.
-- Every use of a handle checks all its bindings. `DescribeAsync`, and from step 6 every use that connects, takes the host and the service again. A mismatch, an unknown handle, or an expired one is refused with `CredentialDeniedException` and audited as `credential.denied`.
+- Every use of a handle checks all its bindings. `DescribeAsync`, and every connection opened with it (§7.9), takes the host and the service again. A mismatch, an unknown handle, or an expired one is refused with `CredentialDeniedException` and audited as `credential.denied`.
 - Outside a plugin's own endpoint (a background job, say), the broker refuses to resolve. Credential use outside requests is designed with its first user.
 
 **The credential prompt.**
@@ -338,6 +339,97 @@ Passing on the user's own sign-in arrives with directory sign-in; local accounts
 - An exchange that fails for any reason (unknown, used, expired, another session, another host or service) is refused, like an unknown handle. A reference is used up when it's exchanged, even if the exchange is refused.
 - Unused prompt references are dropped when they expire, and when their session signs out.
 
+### 7.7 The trust store
+
+Trust on first use, ported from 1.x: the first time a server presents an identity, the user checks it and decides; after that, core checks it on every connection. Phase 1 step 6 brings SSH host keys. TLS certificates join with their first user.
+
+**What's trusted.**
+- A trusted key belongs to one host. It's recorded per:
+  - kind: an SSH host key, so far;
+  - endpoint: the service's own address, when it has one, or the host itself. So a management controller's key is never confused with its server's;
+  - port;
+  - algorithm (`ssh-ed25519`, say). A server presents one key per algorithm.
+- The key itself is recorded as its SHA-256 fingerprint, unpadded base64 as OpenSSH prints it, with when and by whom it was trusted.
+- Services of different types on the same endpoint and port share their trusted keys, because they're the same server.
+
+**Checking a connection.** When core connects (§7.9) and the server presents a key:
+- a trusted key for that algorithm that matches: the connection goes ahead;
+- a trusted key that doesn't match: the connection is refused with `HostKeyChanged`, and audited as `trust.mismatch` with both fingerprints. Core never replaces a key by itself. Someone with Manage on the host removes the old key, and the next connection asks again;
+- no trusted key: the connection is refused with `HostKeyUnknown`, carrying the presented algorithm and fingerprint, and the host and service that presented it (a jump host's, when it's the jump host that's unknown). Core remembers that it presented this key to this auth session.
+
+**The user decides, through core.**
+- A plugin can't trust a key. The shell posts the user's decision to core: `POST /api/hosts/{hostId}/services/{serviceId}/trusted-keys`, with the algorithm and fingerprint. It needs Use on the host.
+- Core trusts the key only if it presented exactly that key, for that host and service, to the same auth session, in the last 10 minutes. Anything else is refused with `400` and `trust_not_presented`, so a user (or a script with their cookie) can't trust a key no server showed them.
+- Each presentation can be trusted once. An auth session keeps at most 20 presentations; recording another drops the oldest. They're dropped at sign-out.
+- A different key trusted meanwhile for the same endpoint, port and algorithm answers `409` with `trust_conflict`.
+- Trusting is audited as `trust.add`.
+
+**Seeing and removing keys.**
+- A host's response lists its trusted keys: ID, kind, address (empty for the host itself), port, algorithm, fingerprint and when they were trusted.
+- `DELETE /api/hosts/{hostId}/trusted-keys/{keyId}` removes one. It needs Manage, and is audited as `trust.remove`.
+- Keys are deleted with their host. Changing a service's address or port leaves them in place, under the endpoint they were trusted for.
+
+### 7.8 Jump hosts
+
+Ported from 1.x. A host can be reached through another host, its **jump host**: core connects to the jump host over SSH, then tunnels to the host through it.
+
+**On the host.**
+- `jump` in `POST` and `PUT /api/hosts`: the jump host's ID, the service to reach it on, and the credential to sign in to it with. `null` means none.
+- When it's set:
+  - the jump host must exist, and the editor must be able to use it. One they can't see is refused like a missing one;
+  - it can't be the host itself;
+  - only one level: a jump host can't have its own jump host, and a host that's another's jump host can't be given one;
+  - the service and the credential must be the jump host's, and the credential must be used with that service (§7.5).
+- Changes are audited with the host.
+- Deleting the jump host clears `jump`. Removing its service or its credential leaves the host pointing at the jump host without them, and connecting fails until the host is edited.
+
+**Connecting through it** (§7.9).
+- The user must be able to use the jump host too, checked at every connection, so a jump host can't lend its credential to someone who can't see it.
+- Core reads the jump host's credential itself. It never reaches a plugin, not even as a handle.
+- The jump host's key is checked like any other (§7.7). An unknown one is refused with `HostKeyUnknown` naming the jump host's service, so the user can trust it there and try again.
+- The target's own key is still checked against the target, not the jump host, so a jump host can't pose as the host behind it.
+- The jump host must allow TCP forwarding.
+
+### 7.9 SSH connections
+
+Core opens the connection and the plugin gets it authenticated (D13 tier 1, plugin-security.md §12.3). Over SSH.NET, in `NKeeper.Connectivity.Ssh`.
+
+```csharp
+use.MapPost("/uptime", async (HostContext host, UptimeRequest request, ICredentialBroker broker, IConnectivity connectivity) =>
+{
+    var handle = await broker.ResolveSavedAsync(host, request.ServiceId, request.CredentialId);
+    await using var ssh = await connectivity.OpenSshAsync(host, request.ServiceId, handle);
+    var result = await ssh.RunAsync("uptime");
+    return Results.Text(result.Output);
+});
+```
+
+**Opening (SDK 0.1.4).** `IConnectivity.OpenSshAsync(host, serviceId, handle)`:
+- checks the handle's bindings, as the broker does (§7.6). A refusal is a `CredentialDeniedException`, audited as `credential.denied`;
+- connects to the service's effective address and port, through the host's jump host if it has one (§7.8);
+- checks the server's key against the trust store (§7.7);
+- signs in with the credential: the private key first, if there is one (with the password as its passphrase), then the password, also through keyboard-interactive. A domain is sent as `DOMAIN\user`, as Windows OpenSSH expects;
+- gives up after 20 seconds, and sends keep-alives every 30 once connected.
+
+Every connection opened is audited as `credential.use`: the host, service, plugin, the credential (or "typed"), and the jump host's credential if any.
+
+**What a plugin gets.** An `ISshConnection`, not SSH.NET's client, whose connection details include the secrets. It offers:
+- `RunAsync(command)`: runs a command, and returns its exit status, output and error output;
+- `OpenShellAsync(terminal)`: an interactive shell with a terminal type and size, as a stream, which can be resized.
+
+SFTP and port forwards join with their first users. The connection doesn't need its handle once it's open; the plugin disposes it, which also closes its tunnel. Closing connections when the user's access changes arrives with sessions, in step 7.
+
+**Failures.** Opening throws `SshConnectException` with a reason the plugin can show or act on:
+- `HostKeyUnknown` (with the presented key) and `HostKeyChanged` (§7.7);
+- `AuthenticationFailed`;
+- `NoSecret`: the credential has neither a password nor a private key;
+- `InvalidPrivateKey`: the key can't be read, or its passphrase is wrong;
+- `Unreachable` and `TimedOut`;
+- `JumpHostUnavailable`: the user can't use the jump host, or its service or credential is gone, or it wouldn't forward.
+
+Messages name the host and port, never a secret.
+
+## 8. Where to read more
 
 - [v2-plan.md](v2-plan.md): the audit of 1.x, the core/plugin boundary, the contribution catalogue, phases and decisions.
 - [plugin-security.md](plugin-security.md): package format, signing, trust, directory checks, verification order and reason codes, loading and states.
