@@ -4,6 +4,7 @@ import { buildCatalog } from './catalog'
 import { ChangePassword } from './ChangePassword'
 import { DialogProvider } from './Dialogs'
 import { loadPluginFrontends, type FrontendState, type ModuleImporter, type PluginStatus } from './plugins'
+import { HealthView } from './HealthView'
 import { PluginsView } from './PluginsView'
 import { UsersView } from './UsersView'
 import { SignIn } from './SignIn'
@@ -24,7 +25,9 @@ type Load =
 export function App({ importer }: { importer?: ModuleImporter }) {
   const [load, setLoad] = useState<Load>({ kind: 'loading' })
   const [attempt, setAttempt] = useState(0)
-  const [view, setView] = useState<'workspace' | 'plugins' | 'users'>('workspace')
+  const [view, setView] = useState<'workspace' | 'health' | 'plugins' | 'users'>('workspace')
+  // A host to show in the workspace, from the Health page.
+  const [focus, setFocus] = useState<{ hostId: string; n: number } | null>(null)
   const [signOutError, setSignOutError] = useState<string | null>(null)
   // Bumped whenever the session ends, so a load still in flight can't bring back the signed-in view.
   const session = useRef(0)
@@ -95,6 +98,11 @@ export function App({ importer }: { importer?: ModuleImporter }) {
         <h1>NKeeper</h1>
         {(load.kind === 'ready' || load.kind === 'mustChangePassword') && (
           <div className="nk-header-tools">
+            {load.kind === 'ready' && (
+              <button type="button" aria-pressed={view === 'health'} onClick={() => setView((v) => (v === 'health' ? 'workspace' : 'health'))}>
+                Health
+              </button>
+            )}
             {isAdministrator && (
               <>
                 <button type="button" aria-pressed={view === 'users'} onClick={() => setView((v) => (v === 'users' ? 'workspace' : 'users'))}>
@@ -136,14 +144,25 @@ export function App({ importer }: { importer?: ModuleImporter }) {
       {load.kind === 'ready' && catalog && (
         <DialogProvider>
           {/* The workspace stays mounted behind the plugin list, so its sessions and drafts carry on. */}
+          {view === 'health' && catalog && (
+            <div className="nk-view">
+              <HealthView
+                catalog={catalog}
+                onShowHost={(hostId) => {
+                  setFocus((current) => ({ hostId, n: (current?.n ?? 0) + 1 }))
+                  setView('workspace')
+                }}
+              />
+            </div>
+          )}
           {view === 'plugins' && isAdministrator && <PluginsView plugins={load.plugins} frontends={load.frontends} />}
           {view === 'users' && isAdministrator && (
             <div className="nk-view">
               <UsersView currentUserId={load.user.id} />
             </div>
           )}
-          <div className="nk-view" hidden={view !== 'workspace' && isAdministrator}>
-            <Workspace catalog={catalog} canCreate={isAdministrator} />
+          <div className="nk-view" hidden={view !== 'workspace'}>
+            <Workspace catalog={catalog} canCreate={isAdministrator} focus={focus} />
           </div>
         </DialogProvider>
       )}

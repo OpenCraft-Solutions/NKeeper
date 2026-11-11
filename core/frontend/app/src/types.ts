@@ -119,4 +119,7 @@ export interface ServiceHealth {
   latencyMs: number
   checkedAtUtc: string
   reason: 'refused' | 'timeout' | 'unreachable' | null
+  /** For a TLS probe that completed its handshake. */
+  certificateSubject?: string | null
+  certificateExpiresAtUtc?: string | null
 }

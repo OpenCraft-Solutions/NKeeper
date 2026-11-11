@@ -29,7 +29,16 @@ let tabs = 0
  * The workspace (docs/architecture.md §7.14): the host tree on the left, tabs on the right. The first tab
  * is always the selected host; each session opens in a tab of its own, which stays mounted while hidden.
  */
-export function Workspace({ catalog, canCreate }: { catalog: Catalog; canCreate: boolean }) {
+export function Workspace({
+  catalog,
+  canCreate,
+  focus = null,
+}: {
+  catalog: Catalog
+  canCreate: boolean
+  /** A host to show, from another page; each new `n` shows it again. */
+  focus?: { hostId: string; n: number } | null
+}) {
   const [hosts, setHosts] = useState<Host[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [health, setHealth] = useState(new Map<string, ServiceHealth>())
@@ -91,6 +100,17 @@ export function Workspace({ catalog, canCreate }: { catalog: Catalog; canCreate:
   const hostName = useCallback((id: string) => hosts?.find((h) => h.id === id)?.name ?? null, [hosts])
   const canManage = useCallback((id: string) => hosts?.find((h) => h.id === id)?.canManage ?? false, [hosts])
   const replaceHost = (host: Host) => setHosts((current) => (current ?? []).map((h) => (h.id === host.id ? host : h)))
+
+  // A host shown from another page: selected once per request, while rendering (no effect needed).
+  const [shownFocus, setShownFocus] = useState(focus)
+  if (focus !== shownFocus) {
+    setShownFocus(focus)
+    if (focus) {
+      setSelectedId(focus.hostId)
+      setPane({ kind: 'details' })
+      setActiveTab('host')
+    }
+  }
 
   function select(host: Host) {
     setSelectedId(host.id)

@@ -3,6 +3,7 @@ import { api, ApiError } from '@nkeeper/sdk'
 import { connectMenu, type Catalog, type ConnectEntry, type ConnectGroup } from './catalog'
 import { ConnectMenu } from './ConnectMenu'
 import { credentialName, hostAddress, serviceName, usedWith } from './hosts'
+import { expiryText } from './health'
 import type { Host, ServiceHealth } from './types'
 
 const DOWN_REASONS: Record<string, string> = { refused: 'refused', timeout: 'timed out', unreachable: 'unreachable' }
@@ -151,7 +152,7 @@ export function HostDetails({
                     {!check
                       ? '—'
                       : check.state === 'up'
-                        ? `Up, ${check.latencyMs} ms`
+                        ? `Up, ${check.latencyMs} ms${check.certificateExpiresAtUtc ? `, certificate expires ${expiryText(check.certificateExpiresAtUtc)}` : ''}`
                         : `Down${check.reason ? `: ${DOWN_REASONS[check.reason] ?? check.reason}` : ''}`}
                   </td>
                   <td>{credentials.length === 0 ? '—' : credentials.map(credentialName).join(', ')}</td>

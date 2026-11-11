@@ -664,3 +664,34 @@ table {
   border: 0;
   background: transparent;
 }
+
+/* The Health page (docs/architecture.md §7.14). */
+.nk-health {
+  overflow: auto;
+  flex: 1;
+}
+
+.nk-health-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.nk-health section {
+  margin-top: 16px;
+}
+
+.nk-warning {
+  color: var(--nk-danger);
+}
+
+.nk-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}

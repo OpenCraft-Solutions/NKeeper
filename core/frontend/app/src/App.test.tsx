@@ -302,6 +302,31 @@ describe('the workspace', () => {
     expect(within(tree).getByRole('img', { name: 'Every checked service is down' })).toBeInTheDocument()
   })
 
+  it('shows a health page of what’s down and which certificates expire, and goes back to a host from it', async () => {
+    const soon = new Date(Date.now() + 5 * 86_400_000 + 3_600_000).toISOString()
+    signedIn({
+      'GET /api/hosts': [...hosts, host({ id: 'h3', name: 'portal', services: [service({ id: 's3', label: 'Portal' })] })],
+      'GET /api/health': [
+        { hostId: 'h1', serviceId: 's1', state: 'down', latencyMs: 3, checkedAtUtc: '2026-01-01T00:00:00Z', reason: 'refused' },
+        { hostId: 'h3', serviceId: 's3', state: 'up', latencyMs: 4, checkedAtUtc: '2026-01-01T00:01:00Z', reason: null, certificateSubject: 'CN=portal', certificateExpiresAtUtc: soon },
+      ],
+    })
+    const user = userEvent.setup()
+
+    render(<App importer={termImporter} />)
+    await user.click(await screen.findByRole('button', { name: 'Health' }))
+    expect(await screen.findByText(/1 of 2 services up · 1 down · 1 certificate expiring within 30 days/)).toBeInTheDocument()
+    const down = screen.getByRole('region', { name: 'Down' })
+    expect(within(down).getByRole('cell', { name: 'Refused' })).toBeInTheDocument()
+    const certificates = screen.getByRole('region', { name: 'Certificates' })
+    expect(within(certificates).getByRole('cell', { name: 'CN=portal' })).toBeInTheDocument()
+    expect(within(certificates).getByText(/\(in 5 days\)/)).toHaveClass('nk-warning')
+
+    await user.click(within(certificates).getByRole('button', { name: 'portal' }))
+    const details = await screen.findByRole('article', { name: 'portal' })
+    expect(within(details).getByText(/^Up, 4 ms, certificate expires in 5 days$/)).toBeInTheDocument()
+  })
+
   it('opens a session in its own tab with a typed credential, asking about the server key', async () => {
     vi.stubGlobal('WebSocket', FakeSocket)
     const fetch = signedIn({ 'POST /api/hosts/h1/services/s1/credential-prompt': { reference: 'ref-1', expiresAtUtc: '2026-01-01T00:02:00Z' } })
