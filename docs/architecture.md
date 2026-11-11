@@ -473,14 +473,16 @@ After `connected`, the plugin owns the data: binary frames, and text frames whos
    - a service that isn't the host's, or isn't of one of the session type's service types, with `wrong_service`;
    - a host reached through a jump host, with `jump_host_unsupported`, when the type can't use one.
 4. **Resolves the credential**, if one is named: a saved one by `credentialId`, or a typed one by `promptReference` (§7.6). The handle is bound to the session type's plugin and to this request, which lasts as long as the session. A refusal is `credential_denied`, audited as `credential.denied`.
-5. **Opens the plugin's session**, with the `HostContext`, the service, the handle and the options: `IStreamSessionHandler.OpenAsync`. The plugin connects, through `IConnectivity`, which can't tell this request from a plugin endpoint's.
+5. **Opens the plugin's session**, with the `HostContext`, the service, the handle and the options: `IStreamSessionHandler.OpenAsync`. The plugin connects, through `IConnectivity`, which can't tell this request from a plugin endpoint's. The session is in the registry (below) from this step on, so a change of access while it opens, during a key prompt say, ends it with `access_revoked`.
 6. **Asks about unknown keys in-band.** If opening fails with `HostKeyUnknown`, core sends `hostKey` and waits for the user. On `trust`, it trusts the key through the trust store, under the same rules as §7.7, then opens again. A jump host and its target can each ask once. Anything but `trust`, including silence, ends the session with `host_key_rejected`.
 7. **Reports other failures** with a code from the failure: `host_key_changed`, `authentication_failed`, `no_secret`, `invalid_private_key`, `unreachable`, `timeout` or `jump_host_unavailable`. Anything else the plugin throws is `failed`, with a generic message, and is logged.
-8. **Runs the session.** Core sends `connected`, registers the session (below), audits `session.open`, and calls `IStreamSession.RunAsync` with a channel for the plugin's frames. It ends when either side closes, or when core ends it.
+8. **Runs the session.** Core checks access once more, audits `session.open`, sends `connected`, and calls `IStreamSession.RunAsync` with a channel for the plugin's frames. It ends when either side closes, or when core ends it.
 
 Core limits each message to 1 MB, and sends WebSocket keep-alives every 30 seconds.
 
-**Ending sessions when access changes.** Checking access only when a session opens isn't enough, since NKeeper is a gateway to privileged infrastructure (v2-plan.md §7.1). Every open session is in core's **session registry**, with its user, sign-in session, host, service and credential. Core re-checks the sessions involved:
+**A plugin can't hold a session open.** When the browser goes, or core ends the session, the plugin's token is cancelled. A plugin's `RunAsync` or `DisposeAsync` that hasn't returned 10 seconds later is left behind and logged, and core finishes without it. Core's own closing messages have a 5-second deadline, after which it aborts the socket.
+
+**Ending sessions when access changes.** Checking access only when a session opens isn't enough, since NKeeper is a gateway to privileged infrastructure (v2-plan.md §7.1). Every open session is in core's **session registry**, with its user, sign-in session, host, service, credential and the jump host it went through. Core re-checks the sessions involved:
 - at once, when:
   - a user's grants are replaced;
   - a host is edited (its tags, services or credentials) or deleted;
@@ -492,7 +494,8 @@ A session is still allowed while:
 - its sign-in session is live;
 - its user is enabled and can use its host;
 - its service is still the host's;
-- its saved credential, if it used one, is still the host's.
+- its saved credential, if it used one, is still the host's;
+- the host's jump host is still the one it went through, and the user can still use that jump host. Changing a host's route ends its sessions, since their tunnels stay on the old one.
 
 Otherwise core ends it:
 - the plugin's `RunAsync` is cancelled;
