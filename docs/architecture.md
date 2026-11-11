@@ -458,7 +458,7 @@ public void Contribute(IPluginContributions contributions, PluginContext context
 | --- | --- | --- |
 | browser → core | `start` `{ hostId, serviceId, credentialId?, promptReference?, options? }` | first, within 15 seconds |
 | core → browser | `status` `{ status: "connecting" }` | after `start` is accepted |
-| core → browser | `hostKey` `{ hostId, serviceId, algorithm, fingerprint }` | a server presented an unknown key |
+| core → browser | `hostKey` `{ hostId, serviceId, kind, algorithm, fingerprint, subject?, notAfterUtc? }` | a server presented an unknown key, or (`kind: "tls-certificate"`) certificate (SDK 0.1.9) |
 | browser → core | `hostKeyDecision` `{ trust }` | the user's answer, within 2 minutes |
 | core → browser | `connected` | the plugin's session is open |
 | core → browser | `error` `{ code, message }` | it failed; the socket then closes |
@@ -476,7 +476,7 @@ After `connected`, the plugin owns the data: binary frames, and text frames whos
    - a host reached through a jump host, with `jump_host_unsupported`, when the type can't use one.
 4. **Resolves the credential**, if one is named: a saved one by `credentialId`, or a typed one by `promptReference` (§7.6). The handle is bound to the session type's plugin and to this request, which lasts as long as the session. A refusal is `credential_denied`, audited as `credential.denied`.
 5. **Opens the plugin's session**, with the `HostContext`, the service, the handle and the options: `IStreamSessionHandler.OpenAsync`. The plugin connects, through `IConnectivity`, which can't tell this request from a plugin endpoint's. The session is in the registry (below) from this step on, so a change of access while it opens, during a key prompt say, ends it with `access_revoked`.
-6. **Asks about unknown keys in-band.** If opening fails with `HostKeyUnknown`, core sends `hostKey` and waits for the user. On `trust`, it trusts the key through the trust store, under the same rules as §7.7, then opens again. A jump host and its target can each ask once. Anything but `trust`, including silence, ends the session with `host_key_rejected`.
+6. **Asks about unknown keys in-band.** If opening fails with `HostKeyUnknown`, from an SSH connection or (SDK 0.1.9) a desktop or HTTP connection's certificate, core sends `hostKey` and waits for the user. On `trust`, it trusts the key through the trust store, under the same rules as §7.7, then opens again. A jump host and its target can each ask once. Anything but `trust`, including silence, ends the session with `host_key_rejected`.
 7. **Reports other failures** with a code from the failure: `host_key_changed`, `authentication_failed`, `no_secret`, `invalid_private_key`, `unreachable`, `timeout` or `jump_host_unavailable`. Anything else the plugin throws is `failed`, with a generic message, and is logged.
 8. **Runs the session.** Core checks access once more, audits `session.open`, sends `connected`, and calls `IStreamSession.RunAsync` with a channel for the plugin's frames. It ends when either side closes, or when core ends it.
 
@@ -643,7 +643,7 @@ export default definePlugin({
   - `connect(options, signal)`, which opens the stream. It runs core's control phase, with core's dialogs for a key and a typed credential. It resolves to a connection once core says `connected`, and rejects with a `SessionError` carrying core's error code. Aborting `signal` (when the view goes) cancels it, and any dialog it was waiting on;
   - whether its tab is showing;
   - `confirmTrust(prompt)` (SDK 0.1.8), for a view that opens its session through the plugin's own endpoints (§7.17): it shows core's dialog for a key or certificate a plugin endpoint reported, and when the user trusts it, posts it to core. It resolves to whether it's now trusted.
-- A connection sends binary frames and JSON text frames, and delivers the plugin's frames. Its `closed` promise gives core's reason. The view may call `connect` again to reconnect.
+- A connection sends binary frames, JSON text frames, and (SDK 0.1.9) raw text frames, and delivers the plugin's frames. Its `closed` promise gives core's reason. The view may call `connect` again to reconnect.
 - The SDK's `openStreamSession` implements the protocol (§7.10). `connect` is that function, with the shell's dialogs.
 - **Styles under the shell's policy.** The policy allows stylesheets only from the server (`style-src 'self'`), so a `<style>` element that a library adds is blocked. The SDK has two helpers that keep the policy as it is:
   - `adoptStyles(css)` adds a stylesheet from text, as a constructable stylesheet, which the policy allows;
