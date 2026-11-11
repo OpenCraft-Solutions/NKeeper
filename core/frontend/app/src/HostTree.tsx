@@ -114,8 +114,9 @@ export function HostTree({
                     aria-current={host.id === selectedId ? 'true' : undefined}
                     onClick={() => onSelect(host)}
                     onDoubleClick={() => {
-                      // Double-click: the menu's first entry, the first saved credential if there is one.
-                      const [first] = connectMenu(host, catalog)
+                      // Double-click: the first session entry, with the first saved credential if there is one.
+                      // Sessions only: a run action never runs by accident.
+                      const first = connectMenu(host, catalog).find((g) => g.entries[0]?.target.kind === 'session')
                       const entry = first?.entries[0]
                       if (first && entry) {
                         onConnect(host, first, entry)

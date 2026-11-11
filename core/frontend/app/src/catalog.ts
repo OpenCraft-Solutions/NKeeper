@@ -46,10 +46,13 @@ export function buildCatalog(statuses: PluginStatus[], frontends: Map<string, Fr
 /** How a session gets its credential. */
 export type SessionCredential = { kind: 'saved'; id: string; name: string } | { kind: 'typed' } | { kind: 'none' }
 
+/** What choosing an entry does: open a session, or run a plugin's endpoint (docs/architecture.md §7.12). */
+export type EntryTarget = { kind: 'session'; sessionType: string } | { kind: 'run'; pluginId: string; endpoint: string }
+
 export interface ConnectEntry {
   key: string
   label: string
-  sessionType: string
+  target: EntryTarget
   serviceId: string
   credential: SessionCredential
 }
@@ -63,24 +66,36 @@ export interface ConnectGroup {
   entries: ConnectEntry[]
 }
 
+/** What an action does, and the service types it applies to; null when it can't be offered on this host. */
+function resolve(action: Catalog['actions'][number], host: Host, catalog: Catalog): { target: EntryTarget; serviceTypes: string[] } | null {
+  if (action.endpoint) {
+    return { target: { kind: 'run', pluginId: action.pluginId, endpoint: action.endpoint }, serviceTypes: action.serviceTypes }
+  }
+  const sessionType = action.sessionType ? catalog.sessionTypes.get(action.sessionType) : undefined
+  if (!sessionType || sessionType.pluginId !== action.pluginId || !catalog.views.has(sessionType.id) || (host.jump && !sessionType.supportsJumpHost)) {
+    return null
+  }
+  return { target: { kind: 'session', sessionType: sessionType.id }, serviceTypes: sessionType.serviceTypes }
+}
+
 /**
- * A host's Connect menu (docs/architecture.md §7.12): for each action, one group per service its session
- * type opens on; with a credential required, an entry per saved credential used with the service, and
- * one to type a credential. Actions whose session type has no view, or can't go through the host's jump
- * host, offer nothing.
+ * A host's menu (docs/architecture.md §7.12): for each action, one group per service it applies to; with a
+ * credential required, an entry per saved credential used with the service, and one to type a credential.
+ * A session action whose session type has no view, or can't go through the host's jump host, offers nothing.
+ * Run actions run a plugin's endpoint instead.
  */
 export function connectMenu(host: Host, catalog: Catalog): ConnectGroup[] {
   const groups: ConnectGroup[] = []
   for (const action of catalog.actions) {
-    const sessionType = catalog.sessionTypes.get(action.sessionType)
-    if (!sessionType || sessionType.pluginId !== action.pluginId || !catalog.views.has(sessionType.id) || (host.jump && !sessionType.supportsJumpHost)) {
+    const resolved = resolve(action, host, catalog)
+    if (!resolved) {
       continue
     }
     host.services.forEach((service, index) => {
-      if (!service.available || !sessionType.serviceTypes.includes(service.type)) {
+      if (!service.available || !resolved.serviceTypes.includes(service.type)) {
         return
       }
-      const base = { sessionType: sessionType.id, serviceId: service.id }
+      const base = { target: resolved.target, serviceId: service.id }
       const entries: ConnectEntry[] =
         action.credential === 'none'
           ? [{ ...base, key: `${action.id}/${service.id}`, label: action.label, credential: { kind: 'none' } }]

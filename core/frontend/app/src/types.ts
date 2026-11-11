@@ -42,7 +42,12 @@ export interface SessionTypeInfo {
 export interface HostActionInfo {
   id: string
   label: string
-  sessionType: string
+  /** The session type it opens; null for a run action. */
+  sessionType: string | null
+  /** For a run action: its path in the plugin's host group. */
+  endpoint: string | null
+  /** For a run action: the service types it applies to. */
+  serviceTypes: string[]
   credential: 'required' | 'none'
 }
 

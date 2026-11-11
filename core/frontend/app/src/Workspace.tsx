@@ -37,6 +37,9 @@ export function Workspace({ catalog, canCreate }: { catalog: Catalog; canCreate:
   const [pane, setPane] = useState<Pane>({ kind: 'details' })
   const [sessions, setSessions] = useState<SessionTab[]>([])
   const [activeTab, setActiveTab] = useState<string>('host')
+  // What the last run action answered, shown until dismissed.
+  const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null)
+  const dialogs = useDialogs()
   // The latest health check asked for, by host.
   const checks = useRef(new Map<string, number>())
 
@@ -96,17 +99,41 @@ export function Workspace({ catalog, canCreate }: { catalog: Catalog; canCreate:
 
   function open(host: Host, group: ConnectGroup, entry: ConnectEntry) {
     const service = host.services.find((s) => s.id === entry.serviceId)
+    if (entry.target.kind === 'run') {
+      void run(host, group, entry, entry.target, service ? serviceName(service, catalog.serviceTypes) : 'the service')
+      return
+    }
     const tab: SessionTab = {
       id: `tab-${++tabs}`,
       title: `${host.name} · ${group.actionLabel}`,
       host: { id: host.id, name: host.name },
       serviceId: entry.serviceId,
       serviceName: service ? serviceName(service, catalog.serviceTypes) : 'the service',
-      sessionType: entry.sessionType,
+      sessionType: entry.target.sessionType,
       credential: entry.credential,
     }
     setSessions((current) => [...current, tab])
     setActiveTab(tab.id)
+  }
+
+  /** A run action (docs/architecture.md §7.12): the plugin's endpoint on the host, and the message it answers. */
+  async function run(host: Host, group: ConnectGroup, entry: ConnectEntry, target: Extract<ConnectEntry['target'], { kind: 'run' }>, service: string) {
+    const body: Record<string, unknown> = { serviceId: entry.serviceId }
+    try {
+      if (entry.credential.kind === 'saved') {
+        body.credentialId = entry.credential.id
+      } else if (entry.credential.kind === 'typed') {
+        const typed = await dialogs.askCredential(host.name, service)
+        if (!typed) {
+          return
+        }
+        body.promptReference = (await api.post<{ reference: string }>(`/api/hosts/${host.id}/services/${entry.serviceId}/credential-prompt`, typed)).reference
+      }
+      const result = await api.post<{ message?: string } | undefined>(`/api/p/${encodeURIComponent(target.pluginId)}/hosts/${host.id}/${target.endpoint}`, body)
+      setNotice({ ok: true, text: result?.message ?? `${group.actionLabel}: done.` })
+    } catch (error) {
+      setNotice({ ok: false, text: error instanceof ApiError ? error.message : `${group.actionLabel} failed.` })
+    }
   }
 
   function close(id: string) {
@@ -171,6 +198,14 @@ export function Workspace({ catalog, canCreate }: { catalog: Catalog; canCreate:
         )}
       </aside>
       <section className="nk-main">
+        {notice && (
+          <div className={notice.ok ? 'nk-notice' : 'nk-notice nk-notice-error'} role={notice.ok ? 'status' : 'alert'}>
+            <span>{notice.text}</span>
+            <button type="button" aria-label="Dismiss" onClick={() => setNotice(null)}>
+              ×
+            </button>
+          </div>
+        )}
         <div className="nk-tabs" role="tablist" aria-label="Open tabs">
           <button type="button" role="tab" id="tab-host" aria-selected={activeTab === 'host'} aria-controls="panel-host" onClick={() => setActiveTab('host')}>
             {pane.kind === 'create' ? 'New host' : (selected?.name ?? 'Host')}

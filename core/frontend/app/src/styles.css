@@ -640,3 +640,27 @@ table {
   margin: 0 0 8px;
   font-size: 17px;
 }
+
+/* A run action's answer */
+
+.nk-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 8px 8px 0;
+  padding: 8px 12px;
+  border: 1px solid var(--nk-up);
+  border-radius: 6px;
+  background: var(--nk-surface);
+}
+
+.nk-notice-error {
+  border-color: var(--nk-danger);
+  color: var(--nk-danger);
+}
+
+.nk-notice button {
+  border: 0;
+  background: transparent;
+}

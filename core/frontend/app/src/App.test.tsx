@@ -365,6 +365,20 @@ describe('the workspace', () => {
     expect(screen.getByRole('note')).toHaveTextContent('There’s nothing to connect with yet: add a service, such as SSH, with Edit.')
   })
 
+  it('runs a plugin’s run action and shows its answer', async () => {
+    const fetch = signedIn({ 'POST /api/p/term/hosts/h1/reboot': { message: 'Rebooting web01.' } })
+    const user = userEvent.setup()
+
+    render(<App importer={termImporter} />)
+    await user.click(await screen.findByRole('button', { name: 'Connect to web01' }))
+    expect(screen.getByRole('group', { name: 'Reboot · Term :22' })).toBeInTheDocument()
+    await user.click(screen.getByRole('menuitem', { name: 'Reboot' }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Rebooting web01.')
+    expect(bodyOf(fetch, 'POST /api/p/term/hosts/h1/reboot')).toEqual({ serviceId: 's1' })
+    expect(screen.queryByRole('tab', { name: /Reboot/ })).not.toBeInTheDocument()
+  })
+
   it('keeps sessions running behind the plugin list, and withdraws a dialog when its tab closes', async () => {
     vi.stubGlobal('WebSocket', FakeSocket)
     signedIn()
