@@ -115,6 +115,7 @@ Ported from 1.x, with ASP.NET Core Identity. Users, roles and sessions are table
   - one active administrator always remains.
 - **A user's sessions end** when their access is cut (disabled, or no longer an administrator), when their role changes (roles are carried in the session), when an administrator resets their password, and when the account is deleted.
 - **Changing one's own password** (`POST /api/account/password`) needs the current password, and is rate limited like sign-in. It's allowed while a password change is required, and signs out the account's other sessions; this one continues.
+- **A colour scheme of one's own**, ported from 1.x. Each account keeps the scheme it uses, by ID, and up to 20 schemes its user built, each a name and four colours (background, surface, text, accent, as `#rrggbb`). They're stored on the account, so they follow the user to any browser. `GET /api/auth/me` returns them as `colorSchemes: { active, custom }`, and `PUT /api/account/color-schemes` replaces them. An ID is lower-case letters, digits and `-`, at most 64 characters, and a scheme's name at most 40; custom IDs are unique. The server checks only their form: the list of presets is the shell's. It's allowed while a password change is required, and isn't audited, since it changes nothing but how the page looks.
 
 ### 6.2 Sessions
 
@@ -598,7 +599,8 @@ The single-page app in `core/frontend/app`. It knows no service type, session ty
 **The look is 1.x's.** The shell looks the same as NKeeper 1.x, so moving to 2.0 changes nothing a user sees except what's new:
 - 1.x's design tokens, as CSS custom properties on `:root`: the dark navy colours, spacing, radii, shadows and font stack. Its UI components (buttons, fields, dialogs, menus, badges, alerts) and their styles are ported from 1.x as they were.
 - 1.x's layout: a top bar with the logo and the pages as tabs, **Hosts**, **Reports**, and for administrators **Users** and **Settings**, with the user's menu on the right. Each page has 1.x's sidebar on the left and its content on the right.
-- A control for a feature that isn't ported yet (Import, Scan network, sorting, colour schemes) appears when its feature does, rather than as a control that does nothing.
+- A control for a feature that isn't ported yet (Import, Scan network, sorting) appears when its feature does, rather than as a control that does nothing.
+- **Colour schemes**, from the user's menu, as in 1.x: 1.x's presets (Navy is the default), and schemes the user builds from four colours, with a live preview. The shell derives every token from the four colours and keeps text readable: a scheme whose text is below 3:1 against its background can't be saved, and one below 4.5:1 is warned about. The chosen scheme's tokens are set on the page's root element, and remembered in the browser, so a reload paints them before the shell has loaded (`color-scheme.js`, a file of the build, since the page's policy allows no inline script). Terminals stay dark in every scheme, as 1.x's did. Plugin views follow the scheme through the tokens.
 - **Plugin views use the same tokens.** `var(--color-surface)` and the rest are the shell's to keep, so a plugin's view matches the shell. Each use gives a fallback value, so a view still draws on a shell without them. The terminal and desktop views keep 1.x's session styles.
 
 **Layout.**
