@@ -5,6 +5,7 @@ import { ChangePassword } from './ChangePassword'
 import { DialogProvider } from './Dialogs'
 import { loadPluginFrontends, type FrontendState, type ModuleImporter, type PluginStatus } from './plugins'
 import { PluginsView } from './PluginsView'
+import { UsersView } from './UsersView'
 import { SignIn } from './SignIn'
 import { ADMINISTRATOR, type CurrentUser } from './types'
 import { Workspace } from './Workspace'
@@ -23,7 +24,7 @@ type Load =
 export function App({ importer }: { importer?: ModuleImporter }) {
   const [load, setLoad] = useState<Load>({ kind: 'loading' })
   const [attempt, setAttempt] = useState(0)
-  const [view, setView] = useState<'workspace' | 'plugins'>('workspace')
+  const [view, setView] = useState<'workspace' | 'plugins' | 'users'>('workspace')
   const [signOutError, setSignOutError] = useState<string | null>(null)
   // Bumped whenever the session ends, so a load still in flight can't bring back the signed-in view.
   const session = useRef(0)
@@ -95,9 +96,14 @@ export function App({ importer }: { importer?: ModuleImporter }) {
         {(load.kind === 'ready' || load.kind === 'mustChangePassword') && (
           <div className="nk-header-tools">
             {isAdministrator && (
-              <button type="button" aria-pressed={view === 'plugins'} onClick={() => setView((v) => (v === 'plugins' ? 'workspace' : 'plugins'))}>
-                Plugins
-              </button>
+              <>
+                <button type="button" aria-pressed={view === 'users'} onClick={() => setView((v) => (v === 'users' ? 'workspace' : 'users'))}>
+                  Users
+                </button>
+                <button type="button" aria-pressed={view === 'plugins'} onClick={() => setView((v) => (v === 'plugins' ? 'workspace' : 'plugins'))}>
+                  Plugins
+                </button>
+              </>
             )}
             <span className="nk-user">{load.user.userName}</span>
             <button type="button" onClick={() => void signOut()}>
@@ -131,7 +137,12 @@ export function App({ importer }: { importer?: ModuleImporter }) {
         <DialogProvider>
           {/* The workspace stays mounted behind the plugin list, so its sessions and drafts carry on. */}
           {view === 'plugins' && isAdministrator && <PluginsView plugins={load.plugins} frontends={load.frontends} />}
-          <div className="nk-view" hidden={view === 'plugins' && isAdministrator}>
+          {view === 'users' && isAdministrator && (
+            <div className="nk-view">
+              <UsersView currentUserId={load.user.id} />
+            </div>
+          )}
+          <div className="nk-view" hidden={view !== 'workspace' && isAdministrator}>
             <Workspace catalog={catalog} canCreate={isAdministrator} />
           </div>
         </DialogProvider>
