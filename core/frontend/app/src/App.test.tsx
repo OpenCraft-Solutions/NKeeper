@@ -182,6 +182,39 @@ describe('App', () => {
   })
 })
 
+describe('a required password change', () => {
+  it('comes before anything else', async () => {
+    let changed = false
+    const fetch = fakeApi({
+      'GET /api/auth/me': () => Response.json({ ...ADMIN, mustChangePassword: !changed }),
+      'POST /api/account/password': () => {
+        changed = true
+        return new Response(null, { status: 204 })
+      },
+      'GET /api/plugins': [],
+      'GET /api/hosts': [],
+      'GET /api/health': [],
+    })
+    const user = userEvent.setup()
+
+    render(<App />)
+    const form = await screen.findByRole('form', { name: 'Change your password' })
+    expect(fetch.mock.calls.some(([url]) => url === '/api/plugins')).toBe(false)
+    await user.type(within(form).getByLabelText('Current password'), 'Old-Passw0rd-1')
+    await user.type(within(form).getByLabelText('New password'), 'New-Passw0rd-1')
+    await user.type(within(form).getByLabelText('Confirm the new password'), 'New-Passw0rd-2')
+    await user.click(within(form).getByRole('button', { name: 'Change password' }))
+    expect(within(form).getByRole('alert')).toHaveTextContent('The new passwords don’t match.')
+
+    await user.clear(within(form).getByLabelText('Confirm the new password'))
+    await user.type(within(form).getByLabelText('Confirm the new password'), 'New-Passw0rd-1')
+    await user.click(within(form).getByRole('button', { name: 'Change password' }))
+
+    expect(await screen.findByText('No hosts yet.')).toBeInTheDocument()
+    expect(bodyOf(fetch, 'POST /api/account/password')).toEqual({ currentPassword: 'Old-Passw0rd-1', newPassword: 'New-Passw0rd-1' })
+  })
+})
+
 describe('the workspace', () => {
   const hosts = [
     host({ id: 'h1', name: 'web01', tags: [{ name: 'env', value: 'prod' }], services: [service({ id: 's1' })], credentials: [credential()] }),

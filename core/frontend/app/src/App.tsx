@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, ApiError, onUnauthorized, resetAntiforgeryToken } from '@nkeeper/sdk'
 import { buildCatalog } from './catalog'
+import { ChangePassword } from './ChangePassword'
 import { DialogProvider } from './Dialogs'
 import { loadPluginFrontends, type FrontendState, type ModuleImporter, type PluginStatus } from './plugins'
 import { PluginsView } from './PluginsView'
@@ -11,6 +12,7 @@ import { Workspace } from './Workspace'
 type Load =
   | { kind: 'loading' }
   | { kind: 'signedOut' }
+  | { kind: 'mustChangePassword'; user: CurrentUser }
   | { kind: 'error'; message: string }
   | { kind: 'ready'; user: CurrentUser; plugins: PluginStatus[]; frontends: Map<string, FrontendState> }
 
@@ -42,6 +44,12 @@ export function App({ importer }: { importer?: ModuleImporter }) {
     void (async () => {
       try {
         const user = await api.get<CurrentUser>('/api/auth/me', { suppressUnauthorizedEvent: true })
+        if (user.mustChangePassword) {
+          if (current()) {
+            setLoad({ kind: 'mustChangePassword', user })
+          }
+          return
+        }
         const plugins = await api.get<PluginStatus[]>('/api/plugins')
         const frontends = await loadPluginFrontends(plugins, importer)
         if (current()) {
@@ -84,7 +92,7 @@ export function App({ importer }: { importer?: ModuleImporter }) {
     <div className="nk-app">
       <header className="nk-header">
         <h1>NKeeper</h1>
-        {load.kind === 'ready' && (
+        {(load.kind === 'ready' || load.kind === 'mustChangePassword') && (
           <div className="nk-header-tools">
             {isAdministrator && (
               <button type="button" aria-pressed={view === 'plugins'} onClick={() => setView((v) => (v === 'plugins' ? 'workspace' : 'plugins'))}>
@@ -106,6 +114,11 @@ export function App({ importer }: { importer?: ModuleImporter }) {
       {load.kind === 'signedOut' && (
         <main className="nk-center">
           <SignIn onSignedIn={() => setAttempt((n) => n + 1)} />
+        </main>
+      )}
+      {load.kind === 'mustChangePassword' && (
+        <main className="nk-center">
+          <ChangePassword onChanged={() => setAttempt((n) => n + 1)} />
         </main>
       )}
       {load.kind === 'loading' && <p className="nk-muted nk-pad">Loading…</p>}
