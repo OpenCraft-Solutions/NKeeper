@@ -576,7 +576,7 @@ The single-page app in `core/frontend/app`. It knows no service type, session ty
   - every host the user can see, from `GET /api/hosts`, searched, grouped and sorted in the browser;
   - **search** matches a host's name, hostname, IP address, description and tags (`name` or `name=value`), ignoring case;
   - **group by** a tag name gives one group per value, plus "No <name>" for hosts without it. The other choice is no grouping. The choice is kept in the browser;
-  - each host shows its services' health (§7.13);
+  - each host shows its services' health (§7.13). The shell checks a host when it's created or saved, rather than waiting for the next background round;
   - selecting a host shows its details. Its Connect menu (§7.12) is on the host's row and in its details.
 - **Tabs**, on the right. The first tab is always the selected host's details. Every session opens in a tab of its own. A tab stays mounted while another is showing, so a terminal keeps running. Closing a tab ends its session.
 - **Plugins**, for administrators: the plugin list and frontend states from Phase 0.
@@ -647,7 +647,7 @@ export default definePlugin({
 
 **The service** (`deploy/systemd/nkeeper.service`) runs the server as the unprivileged `nkeeper` user, listening on `127.0.0.1:5080` only. It has the hardening of plugin-security.md §4: `ProtectSystem=strict` with only `/var/lib/nkeeper` writable, `NoNewPrivileges`, `PrivateTmp`, `ProtectHome` and an empty `CapabilityBoundingSet`. It also has `PrivateDevices`, the kernel protections, `RestrictSUIDSGID`, `LockPersonality`, and network families limited to IPv4, IPv6 and Unix sockets.
 
-**nginx** (`deploy/nginx/nkeeper.conf`):
+**nginx** (`deploy/nginx/nkeeper.conf`), with HTTP/2 turned on in the form the installed version expects:
 - terminates TLS 1.2 and 1.3 on port 443, and redirects port 80 to it;
 - proxies everything to the server, WebSocket upgrades included, with read timeouts long enough for idle sessions. It serves no files itself (plugin-security.md §7.3);
 - sends `X-Forwarded-For` and `X-Forwarded-Proto`, and HSTS.
@@ -655,6 +655,13 @@ export default definePlugin({
 **Forwarded headers.** With `ForwardedHeaders:Enabled`, which the installer sets, the server takes the client's address and scheme from `X-Forwarded-For` and `X-Forwarded-Proto`. It accepts them from a proxy on the loopback address only, for one hop. Without this, the server would see nginx's plain-HTTP request from `127.0.0.1`. Then the WebSocket origin check (§7.10) would refuse every session, the sign-in rate limit (§6.4) would count every user as one client, and the audit would record no real addresses.
 
 **SELinux** (RHEL family): the installer labels the server's executable as a program systemd may start, and lets nginx connect to the server.
+
+**Tested in CI, through a real browser.** The Install workflow runs the installer on a fresh Ubuntu runner. Then a headless Chromium (Playwright, `testing/e2e`):
+- signs in, and creates a host for the runner's own SSH server;
+- opens a terminal with a typed credential and with a saved one, and trusts the server's key;
+- runs commands, checks the terminal resizes with the window, and deletes the host.
+
+It then upgrades in place and checks again.
 
 The rest of the installer is Phase 6: release-signed packages, guacd (D11), and install and upgrade tested end to end on both distribution families.
 
