@@ -133,6 +133,39 @@ public sealed class PluginHostTests : IDisposable
     }
 
     [Fact]
+    public async Task A_reinstall_signed_by_a_new_install_key_updates_the_record_and_an_earlier_key_stops_verifying()
+    {
+        using var first = PluginSigningKey.Generate();
+        using var second = PluginSigningKey.Generate();
+        var trustFile = Path.Combine(_scenario.Options.TrustDirectory, "install.json");
+        File.WriteAllBytes(trustFile, TrustedKey.Install(first.PublicKey.Span, ["hello"]).ToKeyFile());
+        var path = _scenario.Install(TestPlugins.Package(first));
+
+        var installed = await _scenario.LoadAsync();
+        Assert.Equal(PluginState.Loaded, Assert.Single(installed.Statuses).State);
+        Assert.True(_scenario.Store.Records["hello"].BuiltIn);
+
+        // The installer's next run: a new key, the same version rebuilt.
+        File.WriteAllBytes(trustFile, TrustedKey.Install(second.PublicKey.Span, ["hello"]).ToKeyFile());
+        File.Delete(path);
+        path = _scenario.Install(TestPlugins.Package(second));
+        var reinstalled = await _scenario.LoadAsync();
+        Assert.Equal(PluginState.Loaded, Assert.Single(reinstalled.Statuses).State);
+        Assert.Equal(second.KeyId, _scenario.Store.Records["hello"].KeyId);
+        Assert.Contains(_scenario.Audit.Events, e => e is ("plugin.updated", "hello", _));
+
+        // A package signed with the earlier install key no longer verifies.
+        File.Delete(path);
+        path = _scenario.Install(TestPlugins.Package(first));
+        AssertRefused(await _scenario.LoadAsync(), "hello", ReasonCodes.UntrustedKey);
+
+        // Nor does a downgrade, even from the current install key.
+        File.Delete(path);
+        _scenario.Install(TestPlugins.Package(second, version: "0.9.0"));
+        AssertRefused(await _scenario.LoadAsync(), "hello", HostReasonCodes.Downgrade);
+    }
+
+    [Fact]
     public async Task A_newer_version_from_a_new_signer_awaits_approval()
     {
         _scenario.IsDevelopment = true;

@@ -175,6 +175,34 @@ public sealed class FormatTests
     }
 
     [Fact]
+    public void An_install_key_signs_exactly_the_IDs_it_lists_official_ones_included_and_round_trips()
+    {
+        using var key = PluginSigningKey.Generate();
+        var install = TrustedKey.FromKeyFile(TrustedKey.Install(key.PublicKey.Span, ["ssh", "com.example.tool"]).ToKeyFile());
+
+        Assert.Equal(TrustedKeyKind.Install, install.Kind);
+        Assert.Equal(["ssh", "com.example.tool"], install.AllowedIds);
+        Assert.True(install.MaySign("ssh"));
+        Assert.True(install.MaySign("com.example.tool"));
+        Assert.False(install.MaySign("db-mssql"));
+        Assert.False(install.MaySign("com.example.other"));
+    }
+
+    [Theory]
+    [InlineData("""[]""", "")]
+    [InlineData("""["com.example.*"]""", "")]
+    [InlineData("""["Not An Id"]""", "")]
+    [InlineData("""["ssh"]""", ", \"development\": true")]
+    [InlineData("""["ssh"]""", ", \"notAfter\": \"2030-01-01\"")]
+    public void An_install_key_file_lists_exact_IDs_and_nothing_else(string allowedIds, string extra)
+    {
+        using var key = PluginSigningKey.Generate();
+        var json = $$"""{ "keyId": "{{key.KeyId}}", "publicKey": "{{Convert.ToBase64String(key.PublicKey.Span)}}", "allowedIds": {{allowedIds}}, "install": true{{extra}} }""";
+
+        Assert.Throws<TrustConfigurationException>(() => TrustedKey.FromKeyFile(Encoding.UTF8.GetBytes(json)));
+    }
+
+    [Fact]
     public void A_key_file_with_unknown_fields_is_refused()
     {
         using var key = PluginSigningKey.Generate();

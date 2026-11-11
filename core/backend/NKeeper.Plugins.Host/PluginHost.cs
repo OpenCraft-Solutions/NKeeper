@@ -420,8 +420,11 @@ public sealed class PluginHost(
             var fileName = PackageFormat.FileName(manifest.Id, version);
             var kind = trust.Find(v.KeyId!)!.Kind;
 
-            // §3: builtIn counts only from an official key, or a development key in Development.
-            var builtIn = manifest.BuiltIn && (kind == TrustedKeyKind.Official || (kind == TrustedKeyKind.Development && environment.IsDevelopment));
+            // §3: builtIn counts only from an official key, an install key, or a development key in Development.
+            var builtIn = manifest.BuiltIn && (kind is TrustedKeyKind.Official or TrustedKeyKind.Install || (kind == TrustedKeyKind.Development && environment.IsDevelopment));
+
+            // §8: the installer re-signs what it builds with a new install key each time, often at the same version.
+            var reSigned = kind == TrustedKeyKind.Install;
 
             if (!records.TryGetValue(manifest.Id, out var record))
             {
@@ -432,7 +435,7 @@ public sealed class PluginHost(
             else
             {
                 var comparison = manifest.Version.CompareTo(SemanticVersion.Parse(record.Version));
-                if (comparison == 0 && v.PackageSha256 != record.PackageSha256)
+                if (comparison == 0 && v.PackageSha256 != record.PackageSha256 && !reSigned)
                 {
                     await RefuseAsync(result, manifest.Id, version, HostReasonCodes.PinMismatch, $"Version {version} was recorded with package {record.PackageSha256}; this package is {v.PackageSha256}.", v.PackageSha256, v.KeyId, fileName, cancellationToken);
                     continue;
@@ -444,7 +447,7 @@ public sealed class PluginHost(
                     continue;
                 }
 
-                if (comparison > 0 && v.KeyId != record.KeyId)
+                if (comparison > 0 && v.KeyId != record.KeyId && !reSigned)
                 {
                     result.Add(new PluginStatus(manifest.Id, version, PluginState.AwaitingSignerApproval, null, $"Signed by key {v.KeyId}; version {record.Version} was signed by {record.KeyId}. An administrator must approve the new signer.", v.PackageSha256, v.KeyId, builtIn, fileName));
                     result.Alert($"Plugin {manifest.Id} {version} is signed by a new key and awaits approval.");
@@ -452,15 +455,20 @@ public sealed class PluginHost(
                     continue;
                 }
 
-                if (comparison > 0)
+                if (comparison > 0 || (reSigned && (v.PackageSha256 != record.PackageSha256 || v.KeyId != record.KeyId)))
                 {
-                    await audit.WriteAsync("plugin.updated", manifest.Id, $"{record.Version} -> {version}, sha256 {v.PackageSha256}", cancellationToken);
+                    await audit.WriteAsync(
+                        "plugin.updated",
+                        manifest.Id,
+                        $"{record.Version} -> {version}, sha256 {v.PackageSha256}{(v.KeyId != record.KeyId ? $", key {v.KeyId} (was {record.KeyId})" : "")}",
+                        cancellationToken);
                 }
 
                 var updated = record with
                 {
                     Version = version,
                     PackageSha256 = v.PackageSha256!,
+                    KeyId = v.KeyId!,
                     BuiltIn = builtIn,
                     Enabled = record.Enabled || builtIn,
                     EnabledBy = record.Enabled ? record.EnabledBy : builtIn ? BuiltInEnabler : null,
