@@ -9,7 +9,7 @@ How NKeeper is put together today: the parts of core, how plugins plug in, and t
 | Part | Where | What it is |
 | --- | --- | --- |
 | **SDK (backend)** | `core/backend/NKeeper.Abstractions` | The contracts a plugin builds against: `IPlugin`, `PluginContext`, `SdkVersion`. Nothing else. |
-| **SDK (frontend)** | `core/frontend/sdk` (`@nkeeper/sdk`) | `definePlugin`, the API client (`api`, `ApiError`, `onUnauthorized`, `apiWebSocketUrl`, `readJsonLines`). |
+| **SDK (frontend)** | `core/frontend/sdk` (`@nkeeper/sdk`) | `definePlugin` with session views, the API client (`api`, `ApiError`, `onUnauthorized`, `apiWebSocketUrl`, `readJsonLines`), `openStreamSession`, and the style helpers (§7.14). |
 | **Packaging** | `core/backend/NKeeper.Plugins.Packaging` | The `.nkp` format, trust and signature verification: bytes in, a result out. No I/O of its own. |
 | **Plugin host** | `core/backend/NKeeper.Plugins.Host` | Directory and trust checks, pinning, dependency resolution, one load context per plugin, enable state. |
 | **Persistence** | `core/backend/NKeeper.Core.Persistence` | `CoreDbContext` (schema `core`), its migrations, and the stores the host writes plugin records and audit events to. |
@@ -18,12 +18,12 @@ How NKeeper is put together today: the parts of core, how plugins plug in, and t
 | **Identity** | `core/backend/NKeeper.Identity` | Accounts, sign-in, server-side sessions, the key ring and the request policies (§6). |
 | **Server** | `core/backend/NKeeper.Server` | The composition root: startup order, `GET /api/plugins`, plugin frontend files, and the shell with its security policy. |
 | **Shared runtime** | `core/frontend/runtime` (`@nkeeper/runtime`) | Builds the modules the shell shares with plugins, and the import map that names them. |
-| **Shell** | `core/frontend/app` | The single-page app. Loads each plugin's frontend module. |
+| **Shell** | `core/frontend/app` | The single-page app: sign-in, the host tree, the host editor, tabs and core's dialogs (§7.14). Loads each plugin's frontend module. |
 | **Tooling** | `tools/NKeeper.PluginTool` (`nkeeper-plugin`) | `keygen`, `pack`, `verify`. |
 | **Plugins** | `plugins/<id>/` | One folder per plugin: backend, frontend, tests. The first is `ssh` (§7.11). |
 | **Test plugin** | `testing/plugins/NKeeper.TestPlugins.Hello` | A no-op plugin, built and packaged like a real one, used by the tests. |
 
-The rest of core in [v2-plan.md §6](v2-plan.md#6-proposed-repository-structure) (the session framework, the UI kit) arrives during Phase 1.
+The rest of core in [v2-plan.md §6](v2-plan.md#6-proposed-repository-structure) arrives with its first users. The shell keeps its components to itself for now; a UI kit shared with plugins comes once a second plugin draws forms.
 
 ## 2. Dependency rules
 
@@ -67,9 +67,9 @@ public sealed class WakeOnLanPlugin : IPlugin
 - `PluginContext` holds the plugin's ID and version, from the verified manifest rather than the plugin's own code, and its configuration section, `Plugins:Settings:<id>`.
 - `endpoints` is a route group core created at `/api/p/<id>/`, inside core's `/api` group. Every policy in §6.4 applies to it, so a plugin can't forget one ([v2-plan.md §4.4](v2-plan.md#44-guardrails-built-into-the-sdk)).
 - `endpoints.MapHostGroup(HostPermission.Use)` (or `Manage`) gives a group at `hosts/{hostId}/` whose endpoints act on one host the user may use (or manage). See §7.3.
-- `Contribute(IPluginContributions, PluginContext)` declares what the plugin adds to core's catalogues: so far, service types (§7.4) and session types (§7.10). It has an empty default, so a plugin with nothing to declare leaves it out.
-- More contracts (`HostAction`, `HealthProbe`, settings, audit actions) arrive with their first real users ([v2-plan.md §4.2](v2-plan.md#42-contribution-catalogue)). The SDK may change until it is frozen as v1 at the end of Phase 3.
-- **SDK versions.** A manifest declares the SDK range it supports, and a package outside the server's `SdkVersion` is refused. Within v0, an addition raises the patch number (`0.1.1` added the host scope, `0.1.2` service types, `0.1.3` the credential broker, `0.1.4` SSH connections, `0.1.5` stream sessions) and a breaking change raises the minor one. So a plugin built for `>=0.1.0 <0.2.0` keeps loading, and one that uses an addition declares the version that brought it.
+- `Contribute(IPluginContributions, PluginContext)` declares what the plugin adds to core's catalogues: so far, service types (§7.4) with their health probes (§7.13), session types (§7.10) and host actions (§7.12). It has an empty default, so a plugin with nothing to declare leaves it out.
+- More contracts (settings, audit actions) arrive with their first real users ([v2-plan.md §4.2](v2-plan.md#42-contribution-catalogue)). The SDK may change until it is frozen as v1 at the end of Phase 3.
+- **SDK versions.** A manifest declares the SDK range it supports, and a package outside the server's `SdkVersion` is refused. Within v0, an addition raises the patch number (`0.1.1` added the host scope, `0.1.2` service types, `0.1.3` the credential broker, `0.1.4` SSH connections, `0.1.5` stream sessions, `0.1.6` host actions, health probes and, in the frontend SDK, session views) and a breaking change raises the minor one. So a plugin built for `>=0.1.0 <0.2.0` keeps loading, and one that uses an addition declares the version that brought it.
 
 ## 5. Frontend extension point
 
@@ -83,10 +83,12 @@ import { definePlugin } from '@nkeeper/sdk'
 export default definePlugin({
   id: 'wake-on-lan',
   activate(context) {
-    // register contributions here as the SDK gains them
+    // anything the plugin sets up once, when the shell loads it
   },
 })
 ```
+
+The definition also declares what the plugin draws: so far, its session types' tabs (`sessionViews`, §7.14).
 
 **Loading.**
 1. The shell asks `GET /api/plugins`. For each loaded plugin with a frontend, the answer includes its entry URL, `/plugins/<id>/<version>/<hash tag>/<path>`, and the entry file's SHA-256.
@@ -512,17 +514,106 @@ This fixes a 1.x gap: 1.x ended sessions when a user was disabled, but not when 
 ### 7.11 The `ssh` plugin
 
 The first real plugin, in `plugins/ssh/`. It's a plugin like any other: it references only the SDK, and core doesn't name it.
-- **Service type** `ssh`, port 22 by default, no settings yet.
+- **Service type** `ssh`, port 22 by default, no settings yet, checked by a TCP probe (§7.13).
 - **Session type** `ssh`, "Terminal", on `ssh` services:
   - `options`: the terminal's `columns` and `rows`;
   - it opens a shell through `IConnectivity` (§7.9), on an `xterm-256color` terminal;
-  - binary frames carry the terminal's bytes both ways, and a text frame `resize` `{ columns, rows }` resizes it.
-- **Its frontend** (the terminal tab) comes with the shell, in step 8.
+  - binary frames carry the terminal's bytes both ways, and a text frame `resize` `{ columns, rows }` resizes it. Dimensions that aren't numbers fall back to 80 × 24.
+- **Host action** `ssh.terminal`, "Terminal", which opens it with a credential (§7.12).
+- **Its frontend** is the terminal view (§7.14): xterm.js, fitted to its tab, resizing the server's terminal as the tab resizes. When the shell exits it says so, and offers to reconnect.
 
 **Built and signed by the build.** Plugins are always signed, even in development (plugin-security.md §10):
-- building `plugins/ssh` packs it with `nkeeper-plugin` and signs it with the developer's development key. The build creates the key on first use, under `.dev/`, which git ignores;
+- building `plugins/ssh` builds its frontend (`npm run build` in `plugins/ssh/frontend`, so `npm ci` must have run at the root), packs both with `nkeeper-plugin`, and signs the package with the developer's development key. The build creates the key on first use, under `.dev/`, which git ignores;
 - the package goes to `artifacts/plugins/`, the directory to point `Plugins:Directory` at in development;
 - CI verifies the package against that run's development key.
+
+### 7.12 Host actions
+
+The shell's menus are built from data that plugins contribute, not from menu code (v2-plan.md §7.2). The first kind of entry is **Connect**: open one of the plugin's session types on a service.
+
+```csharp
+contributions.AddHostAction(new HostAction("ssh.terminal", "Terminal", SessionType: "ssh"));
+```
+
+- A host action (SDK 0.1.6) has:
+  - an ID: like a service type's, plus dots between segments (`ssh.terminal`), in its own namespace;
+  - a label;
+  - the session type it opens, which must be one the same plugin contributes. It applies to the services that session type opens on;
+  - its credential mode: `Required` (the default), meaning a saved credential or a typed one; or `None`.
+- It's checked at startup like the plugin's other contributions (§7.4). It's refused with `contribution_invalid` for a malformed ID or label, a session type the plugin doesn't contribute, or an ID taken first.
+- `GET /api/plugins` lists each plugin's host actions.
+- **The shell builds the Connect menu** for a host from every loaded plugin's actions. An action offers one entry per service whose type its session type opens on and is available. A host behind a jump host gets none when the session type can't use one. With `Required`, each entry offers:
+  - each saved credential used with that service;
+  - "Type a credential…", which asks for one in core's dialog when the session opens (§7.6).
+
+  The plugin only names the session type; it never sees the menu or the credential.
+- Other locations (Tools, Tasks), and actions that run a dialog instead of a session, arrive with their first users.
+
+### 7.13 Health probes
+
+A service type can say how to tell whether a service is up (SDK 0.1.6):
+
+```csharp
+new ServiceType("ssh", "SSH") { DefaultPort = 22, Health = HealthProbe.Tcp }
+```
+
+- `HealthProbe.Tcp` is the only probe so far: a TCP connection to the service's effective address and port, closed at once. Nothing is sent, and no credential is used. Other probes (a TLS certificate, a protocol handshake) arrive with their first users. A type without a probe isn't checked.
+- **Core runs the probes**, never the plugin, so a plugin can't reach out on a schedule of its own:
+  - in the background, every `Health:Interval` (5 minutes by default, at least 1), unless `Health:Enabled` is false;
+  - each check has `Health:Timeout` (5 seconds by default, at most 60), and at most `Health:Parallelism` (32 by default) run at once;
+  - an address and port that two services share is checked once;
+  - a host reached through a jump host isn't checked, since it usually can't be reached from the server. Its services have no status.
+- **Results are kept in memory only.** For each service: `up` or `down`, how long the check took, and when it ran. For a service that's down, also why: `refused`, `timeout` or `unreachable`. After a restart, services have no status until their next check.
+- `GET /api/health` returns the results for the hosts the user can see. `POST /api/hosts/{hostId}/health` checks one host now, and needs Use. Checking a host isn't audited, since it reads nothing from it.
+
+### 7.14 The shell
+
+The single-page app in `core/frontend/app`. It knows no service type, session type or plugin: everything it shows of them comes from `GET /api/plugins`.
+
+**Layout.**
+- **Sign-in**, then a header with the user's name and Sign out. A session that ends elsewhere brings the sign-in form back (unchanged from Phase 0).
+- **The host tree**, on the left:
+  - every host the user can see, from `GET /api/hosts`, searched, grouped and sorted in the browser;
+  - **search** matches a host's name, hostname, IP address, description and tags (`name` or `name=value`), ignoring case;
+  - **group by** a tag name gives one group per value, plus "No <name>" for hosts without it. The other choice is no grouping. The choice is kept in the browser;
+  - each host shows its services' health (§7.13);
+  - selecting a host shows its details. Its Connect menu (§7.12) is on the host's row and in its details.
+- **Tabs**, on the right. The first tab is always the selected host's details. Every session opens in a tab of its own. A tab stays mounted while another is showing, so a terminal keeps running. Closing a tab ends its session.
+- **Plugins**, for administrators: the plugin list and frontend states from Phase 0.
+
+**The host editor** creates and edits hosts, for users who can manage them:
+- name, hostname, IP address, description and tags;
+- services: a type from the loaded service types, an optional label, port and address, and a **settings form drawn from the type's schema** (§7.4). The form has text, number, switch and choice fields, with their limits. A service whose type no plugin provides is shown as it's stored, and can only be kept or removed;
+- credentials: label, username, domain, and the secrets. Secrets are write-only: a credential shows whether it has a password or a key, and the editor can replace or clear them. Each credential is used with all services or chosen ones;
+- the jump host: another host, with one of its services and credentials;
+- the server keys the host trusts (§7.7), each removable;
+- saving sends the version the edit started from. On a conflict, the editor says someone else changed the host, and reloads it.
+
+The server's own validation is what counts. The editor shows its field errors next to their fields.
+
+**Core's dialogs.** These belong to the shell, not to any plugin:
+- **a server key no one trusted yet** (§7.10): the host, algorithm and fingerprint, with Trust and Cancel;
+- **a typed credential** (§7.6): username, domain, and password or private key. The shell posts it to core's credential prompt and passes only the prompt reference on.
+
+**Session views (frontend SDK 0.1.6).** A plugin's frontend draws its session types' tabs:
+
+```ts
+export default definePlugin({
+  id: 'ssh',
+  sessionViews: { ssh: TerminalView },
+})
+```
+
+- `sessionViews` maps a session type that the same plugin contributes to a React component. The shell ignores a view for any other session type.
+- The component gets:
+  - the host's ID and name, and the service's ID, as the tab describes them;
+  - `connect(options)`, which opens the stream. It runs core's control phase, with core's dialogs for a key and a typed credential. It resolves to a connection once core says `connected`, and rejects with a `SessionError` carrying core's error code;
+  - whether its tab is showing.
+- A connection sends binary frames and JSON text frames, and delivers the plugin's frames. Its `closed` promise gives core's reason. The view may call `connect` again to reconnect.
+- The SDK's `openStreamSession` implements the protocol (§7.10). `connect` is that function, with the shell's dialogs.
+- **Styles under the shell's policy.** The policy allows stylesheets only from the server (`style-src 'self'`), so a `<style>` element that a library adds is blocked. The SDK has two helpers that keep the policy as it is:
+  - `adoptStyles(css)` adds a stylesheet from text, as a constructable stylesheet, which the policy allows;
+  - `mirrorInjectedStyles(element)` copies the `<style>` elements that a library adds under `element` (xterm.js does) into constructable stylesheets. It keeps them in step until it's called off.
 
 ## 8. Where to read more
 

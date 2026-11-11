@@ -557,7 +557,7 @@ Each phase ends in a state that builds, passes tests, **installs as a native Lin
      - the session registry, which ends sessions when access changes;
      - the `ssh` plugin: its service type and terminal session, with the TOFU prompt in-band;
      - the build packs and signs the built-in plugins with the development key, and CI verifies them.
-  8. **Shell:** sign-in, the tree with search and group-by, the host editor driven by service-type schemas, tabs, and the terminal. With it, the SDK contributions its menus and status need: `HostAction`, and `HealthProbe` (TCP). They moved here from step 7, since the shell is their first user.
+  8. **Shell:** sign-in, the tree with search and group-by, the host editor driven by service-type schemas, tabs, and the terminal. With it, the SDK contributions its menus and status need: `HostAction`, and `HealthProbe` (TCP). They moved here from step 7, since the shell is their first user. All of it is SDK 0.1.6 (architecture.md §7.12–7.14). Users and grants are managed through the API until their pages arrive, after Phase 1.
   9. **Native install:**
      - the hardened systemd unit, nginx, PostgreSQL;
      - the root-owned plugin and trust directories;
