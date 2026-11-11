@@ -157,7 +157,7 @@ contributions.AddHostAction(new HostAction("ssh.terminal", "Terminal", SessionTy
 ```
 
 - A **session type** names a handler that core resolves from your services, so register it: `services.AddScoped<TerminalSessionHandler>()` in `ConfigureServices`.
-- A Connect action that names a session type gets an entry per service, with each saved credential and "Type a credential…" (§7.12). The plugin never sees the menu or the credential.
+- A Connect action that names a session type gets an entry per service, with each saved credential and "Enter credentials…" (§7.12). The plugin never sees the menu or the credential.
 - `SupportsJumpHost` (true by default) says whether the session can go through a host's jump host.
 
 ### The stream session

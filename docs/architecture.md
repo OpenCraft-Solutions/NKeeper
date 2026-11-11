@@ -545,7 +545,7 @@ contributions.AddHostAction(new HostAction("ssh.terminal", "Terminal", SessionTy
 - `GET /api/plugins` lists each plugin's host actions.
 - **The shell builds the Connect menu** for a host from every loaded plugin's actions. An action offers one entry per service whose type its session type opens on and is available. A host behind a jump host gets none when the session type can't use one. With `Required`, each entry offers:
   - each saved credential used with that service;
-  - "Type a credential…", which asks for one in core's dialog when the session opens (§7.6).
+  - "Enter credentials…", which asks for one in core's dialog when the session opens (§7.6).
 
   The plugin only names the session type; it never sees the menu or the credential.
 - Other locations (Tools, Tasks), and actions that open a dialog of the plugin's own, arrive with their first users.
@@ -609,7 +609,7 @@ The single-page app in `core/frontend/app`. It knows no service type, session ty
   - **group by** a tag name gives one group per value, plus "No <name>" for hosts without it. The other choice is no grouping. The choice is kept in the browser;
   - each host shows its services' health (§7.13). The shell checks a host when it's created or saved, rather than waiting for the next background round;
   - selecting a host shows its details. Its Connect menu (§7.12) is on the host's row and in its details;
-  - right-clicking a host's row opens its Connect menu there. Double-clicking it opens the menu's first entry: the first action on the first service it applies to, with the first saved credential used with that service, or the typed-credential dialog when there's none;
+  - right-clicking a host's row opens 1.x's host menu there: Connect, Edit and Copy. Double-clicking it opens the menu's first entry: the first action on the first service it applies to, with the first saved credential used with that service, or the typed-credential dialog when there's none;
   - a host's details say why there's nothing to connect with: it has no services, or no loaded plugin opens a session on them.
 - **Tabs**, on the right. The first tab is always the selected host's details. Every session opens in a tab of its own. A tab stays mounted while another is showing, so a terminal keeps running. Closing a tab ends its session.
 - **Reports**, for everyone: 1.x's list of reports on the left, with the report on the right. So far it lists one:
@@ -638,7 +638,7 @@ The single-page app in `core/frontend/app`. It knows no service type, session ty
 The server's own validation is what counts. The editor shows its field errors next to their fields.
 
 **Core's dialogs.** These belong to the shell, not to any plugin:
-- **a server key no one trusted yet** (§7.10): the host, algorithm and fingerprint, with Trust and Cancel. Only someone with Manage on the host sees it (§7.7);
+- **a server key no one trusted yet** (§7.10): the host, algorithm and fingerprint, with "Trust and connect" and Cancel, worded as 1.x's trust card was. Only someone with Manage on the host sees it (§7.7);
 - **a typed credential** (§7.6): username, domain, and password or private key. The shell posts it to core's credential prompt and passes only the prompt reference on.
 
 **Session views (frontend SDK 0.1.6).** A plugin's frontend draws its session types' tabs:
