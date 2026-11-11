@@ -374,10 +374,16 @@ setup_nginx() {
 
     # IPv6 addresses stay in the certificate, but not in server_name: the HTTPS server is the default one anyway.
     local server_names
-    server_names=$(printf '%s
-' "${names[@]}" | grep -v ':' | tr '
-' ' ')
-    sed -e "s|@SERVER_NAMES@|${server_names% }|g" -e "s|@TLS_DIR@|$TLS|g" "$REPO/deploy/nginx/nkeeper.conf" >/etc/nginx/conf.d/nkeeper.conf
+    server_names=$(printf '%s\n' "${names[@]}" | grep -v ':' | tr '\n' ' ')
+    # nginx 1.25.1 moved HTTP/2 from `listen … http2` to its own directive, and warns about the old form.
+    local listen_http2=" http2" http2="" version
+    version=$(nginx -v 2>&1 | sed -n 's|.*nginx/\([0-9.]*\).*|\1|p')
+    if [ -n "$version" ] && [ "$(printf '%s\n' 1.25.1 "$version" | sort -V | head -n 1)" = 1.25.1 ]; then
+        listen_http2="" http2="http2 on;"
+    fi
+    sed -e "s|@SERVER_NAMES@|${server_names% }|g" -e "s|@TLS_DIR@|$TLS|g" \
+        -e "s|@LISTEN_HTTP2@|$listen_http2|g" -e "s|@HTTP2@|$http2|g" \
+        "$REPO/deploy/nginx/nkeeper.conf" >/etc/nginx/conf.d/nkeeper.conf
     chmod 0644 /etc/nginx/conf.d/nkeeper.conf
     # Debian's default site would otherwise answer on port 80 first.
     rm -f /etc/nginx/sites-enabled/default

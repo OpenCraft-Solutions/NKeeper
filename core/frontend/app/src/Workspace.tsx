@@ -112,15 +112,25 @@ export function Workspace({ catalog, canCreate }: { catalog: Catalog; canCreate:
     setActiveTab((current) => (current === id ? 'host' : current))
   }
 
-  async function checkSelected() {
-    if (!selected) {
-      return
-    }
-    const results = await api.post<ServiceHealth[]>(`/api/hosts/${selected.id}/health`)
+  async function checkHost(hostId: string) {
+    const results = await api.post<ServiceHealth[]>(`/api/hosts/${hostId}/health`)
     setHealth((current) => {
-      const next = new Map([...current].filter(([, r]) => r.hostId !== selected.id))
+      const next = new Map([...current].filter(([, r]) => r.hostId !== hostId))
       results.forEach((r) => next.set(r.serviceId, r))
       return next
+    })
+  }
+
+  async function checkSelected() {
+    if (selected) {
+      await checkHost(selected.id)
+    }
+  }
+
+  /** A host just created or saved is checked at once, rather than at the next background round. */
+  function checkSaved(host: Host) {
+    checkHost(host.id).catch(() => {
+      // Health is a nicety: the host is saved either way.
     })
   }
 
@@ -178,6 +188,7 @@ export function Workspace({ catalog, canCreate }: { catalog: Catalog; canCreate:
                 setHosts((current) => [...(current ?? []), host].sort((a, b) => a.name.localeCompare(b.name)))
                 setSelectedId(host.id)
                 setPane({ kind: 'details' })
+                checkSaved(host)
               }}
               onCancel={() => setPane({ kind: 'details' })}
               onReload={loadHosts}
@@ -191,6 +202,7 @@ export function Workspace({ catalog, canCreate }: { catalog: Catalog; canCreate:
               onSaved={(host) => {
                 replaceHost(host)
                 setPane({ kind: 'details' })
+                checkSaved(host)
               }}
               onCancel={() => setPane({ kind: 'details' })}
               onReload={loadHosts}

@@ -6,10 +6,14 @@ export function ConnectMenu({
   groups,
   onChoose,
   label = 'Connect',
+  name = label,
 }: {
   groups: ConnectGroup[]
   onChoose: (group: ConnectGroup, entry: ConnectEntry) => void
+  /** What the button says. */
   label?: string
+  /** Its accessible name, when the label alone isn't enough (several hosts' buttons in one list). */
+  name?: string
 }) {
   const [open, setOpen] = useState(false)
   const root = useRef<HTMLDivElement>(null)
@@ -36,11 +40,11 @@ export function ConnectMenu({
   }
   return (
     <div className="nk-menu" ref={root}>
-      <button type="button" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+      <button type="button" aria-label={name} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
         {label}
       </button>
       {open && (
-        <div className="nk-menu-list" role="menu" aria-label={label}>
+        <div className="nk-menu-list" role="menu" aria-label={name}>
           {groups.map((group) => (
             <div key={group.key} role="group" aria-label={group.label}>
               <div className="nk-menu-heading">{group.label}</div>
