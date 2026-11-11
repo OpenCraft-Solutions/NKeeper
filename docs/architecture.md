@@ -68,8 +68,9 @@ public sealed class WakeOnLanPlugin : IPlugin
 - `endpoints` is a route group core created at `/api/p/<id>/`, inside core's `/api` group. Every policy in §6.4 applies to it, so a plugin can't forget one ([v2-plan.md §4.4](v2-plan.md#44-guardrails-built-into-the-sdk)).
 - `endpoints.MapHostGroup(HostPermission.Use)` (or `Manage`) gives a group at `hosts/{hostId}/` whose endpoints act on one host the user may use (or manage). See §7.3.
 - `Contribute(IPluginContributions, PluginContext)` declares what the plugin adds to core's catalogues: so far, service types (§7.4) with their health probes (§7.13), session types (§7.10) and host actions (§7.12). It has an empty default, so a plugin with nothing to declare leaves it out.
-- More contracts (settings, audit actions) arrive with their first real users ([v2-plan.md §4.2](v2-plan.md#42-contribution-catalogue)). The SDK may change until it is frozen as v1 at the end of Phase 3.
-- **SDK versions.** A manifest declares the SDK range it supports, and a package outside the server's `SdkVersion` is refused. Within v0, an addition raises the patch number (`0.1.1` added the host scope, `0.1.2` service types, `0.1.3` the credential broker, `0.1.4` SSH connections, `0.1.5` stream sessions, `0.1.6` host actions, health probes and, in the frontend SDK, session views, `0.1.7` run actions and plugin audit events, `0.1.8` HTTPS connections, stateful sessions, session origins and, in the frontend SDK, `confirmTrust`, `0.1.9` desktop connections) and a breaking change raises the minor one. So a plugin built for `>=0.1.0 <0.2.0` keeps loading, and one that uses an addition declares the version that brought it.
+- More contracts (plugin settings, scanners, reports) arrive with their first real users ([v2-plan.md §4.2](v2-plan.md#42-contribution-catalogue)), as additions to SDK v1.
+- **SDK versions.** A manifest declares the SDK range it supports, and a package outside the server's `SdkVersion` is refused. Within v0, an addition raises the patch number (`0.1.1` added the host scope, `0.1.2` service types, `0.1.3` the credential broker, `0.1.4` SSH connections, `0.1.5` stream sessions, `0.1.6` host actions, health probes and, in the frontend SDK, session views, `0.1.7` run actions and plugin audit events, `0.1.8` HTTPS connections, stateful sessions, session origins and, in the frontend SDK, `confirmTrust`, `0.1.9` desktop connections) and a breaking change raises the minor one.
+- **SDK v1 (1.0.0)** froze the SDK at the end of Phase 3, after a review of what Phases 1 and 2 used ([v2-plan.md, Phase 3](v2-plan.md#phase-3-freeze-sdk-v1)). From v1, an addition raises the minor number and a breaking change the major one, which the plan avoids. So a plugin built for `>=1.0.0 <2.0.0` keeps loading, and one that uses an addition declares the version that brought it. The frontend SDK, `@nkeeper/sdk`, is versioned with it. [plugin-authoring.md](plugin-authoring.md) shows how to write a plugin against it.
 
 ## 5. Frontend extension point
 
@@ -306,7 +307,6 @@ Plugins use credentials without seeing them (D13, [plugin-security.md §12](plug
 use.MapPost("/connect", async (HostContext host, ConnectRequest request, ICredentialBroker broker, IConnectivity connectivity) =>
 {
     var handle = await broker.ResolveSavedAsync(host, request.ServiceId, request.CredentialId);
-    var who = await broker.DescribeAsync(host, request.ServiceId, handle);   // username, domain, source; never a secret
     await using var ssh = await connectivity.OpenSshAsync(host, request.ServiceId, handle);   // §7.9
 });
 ```
@@ -327,7 +327,7 @@ Passing on the user's own sign-in arrives with directory sign-in; local accounts
   - the request: a handle is dropped when the request that obtained it ends.
 
   Tying a handle to a plugin session instead arrives with sessions, in step 7. So does ending it when the user's access to the host changes.
-- Every use of a handle checks all its bindings. `DescribeAsync`, and every connection opened with it (§7.9), takes the host and the service again. A mismatch, an unknown handle, or an expired one is refused with `CredentialDeniedException` and audited as `credential.denied`.
+- Every use of a handle checks all its bindings. Every connection opened with it (§7.9) takes the host and the service again. A mismatch, an unknown handle, or an expired one is refused with `CredentialDeniedException` and audited as `credential.denied`.
 - Outside a plugin's own endpoint (a background job, say), the broker refuses to resolve. Credential use outside requests is designed with its first user.
 
 **The credential prompt.**
@@ -421,8 +421,8 @@ Every connection opened is audited as `credential.use`: the host, service, plugi
 
 SFTP and port forwards join with their first users. The connection doesn't need its handle once it's open; the plugin disposes it, which also closes its tunnel. Closing connections when the user's access changes arrives with sessions, in step 7.
 
-**Failures.** Opening throws `SshConnectException` with a reason the plugin can show or act on:
-- `HostKeyUnknown` (with the presented key) and `HostKeyChanged` (§7.7);
+**Failures.** Opening throws `ConnectException` with a `ConnectFailure` the plugin can show or act on. Every kind of connection core opens (SSH here, HTTP in §7.16, desktops in §7.20) throws the same exception, with the reasons that apply to it. For SSH:
+- `HostKeyUnknown`, with the presented identity, and `HostKeyChanged` (§7.7). A `PresentedIdentity` names the host and service that presented it, its kind (`SshHostKey` or `TlsCertificate`), algorithm and fingerprint, and for a certificate its subject and expiry;
 - `AuthenticationFailed`;
 - `NoSecret`: the credential has neither a password nor a private key;
 - `InvalidPrivateKey`: the key can't be read, or its passphrase is wrong;
@@ -682,7 +682,7 @@ var response = await http.Client.SendAsync(new HttpRequestMessage(HttpMethod.Get
 - **Certificates** (when `tls` is true):
   - one that's publicly valid for the address is accepted, as in 1.x;
   - otherwise only a certificate the user trusted for the host is: the trust store (§7.7) gains a second kind, `TlsCertificate`, recorded per endpoint and port. Its "algorithm" is `x509`, and its fingerprint the SHA-256 of the certificate, in the same unpadded base64;
-  - core checks before it hands the connection over. A handshake that shows an untrusted certificate fails with `HttpConnectException` and `HostKeyUnknown`, carrying the certificate's fingerprint, subject and expiry, and core remembers it presented it, as for SSH keys. A different certificate than the trusted one fails with `HostKeyChanged`, audited as `trust.mismatch`.
+  - core checks before it hands the connection over. A handshake that shows an untrusted certificate fails with `ConnectException` and `HostKeyUnknown`, carrying the certificate's fingerprint, subject and expiry, and core remembers it presented it, as for SSH keys. A different certificate than the trusted one fails with `HostKeyChanged`, audited as `trust.mismatch`.
   - every later request on the connection is checked against the same rule, so a certificate that changes mid-session is refused too.
 - The user trusts a certificate the way they trust a key: the shell posts it to core's trusted-keys endpoint, which takes the kind from what core presented. The shell's dialog says "certificate" and shows its subject and expiry.
 
@@ -744,7 +744,7 @@ await using var desktop = await connectivity.OpenDesktopAsync(host, serviceId, h
 
 - `IConnectivity.OpenDesktopAsync(host, serviceId, handle, options)`, for an RDP service, so far:
   - checks the handle, as for SSH (§7.9), and audits `credential.use`;
-  - **checks the server's certificate first.** It reads the certificate RDP offers (an X.224 negotiation, then a TLS handshake), and checks it like an HTTPS one (§7.16): publicly valid, or the one trusted for the host. An unknown one fails with `DesktopConnectException` and `HostKeyUnknown`, carrying the certificate, which core remembers it presented. A changed one fails with `HostKeyChanged`, audited as `trust.mismatch`;
+  - **checks the server's certificate first.** It reads the certificate RDP offers (an X.224 negotiation, then a TLS handshake), and checks it like an HTTPS one (§7.16): publicly valid, or the one trusted for the host. An unknown one fails with `ConnectException` and `HostKeyUnknown`, carrying the certificate, which core remembers it presented. A changed one fails with `HostKeyChanged`, audited as `trust.mismatch`;
   - through a jump host, opens a tunnel (§7.16), and guacd connects to its loopback end;
   - connects to guacd (`Guacd:Address`, `127.0.0.1:4822` by default) and does the Guacamole handshake itself: it selects `rdp`, sends the browser's size, and the connection's parameters. These are the address, port, user name, domain and password, NLA security, and `cert-fingerprints` set to the certificate it just checked, so guacd accepts exactly that one. The browser can never choose the protocol, the target or a parameter;
   - returns once guacd says `ready`, with an `IDesktopConnection`:
@@ -832,6 +832,7 @@ The rest of the installer is Phase 6: release-signed packages, guacd (D11), and 
 ## 9. Where to read more
 
 - [v2-plan.md](v2-plan.md): the audit of 1.x, the core/plugin boundary, the contribution catalogue, phases and decisions.
+- [plugin-authoring.md](plugin-authoring.md): writing a plugin against SDK v1, with ssh and wake-on-lan as worked examples.
 - [plugin-security.md](plugin-security.md): package format, signing, trust, directory checks, verification order and reason codes, loading and states.
 - [CONTRIBUTING.md](../CONTRIBUTING.md): development setup and running the shell with plugins.
 - `plugin-authoring.md` (Phase 1): writing a plugin, with SSH as the worked example.
