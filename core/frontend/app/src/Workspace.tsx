@@ -626,7 +626,11 @@ function SessionPanel({
   )
 
   if (!View) {
-    return <p className="nk-alert nk-pad">The plugin that draws this session isn’t loaded any more.</p>
+    return (
+      <div className={layout.mainState}>
+        <Alert>The plugin that draws this session isn’t loaded any more.</Alert>
+      </div>
+    )
   }
   // The plugin's component, from the catalog: the same one each render.
   return createElement(View, { host, serviceId: tab.serviceId, connect, visible, confirmTrust })

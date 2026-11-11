@@ -41,33 +41,33 @@ let created = false // set once the host exists
 try {
   step('sign in')
   await page.goto(`${base}/`)
-  await page.getByLabel('User name or email').fill(adminUser)
+  await page.getByLabel('Username or email').fill(adminUser)
   await page.getByLabel('Password').fill(adminPassword)
   await page.getByRole('button', { name: 'Sign in' }).click()
-  await page.getByRole('button', { name: 'Sign out' }).waitFor({ timeout: 15000 })
+  await page.getByRole('navigation', { name: 'Main' }).waitFor({ timeout: 15000 })
 
   step(`create ${hostName}, with an HTTPS service on ${targetAddress}:443`)
   await page.getByRole('button', { name: 'New host' }).click()
   const form = page.getByRole('form', { name: 'New host' })
   await form.getByLabel('Name', { exact: true }).fill(hostName)
   await form.getByLabel('IP address').fill(targetAddress)
-  await form.getByLabel('Service type').selectOption({ label: 'HTTPS' })
   await form.getByRole('button', { name: 'Add service' }).click()
+  await form.getByLabel('Type for service 1').selectOption({ label: 'HTTPS' })
   await form.getByRole('button', { name: 'Create host' }).click()
   const details = page.getByRole('article', { name: hostName })
   await details.waitFor({ timeout: 15000 })
   created = true
 
   step('the TLS health probe reports the certificate')
-  await details.getByText(/^Up, \d+ ms/).waitFor({ timeout: 15000 })
+  await details.getByText(/^Up · \d+ ms/).waitFor({ timeout: 15000 })
 
   step('open the web page, and trust the certificate in core’s dialog')
   await details.getByRole('button', { name: 'Connect' }).click()
-  await page.getByRole('menuitem', { name: 'Web page' }).click()
+  await page.getByRole('menuitem', { name: /^Web page/ }).click()
   const trust = page.getByRole('dialog', { name: 'Trust this certificate?' })
   await trust.waitFor({ timeout: 30000 })
-  console.log(`    ${await trust.locator('.nk-mono').innerText()}`)
-  await trust.getByRole('button', { name: 'Trust' }).click()
+  console.log(`    ${await trust.locator('dd').first().innerText()}`)
+  await trust.getByRole('button', { name: 'Trust and connect' }).click()
 
   step('the page shows in the frame, on its own session origin')
   const frame = page.locator('iframe[title$="web page"]')
@@ -94,17 +94,20 @@ try {
   if (created || (await page.getByRole('button', { name: new RegExp(`^${hostName},`) }).count()) > 0) {
     step(`delete ${hostName}`)
     try {
-      for (let i = 0; i < 5 && (await page.locator('dialog[open]').count()) > 0; i++) {
+      for (let i = 0; i < 5 && (await page.locator('[role="dialog"]').count()) > 0; i++) {
         await page.keyboard.press('Escape')
       }
       const closeButtons = page.getByRole('button', { name: new RegExp(`^Close ${hostName}`) })
       while ((await closeButtons.count()) > 0) {
         await closeButtons.first().click()
       }
-      await page.getByRole('tab').first().click()
+      // With no sessions left, the tab bar goes, as in 1.x, and the details show.
+      if ((await page.getByRole('tab').count()) > 0) {
+        await page.getByRole('tab').first().click()
+      }
       await page.getByRole('button', { name: new RegExp(`^${hostName},`) }).click()
       await page.getByRole('button', { name: 'Delete', exact: true }).click()
-      await page.getByRole('button', { name: `Delete ${hostName}` }).click()
+      await page.getByRole('button', { name: 'Yes, delete' }).click()
       await page.getByRole('button', { name: new RegExp(`^${hostName},`) }).waitFor({ state: 'detached', timeout: 10000 })
     } catch (error) {
       console.log(`    couldn't delete it: ${error.message.split('\n')[0]}`)

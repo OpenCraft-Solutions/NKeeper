@@ -59,20 +59,20 @@ let created = false
 try {
   step('sign in')
   await page.goto(`${base}/`)
-  await page.getByLabel('User name or email').fill(adminUser)
+  await page.getByLabel('Username or email').fill(adminUser)
   await page.getByLabel('Password').fill(adminPassword)
   await page.getByRole('button', { name: 'Sign in' }).click()
-  await page.getByRole('button', { name: 'Sign out' }).waitFor({ timeout: 15000 })
+  await page.getByRole('navigation', { name: 'Main' }).waitFor({ timeout: 15000 })
 
   step(`create ${hostName}, with an RDP service on ${rdpAddress}:3389 and a saved credential`)
   await page.getByRole('button', { name: 'New host' }).click()
   const form = page.getByRole('form', { name: 'New host' })
   await form.getByLabel('Name', { exact: true }).fill(hostName)
   await form.getByLabel('IP address').fill(rdpAddress)
-  await form.getByLabel('Service type').selectOption({ label: 'RDP' })
   await form.getByRole('button', { name: 'Add service' }).click()
+  await form.getByLabel('Type for service 1').selectOption({ label: 'RDP' })
   await form.getByRole('button', { name: 'Add credential' }).click()
-  await form.getByLabel('User name').fill(rdpUser)
+  await form.getByLabel('Username').fill(rdpUser)
   await form.getByLabel('Password', { exact: true }).fill(rdpPassword)
   await form.getByRole('button', { name: 'Create host' }).click()
   await page.getByRole('article', { name: hostName }).waitFor({ timeout: 15000 })
@@ -82,16 +82,16 @@ try {
   await page.getByRole('button', { name: new RegExp(`^${hostName},`) }).dblclick()
   const trust = page.getByRole('dialog', { name: 'Trust this certificate?' })
   await trust.waitFor({ timeout: 30000 })
-  console.log(`    ${await trust.locator('.nk-mono').innerText()}`)
-  await trust.getByRole('button', { name: 'Trust' }).click()
+  console.log(`    ${await trust.locator('dd').first().innerText()}`)
+  await trust.getByRole('button', { name: 'Trust and connect' }).click()
 
   step('the desktop draws')
   const deadline = Date.now() + 60000
   let drawn = 0
   while (Date.now() < deadline && drawn < 1000) {
-    const ended = panel.locator('.nk-desktop-overlay')
-    if ((await ended.count()) > 0 && (await ended.getByRole('button', { name: 'Reconnect' }).count()) > 0) {
-      throw new Error(`The desktop ended: ${await ended.locator('span').innerText()}`)
+    const ended = panel.getByRole('alert')
+    if ((await ended.count()) > 0) {
+      throw new Error(`The desktop ended: ${await ended.locator('p').innerText()}`)
     }
     drawn = await drawnPixels().catch(() => 0)
     await page.waitForTimeout(500)
@@ -116,7 +116,7 @@ try {
     step(`delete ${hostName}`)
     try {
       // A dialog left open by a failure makes the page behind it inert: cancel it first (Escape).
-      for (let i = 0; i < 5 && (await page.locator('dialog[open]').count()) > 0; i++) {
+      for (let i = 0; i < 5 && (await page.locator('[role="dialog"]').count()) > 0; i++) {
         await page.keyboard.press('Escape')
         await page.waitForTimeout(200)
       }
@@ -124,10 +124,13 @@ try {
       while ((await closeButtons.count()) > 0) {
         await closeButtons.first().click()
       }
-      await page.getByRole('tab').first().click()
+      // With no sessions left, the tab bar goes, as in 1.x, and the details show.
+      if ((await page.getByRole('tab').count()) > 0) {
+        await page.getByRole('tab').first().click()
+      }
       await page.getByRole('button', { name: new RegExp(`^${hostName},`) }).click()
       await page.getByRole('button', { name: 'Delete', exact: true }).click()
-      await page.getByRole('button', { name: `Delete ${hostName}` }).click()
+      await page.getByRole('button', { name: 'Yes, delete' }).click()
       await page.getByRole('button', { name: new RegExp(`^${hostName},`) }).waitFor({ state: 'detached', timeout: 10000 })
     } catch (error) {
       console.log(`    couldn't delete it: ${error.message.split('\n')[0]}`)
