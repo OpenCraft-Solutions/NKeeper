@@ -423,7 +423,7 @@ Every connection opened is audited as `credential.use`: the host, service, plugi
 SFTP and port forwards join with their first users. The connection doesn't need its handle once it's open; the plugin disposes it, which also closes its tunnel. Closing connections when the user's access changes arrives with sessions, in step 7.
 
 **Failures.** Opening throws `ConnectException` with a `ConnectFailure` the plugin can show or act on. Every kind of connection core opens (SSH here, HTTP in §7.16, desktops in §7.20) throws the same exception, with the reasons that apply to it. For SSH:
-- `HostKeyUnknown`, with the presented identity, and `HostKeyChanged` (§7.7). A `PresentedIdentity` names the host and service that presented it, its kind (`SshHostKey` or `TlsCertificate`), algorithm and fingerprint, and for a certificate its subject and expiry;
+- `HostKeyUnknown`, with the presented identity, and `HostKeyChanged` (§7.7). A `PresentedIdentity` names the host and service that presented it, its kind (`SshHostKey` or `TlsCertificate`), algorithm and fingerprint, and for a certificate its subject and expiry. As JSON it's the frontend SDK's `TrustPrompt`, so a plugin endpoint can return it for its view to pass to `confirmTrust` (§7.14);
 - `AuthenticationFailed`;
 - `NoSecret`: the credential has neither a password nor a private key;
 - `InvalidPrivateKey`: the key can't be read, or its passphrase is wrong;
@@ -724,7 +724,7 @@ Web interfaces through NKeeper, in a tab: ported from 1.x's `Web/` (YARP).
 - **Service types** `http` (port 80, TCP probe) and `https` (port 443, TLS probe), as 1.x had them.
 - **Session type** `web`, "Web page", stateful (§7.17), on both, through a jump host too (§7.16).
 - **Host action** `web.open`, "Web page", with no credential.
-- **Opening** (`POST /api/p/web/hosts/{hostId}/sessions`, Use): core opens the connection (§7.16) and registers the session (§7.17). The plugin answers with a one-time launch URL on the session's origin (§7.18), valid for 2 minutes. An untrusted certificate answers `409` with `host_key_unknown` and the certificate, for the shell's dialog; after the user trusts it, the view opens again.
+- **Opening** (`POST /api/p/web/hosts/{hostId}/sessions`, Use): core opens the connection (§7.16) and registers the session (§7.17). The plugin answers with a one-time launch URL on the session's origin (§7.18), valid for 2 minutes. An untrusted certificate answers `409` with `host_key_unknown` and the certificate as `presented`, for the shell's dialog; after the user trusts it, the view opens again.
 - **The session origin** `nkw-<session ID>.<web domain>`, where the ID is 128 random bits:
   - the launch link sets the session's cookie (HttpOnly, Secure, `SameSite=None`, Partitioned, since NKeeper frames it) and redirects to `/`;
   - every other request must carry that cookie. Without it, or for an unknown or ended session, the handler shows a short page instead;
