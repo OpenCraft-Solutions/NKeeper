@@ -45,7 +45,8 @@ public static class InventoryEndpoints
             .AddScoped<TrustStore>()
             .AddScoped<HostAccess>()
             .AddScoped<HostInventory>()
-            .AddScoped<HostGrants>();
+            .AddScoped<HostGrants>()
+            .AddScoped<IPluginAudit, NKeeper.Core.Audit.PluginAudit>();
     }
 
     /// <summary><c>/api/hosts</c>, and <c>/api/users/{id}/grants</c> for administrators.</summary>

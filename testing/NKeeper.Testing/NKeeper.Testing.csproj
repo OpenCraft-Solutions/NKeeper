@@ -19,6 +19,7 @@
     -->
     <ProjectReference Include="..\plugins\NKeeper.TestPlugins.Hello\NKeeper.TestPlugins.Hello.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\plugins\ssh\backend\NKeeper.Plugins.Ssh.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\plugins\wake-on-lan\backend\NKeeper.Plugins.WakeOnLan.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <ItemGroup>
@@ -26,6 +27,8 @@
     <AssemblyMetadata Include="SshPluginPath" Value="$(MSBuildThisFileDirectory)../../plugins/ssh/backend/bin/$(Configuration)/$(TargetFramework)/NKeeper.Plugins.Ssh.dll" />
     <AssemblyMetadata Include="SshPluginManifest" Value="$(MSBuildThisFileDirectory)../../plugins/ssh/backend/nkeeper-plugin.json" />
     <AssemblyMetadata Include="SshPluginFrontend" Value="$(MSBuildThisFileDirectory)../../plugins/ssh/frontend/dist" />
+    <AssemblyMetadata Include="WakeOnLanPluginPath" Value="$(MSBuildThisFileDirectory)../../plugins/wake-on-lan/backend/bin/$(Configuration)/$(TargetFramework)/NKeeper.Plugins.WakeOnLan.dll" />
+    <AssemblyMetadata Include="WakeOnLanPluginManifest" Value="$(MSBuildThisFileDirectory)../../plugins/wake-on-lan/backend/nkeeper-plugin.json" />
   </ItemGroup>
 
 </Project>

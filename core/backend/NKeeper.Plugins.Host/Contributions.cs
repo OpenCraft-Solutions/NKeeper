@@ -169,9 +169,40 @@ public static partial class ContributionRules
             return $"Host action '{action.Id}' needs a label of at most {MaxLabelLength} characters.";
         }
 
-        if (!sessionTypes.Any(t => t.Id == action.SessionType))
+        // Exactly one of a session to open or an endpoint to run (SDK 0.1.7).
+        if ((action.SessionType is null) == (action.Endpoint is null))
         {
-            return $"Host action '{action.Id}' opens session type '{action.SessionType}', which the plugin doesn't contribute.";
+            return $"Host action '{action.Id}' must name either a session type to open or an endpoint to run, not both or neither.";
+        }
+
+        if (action.SessionType is not null)
+        {
+            if (!sessionTypes.Any(t => t.Id == action.SessionType))
+            {
+                return $"Host action '{action.Id}' opens session type '{action.SessionType}', which the plugin doesn't contribute.";
+            }
+
+            if (action.ServiceTypes is not { Count: 0 })
+            {
+                return $"Host action '{action.Id}' opens a session, so its service types come from the session type; leave ServiceTypes empty.";
+            }
+        }
+        else
+        {
+            if (!EndpointPath().IsMatch(action.Endpoint!) || action.Endpoint!.Length > MaxActionIdLength)
+            {
+                return $"Host action '{action.Id}' runs '{action.Endpoint}', which isn't a path of lower-case segments such as 'wake' or 'power/on'.";
+            }
+
+            if (action.ServiceTypes is null || action.ServiceTypes.Count == 0)
+            {
+                return $"Host action '{action.Id}' runs an endpoint, so it must name the service types it applies to.";
+            }
+
+            if (action.ServiceTypes.FirstOrDefault(t => t is null || !TypeId().IsMatch(t)) is var invalid && action.ServiceTypes.Any(t => t is null || !TypeId().IsMatch(t)))
+            {
+                return $"Host action '{action.Id}' names a service type '{invalid}' that isn't a valid ID.";
+            }
         }
 
         return Enum.IsDefined(action.Credential) ? null : $"Host action '{action.Id}' has an unknown credential mode.";
@@ -183,6 +214,9 @@ public static partial class ContributionRules
 
     [GeneratedRegex(@"^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)*\z")]
     private static partial Regex ActionId();
+
+    [GeneratedRegex(@"^[a-z][a-z0-9-]*(?:/[a-z][a-z0-9-]*)*\z")]
+    private static partial Regex EndpointPath();
 
     [GeneratedRegex(@"^[a-z][A-Za-z0-9]{0,63}\z")]
     private static partial Regex SettingKey();

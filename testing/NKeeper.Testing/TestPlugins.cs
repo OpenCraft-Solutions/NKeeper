@@ -71,6 +71,16 @@ public static class TestPlugins
         return PackageBuilder.Build(File.ReadAllBytes(Metadata("SshPluginManifest")), files, key);
     }
 
+    /// <summary>The wake-on-lan plugin (plugins/wake-on-lan), packaged from its own manifest and build output, signed with <paramref name="key"/>.</summary>
+    public static BuiltPackage WakeOnLanPackage(PluginSigningKey key)
+    {
+        string Metadata(string name) => typeof(TestPlugins).Assembly.GetCustomAttributes<AssemblyMetadataAttribute>().Single(a => a.Key == name).Value!;
+        return PackageBuilder.Build(
+            File.ReadAllBytes(Metadata("WakeOnLanPluginManifest")),
+            new Dictionary<string, byte[]> { ["backend/NKeeper.Plugins.WakeOnLan.dll"] = File.ReadAllBytes(Metadata("WakeOnLanPluginPath")) },
+            key);
+    }
+
     /// <summary>Writes a package into <paramref name="directory"/> and returns its path.</summary>
     public static string WriteTo(this BuiltPackage package, string directory)
     {

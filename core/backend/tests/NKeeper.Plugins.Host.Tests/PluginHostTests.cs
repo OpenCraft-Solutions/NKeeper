@@ -428,6 +428,11 @@ public sealed class PluginHostTests : IDisposable
     [InlineData("action-label")]
     [InlineData("action-session")]
     [InlineData("action-credential")]
+    [InlineData("action-both")]
+    [InlineData("action-neither")]
+    [InlineData("action-endpoint")]
+    [InlineData("action-run-services")]
+    [InlineData("action-session-services")]
     public async Task A_plugin_contributing_an_invalid_host_action_is_refused_and_registers_nothing(string rule)
     {
         _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "broken", entryType: TestPlugins.InvalidServiceTypeType));

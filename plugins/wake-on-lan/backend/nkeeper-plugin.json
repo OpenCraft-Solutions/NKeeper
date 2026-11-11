@@ -1,0 +1,12 @@
+{
+  "formatVersion": 1,
+  "id": "wake-on-lan",
+  "name": "Wake-on-LAN",
+  "version": "0.1.0",
+  "sdkVersion": ">=0.1.7 <0.2.0",
+  "builtIn": true,
+  "backend": {
+    "entryAssembly": "backend/NKeeper.Plugins.WakeOnLan.dll",
+    "entryType": "NKeeper.Plugins.WakeOnLan.WakeOnLanPlugin"
+  }
+}
