@@ -33,6 +33,8 @@ NKeeper's native installer (docs/architecture.md §8).
         --admin-user <name>     the first administrator, on a fresh install (default: admin)
         --admin-email <email>   their email address (default: admin@<host name>)
         --admin-password <pw>   their password (default: generated, and printed once)
+        --web-domain <domain>   where web pages open: nkw-<id>.<domain> (docs/architecture.md §7.18). Needs a
+                                wildcard DNS record, *.<domain>, pointing at this server. Kept on upgrade.
         --yes                   don't ask anything
 
   sudo deploy/setup.sh uninstall [--purge]
@@ -73,10 +75,11 @@ selinux() { command -v selinuxenabled >/dev/null 2>&1 && selinuxenabled; }
 
 command=${1:-}
 [ $# -gt 0 ] && shift
-names=() cert="" key="" admin_user=admin admin_email="" admin_password="" assume_yes=false purge=false
+names=() cert="" key="" admin_user=admin admin_email="" admin_password="" assume_yes=false purge=false web_domain=""
 while [ $# -gt 0 ]; do
     case $1 in
         --server-name) names+=("${2:?--server-name needs a value}"); shift 2 ;;
+        --web-domain) web_domain=$(tr '[:upper:]' '[:lower:]' <<<"${2:?--web-domain needs a value}"); shift 2 ;;
         --cert) cert=${2:?--cert needs a file}; shift 2 ;;
         --key) key=${2:?--key needs a file}; shift 2 ;;
         --admin-user) admin_user=${2:?--admin-user needs a value}; shift 2 ;;
@@ -301,6 +304,12 @@ configure() {
     set_env "$ENV_FILE" ASPNETCORE_URLS "http://127.0.0.1:$SERVER_PORT"
     set_env "$ENV_FILE" Frontend__Root "$PREFIX/shell"
     set_env "$ENV_FILE" ForwardedHeaders__Enabled true
+    # The web domain: given now, or kept from the last install.
+    web_domain=${web_domain:-$(get_env "$ENV_FILE" Origins__BaseDomain)}
+    if [ -n "$web_domain" ]; then
+        [[ $web_domain =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,62}$ ]] || die "--web-domain $web_domain isn't a DNS name such as web.example.com."
+        set_env "$ENV_FILE" Origins__BaseDomain "$web_domain"
+    fi
     set_env "$ENV_FILE" DataProtection__CertificatePath "$KEYRING"
     set_env "$ENV_FILE" DOTNET_CLI_TELEMETRY_OPTOUT 1
 
@@ -356,25 +365,34 @@ setup_nginx() {
     fi
     [ ${#names[@]} -gt 0 ] || die "Couldn't tell this machine's names; give one with --server-name."
 
+    # Web pages' session origins (docs/architecture.md §7.18): nkw-<id>.<web domain>, answered by the same server.
+    local all_names=("${names[@]}")
+    if [ -n "$web_domain" ]; then
+        all_names+=("*.$web_domain")
+    fi
+
     if [ -n "$cert" ]; then
         [ -n "$key" ] || die "--cert needs --key."
         install -o root -g root -m 0644 "$cert" "$TLS/nkeeper.crt"
         install -o root -g root -m 0600 "$key" "$TLS/nkeeper.key"
-    elif [ ! -s "$TLS/nkeeper.crt" ]; then
+        rm -f "$TLS/self-signed-for"
+    elif [ ! -s "$TLS/nkeeper.crt" ] || { [ -f "$TLS/self-signed-for" ] && [ "$(cat "$TLS/self-signed-for")" != "${all_names[*]}" ]; }; then
+        # A certificate this installer made is made again when the names change; one given with --cert never is.
         local san="" name
-        for name in "${names[@]}"; do
+        for name in "${all_names[@]}"; do
             if [[ $name =~ ^[0-9.]+$ || $name == *:* ]]; then san+="IP:$name,"; else san+="DNS:$name,"; fi
         done
         (umask 077 && openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 825 \
             -subj "/CN=${names[0]}" -addext "subjectAltName=${san%,}" \
             -keyout "$TLS/nkeeper.key" -out "$TLS/nkeeper.crt" 2>/dev/null) || die "Couldn't create a certificate."
         chmod 0644 "$TLS/nkeeper.crt"
-        warn "nginx uses a self-signed certificate for ${names[*]}; give your own with --cert and --key."
+        echo "${all_names[*]}" >"$TLS/self-signed-for"
+        warn "nginx uses a self-signed certificate for ${all_names[*]}; give your own with --cert and --key."
     fi
 
     # IPv6 addresses stay in the certificate, but not in server_name: the HTTPS server is the default one anyway.
     local server_names
-    server_names=$(printf '%s\n' "${names[@]}" | grep -v ':' | tr '\n' ' ')
+    server_names=$(printf '%s\n' "${all_names[@]}" | grep -v ':' | tr '\n' ' ')
     # nginx 1.25.1 moved HTTP/2 from `listen … http2` to its own directive, and warns about the old form.
     local listen_http2=" http2" http2="" version
     version=$(nginx -v 2>&1 | sed -n 's|.*nginx/\([0-9.]*\).*|\1|p')

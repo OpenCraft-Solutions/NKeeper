@@ -54,7 +54,8 @@ jobs:
           sudo systemctl restart ssh
 
       - name: Install
-        run: sudo deploy/setup.sh install --yes --server-name localhost --admin-password "$ADMIN_PASSWORD"
+        # web.localhost: Chromium resolves *.localhost to loopback, so web pages' session origins need no DNS.
+        run: sudo deploy/setup.sh install --yes --server-name localhost --web-domain web.localhost --admin-password "$ADMIN_PASSWORD"
 
       - name: Sign in through nginx and see the built-in plugins load
         run: deploy/check-install.sh "$ADMIN_PASSWORD"
@@ -64,6 +65,11 @@ jobs:
           SSH_USER: nke2e
           SCREENSHOTS: ${{ runner.temp }}
         run: npm run terminal --workspace @nkeeper/e2e
+
+      - name: Open a web page in a real browser
+        env:
+          SCREENSHOTS: ${{ runner.temp }}
+        run: npm run web --workspace @nkeeper/e2e
 
       - name: Upgrade in place
         run: sudo deploy/setup.sh install --yes --server-name localhost
@@ -76,6 +82,11 @@ jobs:
           SSH_USER: nke2e
           SCREENSHOTS: ${{ runner.temp }}
         run: npm run terminal --workspace @nkeeper/e2e
+
+      - name: Open a web page again after the upgrade
+        env:
+          SCREENSHOTS: ${{ runner.temp }}
+        run: npm run web --workspace @nkeeper/e2e
 
       - name: Keep the screenshots
         if: always()

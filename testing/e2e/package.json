@@ -1,12 +1,13 @@
 {
   "name": "@nkeeper/e2e",
-  "description": "A real-browser test of an installed NKeeper (docs/architecture.md §8): sign in, add a host, open terminals.",
+  "description": "Real-browser tests of an installed NKeeper (docs/architecture.md §8): terminals and web pages.",
   "private": true,
   "license": "MIT",
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "terminal": "node terminal.mjs"
+    "terminal": "node terminal.mjs",
+    "web": "node web.mjs"
   },
   "devDependencies": {
     "playwright": "^1.65.0"
