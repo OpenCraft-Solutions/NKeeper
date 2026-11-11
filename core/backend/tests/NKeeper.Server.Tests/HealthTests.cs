@@ -75,6 +75,29 @@ public sealed class HealthTests(PostgresFixture postgres, SshServerFixture ssh) 
         Assert.Empty((await checkedNow.Content.ReadFromJsonAsync<JsonElement>(Token)).EnumerateArray());
     }
 
+    [Fact]
+    public void A_round_that_ran_long_never_undoes_a_newer_check()
+    {
+        var results = new NKeeper.Core.Health.ServiceHealthResults();
+        var start = new DateTimeOffset(2026, 11, 10, 12, 0, 0, TimeSpan.Zero);
+        var (host, service, removed, added) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        NKeeper.Core.Health.ServiceHealthResponse Result(Guid id, NKeeper.Core.Health.ServiceHealthState state, int seconds) =>
+            new(host, id, state, 1, start.AddSeconds(seconds), null);
+        // The removed service is another host's, so only the round can drop it.
+        results.ReplaceAll(
+            [Result(service, NKeeper.Core.Health.ServiceHealthState.Up, -600), new(Guid.NewGuid(), removed, NKeeper.Core.Health.ServiceHealthState.Up, 1, start.AddSeconds(-600), null)],
+            start.AddSeconds(-600));
+
+        // A round begins; meanwhile someone checks the host now, and a new service is checked too.
+        results.ReplaceHost(host, [Result(service, NKeeper.Core.Health.ServiceHealthState.Up, 20), Result(added, NKeeper.Core.Health.ServiceHealthState.Up, 20)], start.AddSeconds(19));
+        results.ReplaceAll([Result(service, NKeeper.Core.Health.ServiceHealthState.Down, 5)], start);
+
+        var after = results.All.ToDictionary(r => r.ServiceId);
+        Assert.Equal(NKeeper.Core.Health.ServiceHealthState.Up, after[service].State);
+        Assert.True(after.ContainsKey(added));
+        Assert.False(after.ContainsKey(removed));
+    }
+
     /// <summary>A local port nothing listens on: one the system just gave out and took back.</summary>
     private static int ClosedPort()
     {

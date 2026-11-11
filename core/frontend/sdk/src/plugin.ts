@@ -19,8 +19,9 @@ export interface SessionViewProps {
   /**
    * Opens the stream: core's control phase, with the shell's dialogs for a server key and a typed
    * credential. Resolves once core says `connected`; rejects with a `SessionError`. Call it again to reconnect.
+   * Aborting `signal`, when the view goes, cancels it and any dialog it is waiting on.
    */
-  readonly connect: (options?: Record<string, unknown>) => Promise<StreamConnection>
+  readonly connect: (options?: Record<string, unknown>, signal?: AbortSignal) => Promise<StreamConnection>
   /** Whether the view's tab is showing. A hidden view stays mounted, so its session keeps running. */
   readonly visible: boolean
 }
@@ -66,12 +67,17 @@ export function isPluginDefinition(value: unknown): value is PluginDefinition {
   )
 }
 
-/** Components are functions, or objects for memo and forwardRef ones. */
+/** React's own component objects (memo, forwardRef, lazy) carry one of these. */
+const COMPONENT_OBJECTS = new Set([Symbol.for('react.memo'), Symbol.for('react.forward_ref'), Symbol.for('react.lazy')])
+
+/** Components are functions, or React's memo, forwardRef and lazy objects; anything else can't be drawn. */
+function isComponent(view: unknown): boolean {
+  if (typeof view === 'function') {
+    return true
+  }
+  return typeof view === 'object' && view !== null && COMPONENT_OBJECTS.has((view as { $$typeof?: unknown }).$$typeof as symbol)
+}
+
 function isViewMap(value: unknown): boolean {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    !Array.isArray(value) &&
-    Object.values(value).every((view) => typeof view === 'function' || (typeof view === 'object' && view !== null))
-  )
+  return typeof value === 'object' && value !== null && !Array.isArray(value) && Object.values(value).every(isComponent)
 }

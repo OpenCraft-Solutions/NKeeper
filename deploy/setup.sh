@@ -60,7 +60,12 @@ set_env() {
     rm -f "$tmp"
 }
 
-get_env() { [ -f "$1" ] && sed -n "s/^$2=//p" "$1" | tail -n 1 | sed 's/^"\(.*\)"$/\1/' || true; }
+# get_env FILE NAME: the value of NAME in a systemd environment file, without its quotes; empty if unset.
+get_env() {
+    if [ -f "$1" ]; then
+        sed -n "s/^$2=//p" "$1" | tail -n 1 | sed 's/^"\(.*\)"$/\1/'
+    fi
+}
 
 selinux() { command -v selinuxenabled >/dev/null 2>&1 && selinuxenabled; }
 

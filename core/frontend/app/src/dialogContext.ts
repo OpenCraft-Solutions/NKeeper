@@ -10,9 +10,10 @@ export interface TypedCredential {
   privateKey: string | null
 }
 
+/** Each request waits its turn. Aborting its signal withdraws it: a key is then not trusted, and no credential is given. */
 export interface Dialogs {
-  confirmHostKey(prompt: HostKeyPrompt, hostName: string): Promise<boolean>
-  askCredential(hostName: string, serviceName: string): Promise<TypedCredential | null>
+  confirmHostKey(prompt: HostKeyPrompt, hostName: string, signal?: AbortSignal): Promise<boolean>
+  askCredential(hostName: string, serviceName: string, signal?: AbortSignal): Promise<TypedCredential | null>
 }
 
 export const DialogContext = createContext<Dialogs | null>(null)

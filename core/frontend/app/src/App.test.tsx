@@ -65,14 +65,16 @@ describe('loadPluginFrontends', () => {
   })
 })
 
-/** A plugin view that connects when it mounts, and says how it went. */
+/** A plugin view that connects when it mounts, cancelling when it goes, and says how it went. */
 function EchoView({ connect, host }: SessionViewProps) {
   const [state, setState] = useState('opening')
   useEffect(() => {
-    connect({ columns: 80 }).then(
+    const opening = new AbortController()
+    connect({ columns: 80 }, opening.signal).then(
       () => setState('connected'),
       (error: { code?: string }) => setState(`failed: ${error.code}`),
     )
+    return () => opening.abort()
   }, [connect])
   return <p>{`${host.name}: ${state}`}</p>
 }
@@ -286,6 +288,50 @@ describe('the workspace', () => {
     // Closing the tab ends the session.
     await user.click(screen.getByRole('button', { name: 'Close web01 · Terminal' }))
     expect(screen.queryByRole('tab', { name: 'web01 · Terminal' })).not.toBeInTheDocument()
+  })
+
+  it('keeps sessions running behind the plugin list, and withdraws a dialog when its tab closes', async () => {
+    vi.stubGlobal('WebSocket', FakeSocket)
+    signedIn()
+    const user = userEvent.setup()
+
+    render(<App importer={termImporter} />)
+    await user.click(await screen.findByRole('button', { name: 'Connect to web01' }))
+    await user.click(screen.getByRole('menuitem', { name: 'root' }))
+    await waitFor(() => expect(FakeSocket.last).not.toBeNull())
+    const socket = FakeSocket.last!
+    act(() => socket.open())
+    act(() => socket.receiveJson({ type: 'connected' }))
+    expect(await screen.findByText('web01: connected')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Plugins' }))
+    await user.click(screen.getByRole('button', { name: 'Plugins' }))
+    expect(screen.getByText('web01: connected')).toBeInTheDocument()
+    expect(socket.readyState).toBe(FakeSocket.OPEN)
+
+    // A second tab, waiting on a typed credential, is closed before it's answered.
+    await user.click(screen.getByRole('button', { name: 'Connect to web01' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Type a credential…' }))
+    expect(await screen.findByRole('dialog', { name: 'Type a credential' })).toBeInTheDocument()
+    await user.click(screen.getAllByRole('button', { name: 'Close web01 · Terminal' }).at(-1)!)
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Type a credential' })).not.toBeInTheDocument())
+  })
+
+  it('catches a port that isn’t a number before sending', async () => {
+    const fetch = signedIn()
+    const user = userEvent.setup()
+
+    render(<App importer={termImporter} />)
+    await user.click(await screen.findByRole('button', { name: 'New host' }))
+    const form = screen.getByRole('form', { name: 'New host' })
+    await user.type(within(form).getByLabelText('Name'), 'new01')
+    await user.click(within(form).getByRole('button', { name: 'Add service' }))
+    await user.type(within(form).getByLabelText('Port'), 'abc')
+    await user.selectOptions(within(form).getByLabelText('Mode'), 'fast')
+    await user.click(within(form).getByRole('button', { name: 'Create host' }))
+
+    expect(await within(form).findByText('Enter a port from 1 to 65535.', { selector: '.nk-field-error' })).toBeInTheDocument()
+    expect(fetch.mock.calls.some(([url, init]) => url === '/api/hosts' && init?.method === 'POST')).toBe(false)
   })
 
   it('creates a host with a service whose settings form comes from its type’s schema, and shows field errors', async () => {

@@ -63,28 +63,64 @@ public enum ServiceDownReason
 /// <param name="Reason">Why it's down; null when it's up.</param>
 public sealed record ServiceHealthResponse(Guid HostId, Guid ServiceId, ServiceHealthState State, int LatencyMs, DateTimeOffset CheckedAtUtc, ServiceDownReason? Reason);
 
-/// <summary>The latest results, in memory only: after a restart, services have no status until their next check.</summary>
+/// <summary>
+/// The latest results, in memory only: after a restart, services have no status until their next check.
+/// A result never replaces a newer one, so a round that ran long can't undo a check made meanwhile.
+/// </summary>
 public sealed class ServiceHealthResults
 {
-    private ConcurrentDictionary<Guid, ServiceHealthResponse> _results = new();
+    private readonly Lock _lock = new();
+    private Dictionary<Guid, ServiceHealthResponse> _results = [];
 
-    public IEnumerable<ServiceHealthResponse> All => _results.Values;
-
-    /// <summary>Replaces everything with a full round's results, so removed services drop out.</summary>
-    public void ReplaceAll(IEnumerable<ServiceHealthResponse> results) =>
-        _results = new ConcurrentDictionary<Guid, ServiceHealthResponse>(results.Select(r => KeyValuePair.Create(r.ServiceId, r)));
-
-    /// <summary>Replaces one host's results.</summary>
-    public void ReplaceHost(Guid hostId, IEnumerable<ServiceHealthResponse> results)
+    public IReadOnlyList<ServiceHealthResponse> All
     {
-        foreach (var stale in _results.Values.Where(r => r.HostId == hostId))
+        get
         {
-            _results.TryRemove(stale.ServiceId, out _);
+            lock (_lock)
+            {
+                return [.. _results.Values];
+            }
         }
+    }
 
-        foreach (var result in results)
+    /// <summary>
+    /// A full round's results, which began at <paramref name="startedAtUtc"/>. Services it didn't check drop
+    /// out, unless they were checked since it began (a host added and checked meanwhile, say).
+    /// </summary>
+    public void ReplaceAll(IEnumerable<ServiceHealthResponse> results, DateTimeOffset startedAtUtc)
+    {
+        lock (_lock)
         {
-            _results[result.ServiceId] = result;
+            var next = results.ToDictionary(r => r.ServiceId);
+            foreach (var current in _results.Values.Where(r => r.CheckedAtUtc >= startedAtUtc))
+            {
+                if (!next.TryGetValue(current.ServiceId, out var checkedInRound) || checkedInRound.CheckedAtUtc < current.CheckedAtUtc)
+                {
+                    next[current.ServiceId] = current;
+                }
+            }
+
+            _results = next;
+        }
+    }
+
+    /// <summary>Replaces one host's results with a check that began at <paramref name="startedAtUtc"/>.</summary>
+    public void ReplaceHost(Guid hostId, IEnumerable<ServiceHealthResponse> results, DateTimeOffset startedAtUtc)
+    {
+        lock (_lock)
+        {
+            foreach (var stale in _results.Values.Where(r => r.HostId == hostId && r.CheckedAtUtc < startedAtUtc).ToList())
+            {
+                _results.Remove(stale.ServiceId);
+            }
+
+            foreach (var result in results)
+            {
+                if (!_results.TryGetValue(result.ServiceId, out var current) || current.CheckedAtUtc <= result.CheckedAtUtc)
+                {
+                    _results[result.ServiceId] = result;
+                }
+            }
         }
     }
 }
@@ -99,11 +135,17 @@ public sealed class ServiceHealthChecker(
     ServiceTypeCatalog serviceTypes,
     ServiceHealthResults results,
     IOptions<HealthOptions> options,
-    TimeProvider time)
+    TimeProvider time) : IDisposable
 {
+    // Health:Parallelism caps every probe at once: the background round's and on-demand checks' together.
+    private readonly SemaphoreSlim _probes = new(options.Value.Parallelism, options.Value.Parallelism);
+
+    public void Dispose() => _probes.Dispose();
+
     /// <summary>Checks every host, and replaces the results; returns how many services were checked.</summary>
     public async Task<int> CheckAllAsync(CancellationToken cancellationToken)
     {
+        var startedAt = time.GetUtcNow();
         List<Host> hosts;
         await using (var scope = scopes.CreateAsyncScope())
         {
@@ -124,13 +166,14 @@ public sealed class ServiceHealthChecker(
                     checks.Add(check);
                 }
             });
-        results.ReplaceAll(checks);
+        results.ReplaceAll(checks, startedAt);
         return checks.Count;
     }
 
     /// <summary>Checks one host now, and replaces its results.</summary>
     public async Task<List<ServiceHealthResponse>> CheckHostAsync(Guid hostId, CancellationToken cancellationToken)
     {
+        var startedAt = time.GetUtcNow();
         Host? host;
         await using (var scope = scopes.CreateAsyncScope())
         {
@@ -140,7 +183,7 @@ public sealed class ServiceHealthChecker(
         }
 
         var checks = host is null || host.JumpHostId is not null ? [] : await CheckAsync(host, cancellationToken);
-        results.ReplaceHost(hostId, checks);
+        results.ReplaceHost(hostId, checks, startedAt);
         return checks;
     }
 
@@ -177,6 +220,19 @@ public sealed class ServiceHealthChecker(
     }
 
     private async Task<(int LatencyMs, DateTimeOffset At, ServiceDownReason? Reason)> ProbeAsync(string address, int port, CancellationToken cancellationToken)
+    {
+        await _probes.WaitAsync(cancellationToken);
+        try
+        {
+            return await ProbeNowAsync(address, port, cancellationToken);
+        }
+        finally
+        {
+            _probes.Release();
+        }
+    }
+
+    private async Task<(int LatencyMs, DateTimeOffset At, ServiceDownReason? Reason)> ProbeNowAsync(string address, int port, CancellationToken cancellationToken)
     {
         var at = time.GetUtcNow();
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);

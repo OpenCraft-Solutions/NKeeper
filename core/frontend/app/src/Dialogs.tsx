@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import type { HostKeyPrompt } from '@nkeeper/sdk'
 import { DialogContext, type Dialogs, type TypedCredential } from './dialogContext'
 
@@ -18,15 +18,36 @@ export function DialogProvider({ children }: { children: ReactNode }) {
   const [queue, setQueue] = useState<Request[]>([])
   const nextId = useRef(0)
 
-  const push = useCallback((request: NewRequest) => {
-    setQueue((current) => [...current, { ...request, id: ++nextId.current } as Request])
-  }, [])
   const done = useCallback((id: number) => setQueue((current) => current.filter((r) => r.id !== id)), [])
+
+  /** Queues a request; aborting `signal` withdraws it, answering with `withdrawn`. */
+  const push = useCallback(
+    <T,>(request: NewRequest, withdrawn: T, signal: AbortSignal | undefined, settle: (answer: T) => void) => {
+      if (signal?.aborted) {
+        settle(withdrawn)
+        return
+      }
+      const id = ++nextId.current
+      const withdraw = () => {
+        settle(withdrawn)
+        done(id)
+      }
+      signal?.addEventListener('abort', withdraw, { once: true })
+      const resolve = (answer: T) => {
+        signal?.removeEventListener('abort', withdraw)
+        settle(answer)
+      }
+      setQueue((current) => [...current, { ...request, id, resolve } as Request])
+    },
+    [done],
+  )
 
   const dialogs = useMemo<Dialogs>(
     () => ({
-      confirmHostKey: (prompt, hostName) => new Promise((resolve) => push({ kind: 'hostKey', prompt, hostName, resolve })),
-      askCredential: (hostName, serviceName) => new Promise((resolve) => push({ kind: 'credential', hostName, serviceName, resolve })),
+      confirmHostKey: (prompt, hostName, signal) =>
+        new Promise((settle) => push({ kind: 'hostKey', prompt, hostName, resolve: () => {} }, false, signal, settle)),
+      askCredential: (hostName, serviceName, signal) =>
+        new Promise((settle) => push({ kind: 'credential', hostName, serviceName, resolve: () => {} }, null, signal, settle)),
     }),
     [push],
   )
@@ -59,20 +80,42 @@ export function DialogProvider({ children }: { children: ReactNode }) {
   )
 }
 
-function Modal({ title, children }: { title: string; children: ReactNode }) {
+/**
+ * A modal dialog: the browser's own, opened with showModal, so focus moves into it, the page behind is inert,
+ * and focus returns when it closes. Escape is the same as Cancel.
+ */
+function Modal({ title, onCancel, children }: { title: string; onCancel: () => void; children: ReactNode }) {
+  const dialog = useRef<HTMLDialogElement>(null)
+  useEffect(() => {
+    const element = dialog.current
+    if (element && !element.open) {
+      if (typeof element.showModal === 'function') {
+        element.showModal()
+      } else {
+        element.setAttribute('open', '')
+      }
+    }
+    return () => element?.close?.()
+  }, [])
   return (
-    <div className="nk-backdrop">
-      <div className="nk-dialog" role="dialog" aria-modal="true" aria-label={title}>
-        <h2>{title}</h2>
-        {children}
-      </div>
-    </div>
+    <dialog
+      ref={dialog}
+      className="nk-dialog"
+      aria-label={title}
+      onCancel={(event) => {
+        event.preventDefault()
+        onCancel()
+      }}
+    >
+      <h2>{title}</h2>
+      {children}
+    </dialog>
   )
 }
 
 function HostKeyDialog({ request, onAnswer }: { request: Extract<Request, { kind: 'hostKey' }>; onAnswer: (trust: boolean) => void }) {
   return (
-    <Modal title="Trust this server key?">
+    <Modal title="Trust this server key?" onCancel={() => onAnswer(false)}>
       <p>
         <strong>{request.hostName}</strong> presented a key no one has trusted yet. Check its fingerprint with the server’s administrator before
         trusting it.
@@ -112,7 +155,7 @@ function CredentialDialog({ request, onAnswer }: { request: Extract<Request, { k
   }
 
   return (
-    <Modal title="Type a credential">
+    <Modal title="Type a credential" onCancel={() => onAnswer(null)}>
       <form onSubmit={submit} className="nk-form">
         <p>
           For {request.serviceName} on <strong>{request.hostName}</strong>. It’s used for this session only, and isn’t saved.

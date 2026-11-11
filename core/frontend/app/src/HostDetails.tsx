@@ -15,7 +15,7 @@ export function HostDetails({
   health,
   onEdit,
   onDeleted,
-  onChanged,
+  onKeyRemoved,
   onCheck,
   onConnect,
 }: {
@@ -25,7 +25,8 @@ export function HostDetails({
   health: Map<string, ServiceHealth>
   onEdit: () => void
   onDeleted: () => void
-  onChanged: (host: Host) => void
+  /** A trusted key was removed: applied to the latest host, so two removals at once both stay removed. */
+  onKeyRemoved: (keyId: string) => void
   onCheck: () => Promise<void>
   onConnect: (group: ConnectGroup, entry: ConnectEntry) => void
 }) {
@@ -48,7 +49,7 @@ export function HostDetails({
     setError(null)
     try {
       await api.delete(`/api/hosts/${host.id}/trusted-keys/${keyId}`)
-      onChanged({ ...host, trustedKeys: host.trustedKeys.filter((k) => k.id !== keyId) })
+      onKeyRemoved(keyId)
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : 'The key could not be removed.')
     }

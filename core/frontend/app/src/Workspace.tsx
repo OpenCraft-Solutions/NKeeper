@@ -82,6 +82,8 @@ export function Workspace({ catalog, canCreate }: { catalog: Catalog; canCreate:
   }, [])
 
   const selected = hosts?.find((h) => h.id === selectedId) ?? null
+  // A jump host's key prompt names the jump host, which the user may not be able to see.
+  const hostName = useCallback((id: string) => hosts?.find((h) => h.id === id)?.name ?? null, [hosts])
   const replaceHost = (host: Host) => setHosts((current) => (current ?? []).map((h) => (h.id === host.id ? host : h)))
 
   function select(host: Host) {
@@ -195,6 +197,7 @@ export function Workspace({ catalog, canCreate }: { catalog: Catalog; canCreate:
             />
           ) : selected ? (
             <HostDetails
+              key={selected.id}
               host={selected}
               hosts={hosts ?? []}
               catalog={catalog}
@@ -204,7 +207,9 @@ export function Workspace({ catalog, canCreate }: { catalog: Catalog; canCreate:
                 setHosts((current) => (current ?? []).filter((h) => h.id !== selected.id))
                 setSelectedId(null)
               }}
-              onChanged={replaceHost}
+              onKeyRemoved={(keyId) =>
+                setHosts((current) => (current ?? []).map((h) => (h.id === selected.id ? { ...h, trustedKeys: h.trustedKeys.filter((k) => k.id !== keyId) } : h)))
+              }
               onCheck={checkSelected}
               onConnect={(group, entry) => open(selected, group, entry)}
             />
@@ -214,7 +219,7 @@ export function Workspace({ catalog, canCreate }: { catalog: Catalog; canCreate:
         </div>
         {sessions.map((tab) => (
           <div key={tab.id} className="nk-panel nk-session" role="tabpanel" id={`panel-${tab.id}`} aria-labelledby={tab.id} hidden={activeTab !== tab.id}>
-            <SessionPanel tab={tab} catalog={catalog} visible={activeTab === tab.id} />
+            <SessionPanel tab={tab} catalog={catalog} visible={activeTab === tab.id} hostName={hostName} />
           </div>
         ))}
       </section>
@@ -223,18 +228,31 @@ export function Workspace({ catalog, canCreate }: { catalog: Catalog; canCreate:
 }
 
 /** One session's tab: the plugin's view, given a `connect` that runs core's control phase with core's dialogs. */
-function SessionPanel({ tab, catalog, visible }: { tab: SessionTab; catalog: Catalog; visible: boolean }) {
+function SessionPanel({
+  tab,
+  catalog,
+  visible,
+  hostName,
+}: {
+  tab: SessionTab
+  catalog: Catalog
+  visible: boolean
+  hostName: (id: string) => string | null
+}) {
   const dialogs = useDialogs()
   const View = catalog.views.get(tab.sessionType)
   const host = useMemo(() => tab.host, [tab.host])
 
   const connect = useCallback(
-    async (options?: Record<string, unknown>) => {
+    async (options?: Record<string, unknown>, signal?: AbortSignal) => {
       const start: { -readonly [K in keyof StreamStart]: StreamStart[K] } = { hostId: tab.host.id, serviceId: tab.serviceId, options }
       if (tab.credential.kind === 'saved') {
         start.credentialId = tab.credential.id
       } else if (tab.credential.kind === 'typed') {
-        const typed = await dialogs.askCredential(tab.host.name, tab.serviceName)
+        const typed = await dialogs.askCredential(tab.host.name, tab.serviceName, signal)
+        if (signal?.aborted) {
+          throw new SessionError('aborted', 'The session was cancelled.')
+        }
         if (!typed) {
           throw new SessionError('cancelled', 'No credential was given, so the session didn’t open.')
         }
@@ -245,9 +263,17 @@ function SessionPanel({ tab, catalog, visible }: { tab: SessionTab; catalog: Cat
           throw new SessionError('credential_denied', error instanceof ApiError ? error.message : 'The credential could not be used.')
         }
       }
-      return openStreamSession(tab.sessionType, start, { confirmHostKey: (prompt) => dialogs.confirmHostKey(prompt, tab.host.name) })
+      return openStreamSession(tab.sessionType, start, {
+        signal,
+        confirmHostKey: (prompt) =>
+          dialogs.confirmHostKey(
+            prompt,
+            prompt.hostId === tab.host.id ? tab.host.name : (hostName(prompt.hostId) ?? `the jump host of ${tab.host.name}`),
+            signal,
+          ),
+      })
     },
-    [dialogs, tab],
+    [dialogs, tab, hostName],
   )
 
   if (!View) {

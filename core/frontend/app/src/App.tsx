@@ -129,11 +129,11 @@ export function App({ importer }: { importer?: ModuleImporter }) {
       )}
       {load.kind === 'ready' && catalog && (
         <DialogProvider>
-          {view === 'plugins' && isAdministrator ? (
-            <PluginsView plugins={load.plugins} frontends={load.frontends} />
-          ) : (
+          {/* The workspace stays mounted behind the plugin list, so its sessions and drafts carry on. */}
+          {view === 'plugins' && isAdministrator && <PluginsView plugins={load.plugins} frontends={load.frontends} />}
+          <div className="nk-view" hidden={view === 'plugins' && isAdministrator}>
             <Workspace catalog={catalog} canCreate={isAdministrator} />
-          )}
+          </div>
         </DialogProvider>
       )}
     </div>

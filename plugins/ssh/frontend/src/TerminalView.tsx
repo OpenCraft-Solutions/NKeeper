@@ -57,10 +57,12 @@ export function TerminalView({ connect, visible }: SessionViewProps) {
 
     let disposed = false
     let connection: StreamConnection | null = null
+    // Going before the session opens cancels its opening, and any dialog it's waiting on.
+    const opening = new AbortController()
     const cleanups: (() => void)[] = []
     setState({ kind: 'connecting' })
 
-    connect({ columns: terminal.cols, rows: terminal.rows }).then(
+    connect({ columns: terminal.cols, rows: terminal.rows }, opening.signal).then(
       (opened) => {
         if (disposed) {
           opened.close()
@@ -92,6 +94,7 @@ export function TerminalView({ connect, visible }: SessionViewProps) {
     resized.observe(container)
     return () => {
       disposed = true
+      opening.abort()
       resized.disconnect()
       cleanups.forEach((cleanup) => cleanup())
       connection?.close()

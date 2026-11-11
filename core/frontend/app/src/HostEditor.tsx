@@ -169,10 +169,19 @@ export function HostEditor({ host, hosts, serviceTypes, onSaved, onCancel, onRel
 
   async function submit(event: FormEvent) {
     event.preventDefault()
-    setBusy(true)
     setErrors({})
     setMessage(null)
     setConflict(false)
+    // A port that isn't a whole number would be sent as no port at all, so it's caught here.
+    const badPorts = Object.fromEntries(
+      draft.services.flatMap((s, i) => (s.port.trim() === '' || /^\d{1,5}$/.test(s.port.trim()) ? [] : [[`services[${i}].port`, ['Enter a port from 1 to 65535.']]])),
+    )
+    if (Object.keys(badPorts).length > 0) {
+      setErrors(badPorts)
+      setMessage('Some fields need fixing.')
+      return
+    }
+    setBusy(true)
     try {
       const body = requestOf(draft, host?.version ?? null)
       onSaved(host ? await api.put<Host>(`/api/hosts/${host.id}`, body) : await api.post<Host>('/api/hosts', body))
@@ -324,7 +333,27 @@ export function HostEditor({ host, hosts, serviceTypes, onSaved, onCancel, onRel
         {types.length === 0 ? (
           <p className="nk-muted">No plugin provides a service type yet.</p>
         ) : (
-          <AddService types={types} onAdd={(type) => update({ services: [...draft.services, { key: newKey(), id: null, type: type.id, label: '', port: '', address: '', settings: {}, available: true }] })} />
+          <AddService
+            types={types}
+            onAdd={(type) =>
+              update({
+                services: [
+                  ...draft.services,
+                  // A required switch shows as off, so it starts as off rather than unset.
+                  {
+                    key: newKey(),
+                    id: null,
+                    type: type.id,
+                    label: '',
+                    port: '',
+                    address: '',
+                    settings: Object.fromEntries(type.settings.filter((s) => s.kind === 'switch' && s.required).map((s) => [s.key, false])),
+                    available: true,
+                  },
+                ],
+              })
+            }
+          />
         )}
       </Section>
 
