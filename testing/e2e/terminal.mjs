@@ -136,6 +136,11 @@ try {
   if (created) {
     step(`delete ${hostName}`)
     try {
+      // A dialog left open by a failure makes the page behind it inert: cancel it first (Escape).
+      for (let i = 0; i < 5 && (await page.locator('dialog[open]').count()) > 0; i++) {
+        await page.keyboard.press('Escape')
+        await page.waitForTimeout(200)
+      }
       // Closing a tab renumbers the rest, so close the first until none are left.
       const closeButtons = page.getByRole('button', { name: new RegExp(`^Close ${hostName}`) })
       while ((await closeButtons.count()) > 0) {
