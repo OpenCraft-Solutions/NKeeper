@@ -26,6 +26,12 @@ readonly GUACD_VERSION=1.6.0
 readonly GUACD_SHA256=8bc45675da96d7b6f39728160181e3d4ff3c08f460f6d26de5805b642bf13f2b
 readonly GUACD_PREFIX=/usr/lib/nkeeper/guacd
 
+# The FreeRDP guacd runs on (docs/architecture.md §8): 2.11, as Apache's own guacd images use, since guacd 1.6.0
+# crashes on FreeRDP 3.31 and newer. Its SHA-256 matched both pub.freerdp.com's copy and its GitHub release's.
+readonly FREERDP_VERSION=2.11.7
+readonly FREERDP_SHA256=5a2d54e1ca0f1facd1632bcc94c73b9f071a80c5fdbbb3f26e79f02aaa586ca3
+readonly GUACD_BUILD="guacd-$GUACD_VERSION+freerdp-$FREERDP_VERSION"
+
 usage() {
     cat <<'EOF'
 NKeeper's native installer (docs/architecture.md §8).
@@ -360,53 +366,77 @@ configure() {
 
 # --- guacd -----------------------------------------------------------------------------------------
 
-# The packages guacd builds against: FreeRDP (3 where there is one, else 2) and libvncserver, with their tools.
+# The packages guacd and FreeRDP build against. FreeRDP itself is built from source (below), not the distribution's.
 guacd_build_packages() {
     if [ "$pm" = apt ]; then
-        local freerdp=freerdp3-dev
-        apt-cache show freerdp3-dev >/dev/null 2>&1 || freerdp=freerdp2-dev
-        apt-get install -y -qq build-essential pkg-config libtool-bin libcairo2-dev libjpeg-dev libpng-dev uuid-dev \
-            libssl-dev libwebp-dev libvncserver-dev "$freerdp" >/dev/null
+        apt-get install -y -qq build-essential cmake pkg-config libtool-bin libcairo2-dev libjpeg-dev libpng-dev uuid-dev \
+            libssl-dev libwebp-dev zlib1g-dev >/dev/null
     else
-        # FreeRDP's and libvncserver's development packages are in CRB and EPEL on the RHEL family.
+        # A few of these are in CRB on the RHEL family.
         if [ -f /etc/os-release ] && ! grep -qi '^ID="\?fedora' /etc/os-release; then
             dnf install -y -q dnf-plugins-core >/dev/null
             dnf config-manager --set-enabled crb >/dev/null 2>&1 || dnf config-manager --set-enabled powertools >/dev/null 2>&1 || true
-            rpm -q epel-release >/dev/null 2>&1 || dnf install -y -q epel-release >/dev/null
         fi
-        dnf install -y -q gcc make pkgconf libtool cairo-devel libjpeg-turbo-devel libpng-devel libuuid-devel \
-            openssl-devel libwebp-devel libvncserver-devel freerdp-devel >/dev/null
+        dnf install -y -q gcc gcc-c++ make cmake pkgconf libtool cairo-devel libjpeg-turbo-devel libpng-devel libuuid-devel \
+            openssl-devel libwebp-devel zlib-devel >/dev/null
     fi
 }
 
-build_guacd() {
-    step "Building guacd $GUACD_VERSION (a few minutes)"
-    guacd_build_packages
-    local src=$CACHE/guacd tarball="guacamole-server-$GUACD_VERSION.tar.gz" url
-    rm -rf "$src" && mkdir -p "$src"
-    for url in "https://downloads.apache.org/guacamole/$GUACD_VERSION/source/$tarball" \
-               "https://archive.apache.org/dist/guacamole/$GUACD_VERSION/source/$tarball"; do
-        curl -fsSL "$url" -o "$src/$tarball" && break
+# download URL... TARGET SHA256: the first URL that works, checked against the pinned hash.
+download_checked() {
+    local target=${*: -2:1} sha256=${*: -1} url
+    for url in "${@:1:$#-2}"; do
+        curl -fsSL "$url" -o "$target" && break
     done
-    [ -s "$src/$tarball" ] || die "Couldn't download guacamole-server $GUACD_VERSION."
-    echo "$GUACD_SHA256  $src/$tarball" | sha256sum -c --quiet - || die "The guacamole-server download failed its checksum."
-    tar -xzf "$src/$tarball" -C "$src" --strip-components=1
+    [ -s "$target" ] || die "Couldn't download $(basename "$target")."
+    echo "$sha256  $target" | sha256sum -c --quiet - || die "$(basename "$target") failed its checksum."
+}
 
-    # RDP and VNC only: NKeeper has its own SSH, and guacd needs no terminal, Kubernetes or recording tools.
-    # guacd builds with warnings as errors; FreeRDP 3 releases newer than guacd deprecate callbacks it still uses,
-    # which still work, so those warnings alone stay warnings.
-    (cd "$src" && CFLAGS="-O2 -Wno-error=deprecated-declarations" ./configure --prefix="$GUACD_PREFIX" --with-freerdp-plugin-dir="$GUACD_PREFIX/lib/freerdp" \
-        --without-ssh --without-telnet --without-websockets --without-pango --without-terminal \
-        --disable-guacenc --disable-guaclog --disable-kubernetes >"$src/configure.log" 2>&1) ||
-        { tail -n 30 "$src/configure.log" >&2; die "guacamole-server's configure failed (above)."; }
-    grep -q 'RDP .*\.\.\. yes' "$src/configure.log" || grep -q 'RDP *\.\.\. yes' "$src/configure.log" ||
-        { grep -A20 'Protocol support' "$src/configure.log" >&2; die "guacamole-server would build without RDP support (FreeRDP not found)."; }
-    (cd "$src" && make -j"$(nproc)" >"$src/build.log" 2>&1 && rm -rf "$GUACD_PREFIX" && make install >>"$src/build.log" 2>&1) ||
-        { tail -n 30 "$src/build.log" >&2; die "Building guacd failed (above)."; }
+build_guacd() {
+    step "Building FreeRDP $FREERDP_VERSION and guacd $GUACD_VERSION (several minutes)"
+    guacd_build_packages
+    local work=$CACHE/guacd freerdp guacd
+    rm -rf "$work" "$GUACD_PREFIX" && mkdir -p "$work/freerdp" "$work/guacd"
+    freerdp="freerdp-$FREERDP_VERSION.tar.gz"
+    guacd="guacamole-server-$GUACD_VERSION.tar.gz"
+    download_checked "https://pub.freerdp.com/releases/$freerdp" \
+        "https://github.com/FreeRDP/FreeRDP/releases/download/$FREERDP_VERSION/$freerdp" "$work/$freerdp" "$FREERDP_SHA256"
+    download_checked "https://downloads.apache.org/guacamole/$GUACD_VERSION/source/$guacd" \
+        "https://archive.apache.org/dist/guacamole/$GUACD_VERSION/source/$guacd" "$work/$guacd" "$GUACD_SHA256"
+    tar -xzf "$work/$freerdp" -C "$work/freerdp" --strip-components=1
+    tar -xzf "$work/$guacd" -C "$work/guacd" --strip-components=1
+
+    # FreeRDP, as Apache's own guacd images build it: a client library only, no X11, server or sound.
+    (cmake -S "$work/freerdp" -B "$work/freerdp/build" -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX="$GUACD_PREFIX" -DCMAKE_INSTALL_LIBDIR=lib -DCMAKE_INSTALL_RPATH="$GUACD_PREFIX/lib" \
+        -DCMAKE_C_FLAGS="-Wno-error=incompatible-pointer-types -Wno-error=int-conversion" \
+        -DBUILTIN_CHANNELS=OFF -DCHANNEL_URBDRC=OFF -DWITH_CHANNELS=ON -DWITH_CLIENT=ON -DWITH_CAIRO=ON -DWITH_JPEG=ON \
+        -DWITH_OPENSSL=ON -DWITH_ZLIB=ON -DWITH_SERVER=OFF -DWITH_SERVER_INTERFACE=OFF -DWITH_SAMPLE=OFF -DWITH_X11=OFF \
+        -DWITH_WAYLAND=OFF -DWITH_ALSA=OFF -DWITH_PULSE=OFF -DWITH_OSS=OFF -DWITH_CUPS=OFF -DWITH_PCSC=OFF -DWITH_FFMPEG=OFF \
+        -DWITH_DSP_FFMPEG=OFF -DWITH_SWSCALE=OFF -DWITH_GSM=OFF -DWITH_GSSAPI=OFF -DWITH_KRB5=OFF -DWITH_OPENH264=OFF \
+        -DWITH_X264=OFF -DWITH_LIBSYSTEMD=OFF -DWITH_MANPAGES=OFF -DWITH_SHADOW_X11=OFF -DWITH_SHADOW_MAC=OFF \
+        -DWITH_PROXY=OFF -DWITH_FUSE=OFF >"$work/freerdp.log" 2>&1 &&
+        cmake --build "$work/freerdp/build" -j "$(nproc)" >>"$work/freerdp.log" 2>&1 &&
+        cmake --install "$work/freerdp/build" >>"$work/freerdp.log" 2>&1) ||
+        { tail -n 30 "$work/freerdp.log" >&2; die "Building FreeRDP failed (above)."; }
+
+    # guacd against that FreeRDP, RDP only. It builds with warnings as errors, which FreeRDP's deprecations aren't.
+    (cd "$work/guacd" && PKG_CONFIG_PATH="$GUACD_PREFIX/lib/pkgconfig" CFLAGS="-O2 -Wno-error=deprecated-declarations" \
+        LDFLAGS="-Wl,-rpath,$GUACD_PREFIX/lib" ./configure --prefix="$GUACD_PREFIX" \
+        --with-freerdp-plugin-dir="$GUACD_PREFIX/lib/freerdp2" --without-vnc --without-ssh --without-telnet \
+        --without-websockets --without-pango --without-terminal --disable-guacenc --disable-guaclog --disable-kubernetes \
+        >"$work/guacd.log" 2>&1) ||
+        { tail -n 30 "$work/guacd.log" >&2; die "guacamole-server's configure failed (above)."; }
+    grep -q 'RDP .*\.\.\. yes' "$work/guacd.log" ||
+        { grep -A12 'Protocol support' "$work/guacd.log" >&2; die "guacamole-server would build without RDP support."; }
+    grep -q "$GUACD_PREFIX/include/freerdp2" "$work/guacd/config.log" ||
+        die "guacamole-server didn't pick the FreeRDP built for it."
+    (cd "$work/guacd" && make -j"$(nproc)" >>"$work/guacd.log" 2>&1 && make install >>"$work/guacd.log" 2>&1) ||
+        { tail -n 30 "$work/guacd.log" >&2; die "Building guacd failed (above)."; }
     chown -R root:root "$GUACD_PREFIX"
     chmod -R u=rwX,go=rX "$GUACD_PREFIX"
-    echo "$GUACD_VERSION" >"$GUACD_PREFIX/.version"
-    ok "Built guacd $GUACD_VERSION into $GUACD_PREFIX."
+    echo "$GUACD_BUILD" >"$GUACD_PREFIX/.version"
+    ok "Built guacd $GUACD_VERSION on FreeRDP $FREERDP_VERSION into $GUACD_PREFIX."
 }
 
 install_guacd() {
@@ -414,14 +444,14 @@ install_guacd() {
         warn "Skipping guacd (--no-guacd): remote desktops won't work."
         return
     fi
-    if [ "$(cat "$GUACD_PREFIX/.version" 2>/dev/null)" != "$GUACD_VERSION" ] || [ ! -x "$GUACD_PREFIX/sbin/guacd" ]; then
+    if [ "$(cat "$GUACD_PREFIX/.version" 2>/dev/null)" != "$GUACD_BUILD" ] || [ ! -x "$GUACD_PREFIX/sbin/guacd" ]; then
         # In a subshell: a failed build mustn't stop NKeeper itself from installing and starting.
         if ! (build_guacd); then
             warn "guacd couldn't be built (above): NKeeper carries on, and remote desktops say the gateway is unavailable."
             [ -x "$GUACD_PREFIX/sbin/guacd" ] || return 0
         fi
     else
-        ok "guacd $GUACD_VERSION is already built."
+        ok "guacd $GUACD_VERSION on FreeRDP $FREERDP_VERSION is already built."
     fi
 
     id nkeeper-guacd >/dev/null 2>&1 || useradd --system --home-dir /nonexistent --no-create-home --shell /usr/sbin/nologin nkeeper-guacd
