@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { api, ApiError, onUnauthorized, resetAntiforgeryToken } from '@nkeeper/sdk'
+import { ColorSchemeDialog } from './appearance/ColorSchemeDialog'
+import { applyColorScheme, tokensFor, type ColorSchemePreferences } from './appearance/colorSchemes'
 import { buildCatalog } from './catalog'
 import { ChangePassword } from './ChangePassword'
 import { DialogProvider } from './Dialogs'
@@ -36,6 +38,7 @@ export function App({ importer }: { importer?: ModuleImporter }) {
   const [attempt, setAttempt] = useState(0)
   const [view, setView] = useState<View>('workspace')
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
+  const [choosingColors, setChoosingColors] = useState(false)
   // A host to show in the workspace, from the Health page.
   const [focus, setFocus] = useState<{ hostId: string; n: number } | null>(null)
   const [signOutError, setSignOutError] = useState<string | null>(null)
@@ -83,6 +86,19 @@ export function App({ importer }: { importer?: ModuleImporter }) {
       cancelled = true
     }
   }, [importer, attempt])
+
+  // The signed-in user's colour scheme, as soon as the shell knows who they are (§7.14).
+  const colorSchemes = load.kind === 'ready' || load.kind === 'mustChangePassword' ? load.user.colorSchemes : null
+  useEffect(() => {
+    if (colorSchemes) {
+      applyColorScheme(tokensFor(colorSchemes))
+    }
+  }, [colorSchemes])
+
+  /** A scheme chosen in the dialog: shown at once; the dialog saves it. */
+  function colorSchemesChanged(next: ColorSchemePreferences) {
+    setLoad((current) => (current.kind === 'ready' ? { ...current, user: { ...current.user, colorSchemes: next } } : current))
+  }
 
   const catalog = useMemo(() => (load.kind === 'ready' ? buildCatalog(load.plugins, load.frontends) : null), [load])
 
@@ -182,6 +198,7 @@ export function App({ importer }: { importer?: ModuleImporter }) {
           </div>
         </DialogProvider>
       </main>
+      {choosingColors && <ColorSchemeDialog preferences={load.user.colorSchemes} onChange={colorSchemesChanged} onClose={() => setChoosingColors(false)} />}
       {menu && (
         <ContextMenu
           label="Account"
@@ -190,6 +207,7 @@ export function App({ importer }: { importer?: ModuleImporter }) {
           onClose={() => setMenu(null)}
           entries={[
             { kind: 'header', label: load.user.email ?? load.user.userName },
+            { kind: 'item', label: 'Color scheme', onSelect: () => setChoosingColors(true) },
             { kind: 'separator' },
             { kind: 'item', label: 'Sign out', onSelect: () => void signOut() },
           ]}

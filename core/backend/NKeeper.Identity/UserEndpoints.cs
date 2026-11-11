@@ -51,6 +51,21 @@ public static class UserEndpoints
                 return deleted ? Results.NoContent() : Results.NotFound();
             }));
 
+        // How the page looks for this user, kept on their account (§6.1). Not audited: it changes nothing else.
+        api.MapPut("/account/color-schemes", (ColorSchemesRequest? request, UserManager<ApplicationUser> accounts, HttpContext context) =>
+                Validated(async () =>
+                {
+                    if (await accounts.GetUserAsync(context.User) is not { } user)
+                    {
+                        return Results.Unauthorized();
+                    }
+
+                    ColorSchemes.Apply(user, request);
+                    var updated = await accounts.UpdateAsync(user);
+                    return updated.Succeeded ? Results.Ok(ColorSchemes.Of(user)) : Results.Problem(statusCode: StatusCodes.Status500InternalServerError, detail: "The colour schemes couldn't be saved.");
+                }))
+            .WithMetadata(new AllowWhilePasswordChangeRequiredAttribute());
+
         // Verifies the current password, so it's rate limited like sign-in.
         api.MapPost("/account/password", (ChangePasswordRequest? request, UserAdministration users, UserManager<ApplicationUser> accounts, SignInManager<ApplicationUser> signIn, HttpContext context) =>
                 Validated(async () =>

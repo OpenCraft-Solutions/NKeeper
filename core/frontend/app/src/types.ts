@@ -1,3 +1,5 @@
+import type { ColorSchemePreferences } from './appearance/colorSchemes'
+
 /** The API's shapes, as the shell reads them (docs/architecture.md §6, §7). */
 
 /** The signed-in user, as `/api/auth/login` and `/api/auth/me` return them. */
@@ -7,6 +9,8 @@ export interface CurrentUser {
   email: string | null
   roles: string[]
   mustChangePassword: boolean
+  /** The user's colour scheme and the schemes they built (docs/architecture.md §6.1). */
+  colorSchemes: ColorSchemePreferences
 }
 
 export const ADMINISTRATOR = 'Administrator'

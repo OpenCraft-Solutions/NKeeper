@@ -77,7 +77,7 @@ export function host(overrides: Partial<Host> = {}): Host {
   }
 }
 
-export const ADMIN = { id: 'u1', userName: 'admin', email: null, roles: ['Administrator'], mustChangePassword: false }
+export const ADMIN = { id: 'u1', userName: 'admin', email: null, roles: ['Administrator'], mustChangePassword: false, colorSchemes: { active: 'navy', custom: [] } }
 
 type Handler = (init: RequestInit | undefined, url: string) => Response | Promise<Response>
 
