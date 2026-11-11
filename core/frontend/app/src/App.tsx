@@ -1,31 +1,31 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, ApiError, onUnauthorized, resetAntiforgeryToken } from '@nkeeper/sdk'
+import { buildCatalog } from './catalog'
+import { DialogProvider } from './Dialogs'
 import { loadPluginFrontends, type FrontendState, type ModuleImporter, type PluginStatus } from './plugins'
+import { PluginsView } from './PluginsView'
 import { SignIn } from './SignIn'
-
-const STATE_LABELS: Record<PluginStatus['state'], string> = {
-  loaded: 'Loaded',
-  disabled: 'Disabled',
-  awaitingSignerApproval: 'Awaiting signer approval',
-  refused: 'Refused',
-  missing: 'Missing',
-}
+import { ADMINISTRATOR, type CurrentUser } from './types'
+import { Workspace } from './Workspace'
 
 type Load =
   | { kind: 'loading' }
   | { kind: 'signedOut' }
   | { kind: 'error'; message: string }
-  | { kind: 'ready'; plugins: PluginStatus[]; frontends: Map<string, FrontendState> }
+  | { kind: 'ready'; user: CurrentUser; plugins: PluginStatus[]; frontends: Map<string, FrontendState> }
 
-/** The application shell: signs the user in, lists the server's plugins and loads their frontends. */
+/**
+ * The application shell (docs/architecture.md §7.14): signs the user in, loads the plugins and their
+ * frontends, then shows the workspace. A session that ends anywhere brings the sign-in form back.
+ */
 export function App({ importer }: { importer?: ModuleImporter }) {
   const [load, setLoad] = useState<Load>({ kind: 'loading' })
   const [attempt, setAttempt] = useState(0)
+  const [view, setView] = useState<'workspace' | 'plugins'>('workspace')
   const [signOutError, setSignOutError] = useState<string | null>(null)
   // Bumped whenever the session ends, so a load still in flight can't bring back the signed-in view.
   const session = useRef(0)
 
-  // A session that ends (signed out elsewhere, expired, revoked) brings back the sign-in form.
   useEffect(
     () =>
       onUnauthorized(() => {
@@ -41,17 +41,18 @@ export function App({ importer }: { importer?: ModuleImporter }) {
     const current = () => !cancelled && session.current === started
     void (async () => {
       try {
+        const user = await api.get<CurrentUser>('/api/auth/me', { suppressUnauthorizedEvent: true })
         const plugins = await api.get<PluginStatus[]>('/api/plugins')
         const frontends = await loadPluginFrontends(plugins, importer)
         if (current()) {
-          setLoad({ kind: 'ready', plugins, frontends })
+          setLoad({ kind: 'ready', user, plugins, frontends })
         }
       } catch (error) {
         if (current()) {
           setLoad(
             error instanceof ApiError && error.status === 401
               ? { kind: 'signedOut' }
-              : { kind: 'error', message: error instanceof ApiError ? error.message : 'The plugin list could not be loaded.' },
+              : { kind: 'error', message: error instanceof ApiError ? error.message : 'NKeeper could not be loaded.' },
           )
         }
       }
@@ -60,6 +61,8 @@ export function App({ importer }: { importer?: ModuleImporter }) {
       cancelled = true
     }
   }, [importer, attempt])
+
+  const catalog = useMemo(() => (load.kind === 'ready' ? buildCatalog(load.plugins, load.frontends) : null), [load])
 
   // Only a sign-out the server confirmed shows the sign-in form: until then the session may still be valid.
   async function signOut() {
@@ -72,65 +75,54 @@ export function App({ importer }: { importer?: ModuleImporter }) {
     }
     resetAntiforgeryToken()
     session.current += 1
+    setView('workspace')
     setLoad({ kind: 'signedOut' })
   }
 
+  const isAdministrator = load.kind === 'ready' && load.user.roles.includes(ADMINISTRATOR)
   return (
-    <main>
-      <h1>NKeeper</h1>
-      <p>Version 2.0 is in early development.</p>
-      {load.kind === 'signedOut' && <SignIn onSignedIn={() => setAttempt((n) => n + 1)} />}
-      {load.kind !== 'signedOut' && <h2>Plugins</h2>}
-      {load.kind === 'loading' && <p>Loading plugins…</p>}
-      {load.kind === 'error' && <p role="alert">{load.message}</p>}
-      {load.kind === 'ready' && load.plugins.length === 0 && <p>No plugins are installed.</p>}
-      {load.kind === 'ready' && load.plugins.length > 0 && (
-        <table>
-          <thead>
-            <tr>
-              <th scope="col">Plugin</th>
-              <th scope="col">Version</th>
-              <th scope="col">State</th>
-              <th scope="col">Frontend</th>
-            </tr>
-          </thead>
-          <tbody>
-            {load.plugins.map((plugin) => (
-              <tr key={plugin.id}>
-                <td>
-                  {plugin.id}
-                  {plugin.builtIn && ' (built in)'}
-                </td>
-                <td>{plugin.version ?? '—'}</td>
-                <td>
-                  {STATE_LABELS[plugin.state]}
-                  {plugin.reasonCode && ` (${plugin.reasonCode})`}
-                </td>
-                <td>{describeFrontend(load.frontends.get(plugin.id))}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+    <div className="nk-app">
+      <header className="nk-header">
+        <h1>NKeeper</h1>
+        {load.kind === 'ready' && (
+          <div className="nk-header-tools">
+            {isAdministrator && (
+              <button type="button" aria-pressed={view === 'plugins'} onClick={() => setView((v) => (v === 'plugins' ? 'workspace' : 'plugins'))}>
+                Plugins
+              </button>
+            )}
+            <span className="nk-user">{load.user.userName}</span>
+            <button type="button" onClick={() => void signOut()}>
+              Sign out
+            </button>
+            {signOutError && (
+              <span role="alert" className="nk-header-error">
+                {signOutError}
+              </span>
+            )}
+          </div>
+        )}
+      </header>
+      {load.kind === 'signedOut' && (
+        <main className="nk-center">
+          <SignIn onSignedIn={() => setAttempt((n) => n + 1)} />
+        </main>
       )}
-      {load.kind === 'ready' && (
-        <p>
-          <button type="button" onClick={() => void signOut()}>
-            Sign out
-          </button>
-          {signOutError && <span role="alert"> {signOutError}</span>}
+      {load.kind === 'loading' && <p className="nk-muted nk-pad">Loading…</p>}
+      {load.kind === 'error' && (
+        <p className="nk-alert nk-pad" role="alert">
+          {load.message}
         </p>
       )}
-    </main>
+      {load.kind === 'ready' && catalog && (
+        <DialogProvider>
+          {view === 'plugins' && isAdministrator ? (
+            <PluginsView plugins={load.plugins} frontends={load.frontends} />
+          ) : (
+            <Workspace catalog={catalog} canCreate={isAdministrator} />
+          )}
+        </DialogProvider>
+      )}
+    </div>
   )
-}
-
-function describeFrontend(state: FrontendState | undefined): string {
-  switch (state?.kind) {
-    case 'active':
-      return 'Active'
-    case 'failed':
-      return `Failed: ${state.reason}`
-    default:
-      return '—'
-  }
 }

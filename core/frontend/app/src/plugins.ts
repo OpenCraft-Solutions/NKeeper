@@ -1,4 +1,5 @@
 import { isPluginDefinition, type PluginDefinition } from '@nkeeper/sdk'
+import type { HostActionInfo, ServiceTypeInfo, SessionTypeInfo } from './types'
 
 /** One plugin, as `GET /api/plugins` reports it. */
 export interface PluginStatus {
@@ -12,6 +13,10 @@ export interface PluginStatus {
   /** Same-origin URL of the plugin's frontend entry module, for loaded plugins that have one. */
   frontendEntry: string | null
   frontendEntrySha256: string | null
+  /** For a loaded plugin, what it contributed (docs/architecture.md §7.4, §7.10, §7.12). */
+  serviceTypes?: ServiceTypeInfo[] | null
+  sessionTypes?: SessionTypeInfo[] | null
+  hostActions?: HostActionInfo[] | null
 }
 
 /** What happened to one plugin's frontend in this page. */
