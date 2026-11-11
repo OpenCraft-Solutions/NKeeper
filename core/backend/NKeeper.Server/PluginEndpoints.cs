@@ -13,6 +13,7 @@ namespace NKeeper.Server;
 /// <param name="FrontendEntrySha256">The entry module's SHA-256, for checking it if browsers gain module integrity for import().</param>
 /// <param name="ServiceTypes">For a loaded plugin, the service types it contributed (docs/architecture.md §7.4).</param>
 /// <param name="SessionTypes">For a loaded plugin, the session types it contributed (§7.10).</param>
+/// <param name="HostActions">For a loaded plugin, the host actions it contributed (§7.12).</param>
 public sealed record PluginStatusResponse(
     string Id,
     string? Version,
@@ -24,16 +25,21 @@ public sealed record PluginStatusResponse(
     string? FrontendEntry = null,
     string? FrontendEntrySha256 = null,
     IReadOnlyList<ServiceTypeResponse>? ServiceTypes = null,
-    IReadOnlyList<SessionTypeResponse>? SessionTypes = null);
+    IReadOnlyList<SessionTypeResponse>? SessionTypes = null,
+    IReadOnlyList<HostActionResponse>? HostActions = null);
+
+/// <summary>A Connect menu entry: the session type it opens, and whether it needs a credential.</summary>
+public sealed record HostActionResponse(string Id, string Label, string SessionType, HostActionCredential Credential);
 
 /// <summary>A session type: what it is called, and the service types it opens on.</summary>
 public sealed record SessionTypeResponse(string Id, string Label, IReadOnlyList<string> ServiceTypes, bool SupportsJumpHost);
 
 /// <summary>A service type, with the schema the shell draws a service's settings form from.</summary>
-public sealed record ServiceTypeResponse(string Id, string Label, int? DefaultPort, int SettingsVersion, IReadOnlyList<ServiceSettingResponse> Settings)
+/// <param name="Health">The kind of its health probe (§7.13), e.g. <c>tcp</c>; null when it has none.</param>
+public sealed record ServiceTypeResponse(string Id, string Label, int? DefaultPort, int SettingsVersion, IReadOnlyList<ServiceSettingResponse> Settings, string? Health)
 {
     public static ServiceTypeResponse From(ServiceType type) =>
-        new(type.Id, type.Label, type.DefaultPort, type.SettingsVersion, [.. type.Settings.Select(ServiceSettingResponse.From)]);
+        new(type.Id, type.Label, type.DefaultPort, type.SettingsVersion, [.. type.Settings.Select(ServiceSettingResponse.From)], type.Health?.Kind);
 }
 
 /// <param name="Choices">For a choice, its values; otherwise null.</param>
@@ -104,7 +110,8 @@ internal static class PluginEndpoints
                     entry is null || s.PackageSha256 is null ? null : FrontendBase(loaded!, s.PackageSha256) + EscapePath(entry[PackageFormat.FrontendFolder.Length..]),
                     entry is null ? null : Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(loaded!.Files[entry].Span)),
                     loaded is null ? null : [.. plugins.ServiceTypes.Where(t => t.PluginId == s.Id).Select(t => ServiceTypeResponse.From(t.Type))],
-                    loaded is null ? null : [.. plugins.SessionTypes.Where(t => t.PluginId == s.Id).Select(t => new SessionTypeResponse(t.Type.Id, t.Type.Label, t.Type.ServiceTypes, t.Type.SupportsJumpHost))]);
+                    loaded is null ? null : [.. plugins.SessionTypes.Where(t => t.PluginId == s.Id).Select(t => new SessionTypeResponse(t.Type.Id, t.Type.Label, t.Type.ServiceTypes, t.Type.SupportsJumpHost))],
+                    loaded is null ? null : [.. plugins.HostActions.Where(a => a.PluginId == s.Id).Select(a => new HostActionResponse(a.Action.Id, a.Action.Label, a.Action.SessionType, a.Action.Credential))]);
             })
             .ToList());
 

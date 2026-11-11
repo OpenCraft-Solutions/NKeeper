@@ -3,6 +3,9 @@
  * by the shell through the import map, so every plugin and the shell see the same instance.
  */
 export { SDK_VERSION, definePlugin, isPluginDefinition } from './plugin'
-export type { PluginContext, PluginDefinition } from './plugin'
+export type { PluginContext, PluginDefinition, SessionViewProps } from './plugin'
 export { ApiError, api, apiWebSocketUrl, onUnauthorized, readJsonLines, resetAntiforgeryToken } from './api'
 export type { ProblemDetails, RequestOptions } from './api'
+export { SessionError, openStreamSession } from './sessions'
+export type { HostKeyPrompt, OpenStreamOptions, StreamConnection, StreamStart } from './sessions'
+export { adoptStyles, mirrorInjectedStyles } from './styles'

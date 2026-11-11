@@ -28,6 +28,7 @@ public sealed class PluginHostResult
     private readonly List<string> _alerts = [];
     private readonly List<ContributedServiceType> _serviceTypes = [];
     private readonly List<ContributedSessionType> _sessionTypes = [];
+    private readonly List<ContributedHostAction> _hostActions = [];
 
     public IReadOnlyList<PluginStatus> Statuses => _statuses;
 
@@ -38,6 +39,10 @@ public sealed class PluginHostResult
     /// <summary>The session types the loaded plugins contributed, in load order (docs/architecture.md §7.10).</summary>
     public IReadOnlyList<ContributedSessionType> SessionTypes =>
         [.. _sessionTypes.Where(t => _loaded.Exists(p => p.Manifest.Id == t.PluginId))];
+
+    /// <summary>The host actions the loaded plugins contributed, in load order (docs/architecture.md §7.12).</summary>
+    public IReadOnlyList<ContributedHostAction> HostActions =>
+        [.. _hostActions.Where(a => _loaded.Exists(p => p.Manifest.Id == a.PluginId))];
 
     /// <summary>Loaded plugins, dependencies before dependants.</summary>
     public IReadOnlyList<LoadedPlugin> Loaded => _loaded;
@@ -61,6 +66,9 @@ public sealed class PluginHostResult
 
     internal void AddSessionTypes(string pluginId, IEnumerable<SessionType> types) =>
         _sessionTypes.AddRange(types.Select(t => new ContributedSessionType(pluginId, t)));
+
+    internal void AddHostActions(string pluginId, IEnumerable<HostAction> actions) =>
+        _hostActions.AddRange(actions.Select(a => new ContributedHostAction(pluginId, a)));
 
     /// <summary>Marks a loaded plugin as refused, with every loaded plugin that depends on it.</summary>
     internal IReadOnlyList<string> Fail(string id, string reasonCode, string message)
@@ -270,8 +278,28 @@ public sealed class PluginHost(
 
             if (code is null)
             {
+                var taken = result.HostActions.ToDictionary(a => a.Action.Id, a => a.PluginId, StringComparer.Ordinal);
+                foreach (var action in collected.HostActions)
+                {
+                    problem = ContributionRules.Check(action, collected.SessionTypes)
+                        ?? (taken.TryGetValue(action.Id, out var owner)
+                            ? $"The host action '{action.Id}' is already contributed by plugin {owner}."
+                            : null);
+                    if (problem is not null)
+                    {
+                        code = HostReasonCodes.ContributionInvalid;
+                        break;
+                    }
+
+                    taken[action.Id] = id;
+                }
+            }
+
+            if (code is null)
+            {
                 result.AddServiceTypes(id, collected.ServiceTypes);
                 result.AddSessionTypes(id, collected.SessionTypes);
+                result.AddHostActions(id, collected.HostActions);
                 continue;
             }
 
@@ -392,8 +420,11 @@ public sealed class PluginHost(
             var fileName = PackageFormat.FileName(manifest.Id, version);
             var kind = trust.Find(v.KeyId!)!.Kind;
 
-            // §3: builtIn counts only from an official key, or a development key in Development.
-            var builtIn = manifest.BuiltIn && (kind == TrustedKeyKind.Official || (kind == TrustedKeyKind.Development && environment.IsDevelopment));
+            // §3: builtIn counts only from an official key, an install key, or a development key in Development.
+            var builtIn = manifest.BuiltIn && (kind is TrustedKeyKind.Official or TrustedKeyKind.Install || (kind == TrustedKeyKind.Development && environment.IsDevelopment));
+
+            // §8: the installer re-signs what it builds with a new install key each time, often at the same version.
+            var reSigned = kind == TrustedKeyKind.Install;
 
             if (!records.TryGetValue(manifest.Id, out var record))
             {
@@ -404,7 +435,7 @@ public sealed class PluginHost(
             else
             {
                 var comparison = manifest.Version.CompareTo(SemanticVersion.Parse(record.Version));
-                if (comparison == 0 && v.PackageSha256 != record.PackageSha256)
+                if (comparison == 0 && v.PackageSha256 != record.PackageSha256 && !reSigned)
                 {
                     await RefuseAsync(result, manifest.Id, version, HostReasonCodes.PinMismatch, $"Version {version} was recorded with package {record.PackageSha256}; this package is {v.PackageSha256}.", v.PackageSha256, v.KeyId, fileName, cancellationToken);
                     continue;
@@ -416,7 +447,7 @@ public sealed class PluginHost(
                     continue;
                 }
 
-                if (comparison > 0 && v.KeyId != record.KeyId)
+                if (comparison > 0 && v.KeyId != record.KeyId && !reSigned)
                 {
                     result.Add(new PluginStatus(manifest.Id, version, PluginState.AwaitingSignerApproval, null, $"Signed by key {v.KeyId}; version {record.Version} was signed by {record.KeyId}. An administrator must approve the new signer.", v.PackageSha256, v.KeyId, builtIn, fileName));
                     result.Alert($"Plugin {manifest.Id} {version} is signed by a new key and awaits approval.");
@@ -424,15 +455,20 @@ public sealed class PluginHost(
                     continue;
                 }
 
-                if (comparison > 0)
+                if (comparison > 0 || (reSigned && (v.PackageSha256 != record.PackageSha256 || v.KeyId != record.KeyId)))
                 {
-                    await audit.WriteAsync("plugin.updated", manifest.Id, $"{record.Version} -> {version}, sha256 {v.PackageSha256}", cancellationToken);
+                    await audit.WriteAsync(
+                        "plugin.updated",
+                        manifest.Id,
+                        $"{record.Version} -> {version}, sha256 {v.PackageSha256}{(v.KeyId != record.KeyId ? $", key {v.KeyId} (was {record.KeyId})" : "")}",
+                        cancellationToken);
                 }
 
                 var updated = record with
                 {
                     Version = version,
                     PackageSha256 = v.PackageSha256!,
+                    KeyId = v.KeyId!,
                     BuiltIn = builtIn,
                     Enabled = record.Enabled || builtIn,
                     EnabledBy = record.Enabled ? record.EnabledBy : builtIn ? BuiltInEnabler : null,

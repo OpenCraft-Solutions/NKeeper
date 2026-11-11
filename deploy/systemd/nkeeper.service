@@ -1,0 +1,51 @@
+# NKeeper (docs/architecture.md §8), installed by deploy/setup.sh.
+# The server runs unprivileged, on loopback only, behind nginx, and can write nothing but /var/lib/nkeeper:
+# not its own code, its plugins or their trusted keys (docs/plugin-security.md §4).
+
+[Unit]
+Description=NKeeper
+After=network-online.target postgresql.service
+Wants=network-online.target postgresql.service
+
+[Service]
+Type=simple
+User=nkeeper
+Group=nkeeper
+WorkingDirectory=/usr/lib/nkeeper/server
+EnvironmentFile=/etc/nkeeper/nkeeper.env
+ExecStart=/usr/lib/nkeeper/server/NKeeper.Server
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGINT
+TimeoutStopSec=30
+
+# /var/lib/nkeeper: the one place the service may write.
+StateDirectory=nkeeper
+StateDirectoryMode=0750
+Environment=HOME=/var/lib/nkeeper
+UMask=0027
+
+# Hardening (docs/plugin-security.md §4). .NET's JIT needs writable and executable memory, so
+# MemoryDenyWriteExecute stays off.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

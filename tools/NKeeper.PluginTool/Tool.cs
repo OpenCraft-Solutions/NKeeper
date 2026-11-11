@@ -18,6 +18,10 @@ internal static class Tool
               A new signing key. Writes <name>.private.pem (owner-only) and <name>.trust.json.
               Without --allow it is a development key, trusted only by servers in Development.
               With --allow it is a third-party key limited to those IDs (e.g. com.example.*).
+          keygen --install --out <dir> --name <name> --allow <id>... [--comment <text>]
+              A one-time install key (plugin-security.md §6.1) for the built-in plugins a native install
+              built: it may sign exactly the IDs given, official ones included. Sign the packages, then
+              delete the private key.
           keygen --release --out <dir> --name <name>
               The official release key (decision D12). Writes <name>.private.pem and
               <name>.public.txt (key ID and public key, to embed in the server). Keep exactly two
@@ -103,7 +107,11 @@ internal static class Tool
         DateOnly? notAfter = options.Get("not-after") is { } date
             ? DateOnly.ParseExact(date, "yyyy-MM-dd", CultureInfo.InvariantCulture)
             : null;
-        var trusted = allowed.Count > 0
+        var trusted = options.Has("install")
+            ? notAfter is null && allowed.Count > 0
+                ? TrustedKey.Install(key.PublicKey.Span, allowed, options.Get("comment") ?? "install key")
+                : throw new UsageException("An install key needs --allow with the exact IDs it may sign, and no --not-after.")
+            : allowed.Count > 0
             ? TrustedKey.ThirdParty(key.PublicKey.Span, allowed, options.Get("comment"), notAfter)
             : notAfter is null
                 ? TrustedKey.Development(key.PublicKey.Span, options.Get("comment") ?? "development key")
@@ -288,7 +296,7 @@ internal sealed class UsageException(string message) : Exception(message);
 /// <summary><c>--name value</c> options, repeatable ones, flags, and one positional argument.</summary>
 internal sealed class Options
 {
-    private static readonly HashSet<string> Flags = ["release", "development", "force"];
+    private static readonly HashSet<string> Flags = ["release", "development", "force", "install"];
     private readonly Dictionary<string, List<string>> _values = new(StringComparer.Ordinal);
 
     public string? Positional { get; private set; }

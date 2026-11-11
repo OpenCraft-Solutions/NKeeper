@@ -23,7 +23,19 @@ public sealed class SshPluginTests(PostgresFixture postgres, SshServerFixture ss
         var plugin = plugins.EnumerateArray().Single(p => p.GetProperty("id").GetString() == "ssh");
         Assert.Equal("loaded", plugin.GetProperty("state").GetString());
         var serviceType = Assert.Single(plugin.GetProperty("serviceTypes").EnumerateArray());
-        Assert.Equal(("SSH", 22), (serviceType.GetProperty("label").GetString(), serviceType.GetProperty("defaultPort").GetInt32()));
+        Assert.Equal(("SSH", 22, "tcp"), (serviceType.GetProperty("label").GetString(), serviceType.GetProperty("defaultPort").GetInt32(), serviceType.GetProperty("health").GetString()));
+        var action = Assert.Single(plugin.GetProperty("hostActions").EnumerateArray());
+        Assert.Equal(("ssh.terminal", "Terminal", "ssh", "required"), (
+            action.GetProperty("id").GetString(),
+            action.GetProperty("label").GetString(),
+            action.GetProperty("sessionType").GetString(),
+            action.GetProperty("credential").GetString()));
+
+        // Its frontend, the terminal view, is served from the verified package.
+        var entry = plugin.GetProperty("frontendEntry").GetString()!;
+        using var module = await admin.GetAsync(new Uri(entry, UriKind.Relative), Token);
+        Assert.Equal(HttpStatusCode.OK, module.StatusCode);
+        Assert.Contains("@nkeeper/sdk", await module.Content.ReadAsStringAsync(Token), StringComparison.Ordinal);
         var sessionType = Assert.Single(plugin.GetProperty("sessionTypes").EnumerateArray());
         Assert.Equal(("ssh", "Terminal"), (sessionType.GetProperty("id").GetString(), sessionType.GetProperty("label").GetString()));
     }

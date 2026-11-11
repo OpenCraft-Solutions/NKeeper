@@ -40,6 +40,22 @@ public sealed class ToolTests : IDisposable
     }
 
     [Fact]
+    public void An_install_key_signs_the_official_IDs_it_names_outside_development()
+    {
+        var keys = Path.Combine(_root, "install");
+        Assert.Equal(Tool.Ok, Run("keygen", "--install", "--out", keys, "--name", "install", "--allow", "sample"));
+
+        var named = PackSample(Path.Combine(keys, "install.private.pem"), id: "sample");
+        var other = PackSample(Path.Combine(keys, "install.private.pem"), id: "other");
+
+        Assert.Equal(Tool.Ok, Run("verify", named, "--trust", keys));
+        var (code, output) = RunWithOutput("verify", other, "--trust", keys);
+        Assert.Equal(Tool.Refused, code);
+        Assert.Contains("refused (key_scope)", output, StringComparison.Ordinal);
+        Assert.Equal(Tool.UsageError, Run("keygen", "--install", "--out", Path.Combine(_root, "unscoped"), "--name", "install"));
+    }
+
+    [Fact]
     public void A_release_key_is_trusted_as_official()
     {
         var keys = Path.Combine(_root, "release");

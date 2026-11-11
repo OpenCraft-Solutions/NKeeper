@@ -79,3 +79,14 @@ describe('readJsonLines', () => {
     expect(lines).toEqual([{ id: 1 }, { id: 2 }])
   })
 })
+
+describe('session views', () => {
+  it('accepts function and React component objects, and nothing else', () => {
+    const memo = { $$typeof: Symbol.for('react.memo'), type: () => null }
+    expect(isPluginDefinition({ id: 'term', sessionViews: { a: () => null, b: memo } })).toBe(true)
+    expect(isPluginDefinition({ id: 'term', sessionViews: { a: {} } })).toBe(false)
+    expect(isPluginDefinition({ id: 'term', sessionViews: { a: [] } })).toBe(false)
+    expect(isPluginDefinition({ id: 'term', sessionViews: [] })).toBe(false)
+    expect(isPluginDefinition({ id: 'term', sessionViews: { a: 'TerminalView' } })).toBe(false)
+  })
+})

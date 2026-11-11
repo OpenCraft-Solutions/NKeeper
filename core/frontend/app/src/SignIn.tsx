@@ -1,19 +1,8 @@
 import { useState, type FormEvent } from 'react'
 import { api, ApiError, resetAntiforgeryToken } from '@nkeeper/sdk'
+import type { CurrentUser } from './types'
 
-/** The signed-in user, as `/api/auth/login` and `/api/auth/me` return them. */
-export interface CurrentUser {
-  id: string
-  userName: string
-  email: string | null
-  roles: string[]
-  mustChangePassword: boolean
-}
-
-/**
- * A minimal sign-in form (docs/architecture.md §6.1), until the shell gets its real one in Phase 1
- * step 8.
- */
+/** The sign-in form (docs/architecture.md §6.1). */
 export function SignIn({ onSignedIn }: { onSignedIn: (user: CurrentUser) => void }) {
   const [userNameOrEmail, setUserNameOrEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -40,7 +29,7 @@ export function SignIn({ onSignedIn }: { onSignedIn: (user: CurrentUser) => void
   }
 
   return (
-    <form onSubmit={(event) => void submit(event)} aria-label="Sign in">
+    <form className="nk-form nk-signin" onSubmit={(event) => void submit(event)} aria-label="Sign in">
       <h2>Sign in</h2>
       <p>
         <label>

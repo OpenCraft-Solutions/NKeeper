@@ -133,6 +133,39 @@ public sealed class PluginHostTests : IDisposable
     }
 
     [Fact]
+    public async Task A_reinstall_signed_by_a_new_install_key_updates_the_record_and_an_earlier_key_stops_verifying()
+    {
+        using var first = PluginSigningKey.Generate();
+        using var second = PluginSigningKey.Generate();
+        var trustFile = Path.Combine(_scenario.Options.TrustDirectory, "install.json");
+        File.WriteAllBytes(trustFile, TrustedKey.Install(first.PublicKey.Span, ["hello"]).ToKeyFile());
+        var path = _scenario.Install(TestPlugins.Package(first));
+
+        var installed = await _scenario.LoadAsync();
+        Assert.Equal(PluginState.Loaded, Assert.Single(installed.Statuses).State);
+        Assert.True(_scenario.Store.Records["hello"].BuiltIn);
+
+        // The installer's next run: a new key, the same version rebuilt.
+        File.WriteAllBytes(trustFile, TrustedKey.Install(second.PublicKey.Span, ["hello"]).ToKeyFile());
+        File.Delete(path);
+        path = _scenario.Install(TestPlugins.Package(second));
+        var reinstalled = await _scenario.LoadAsync();
+        Assert.Equal(PluginState.Loaded, Assert.Single(reinstalled.Statuses).State);
+        Assert.Equal(second.KeyId, _scenario.Store.Records["hello"].KeyId);
+        Assert.Contains(_scenario.Audit.Events, e => e is ("plugin.updated", "hello", _));
+
+        // A package signed with the earlier install key no longer verifies.
+        File.Delete(path);
+        path = _scenario.Install(TestPlugins.Package(first));
+        AssertRefused(await _scenario.LoadAsync(), "hello", ReasonCodes.UntrustedKey);
+
+        // Nor does a downgrade, even from the current install key.
+        File.Delete(path);
+        _scenario.Install(TestPlugins.Package(second, version: "0.9.0"));
+        AssertRefused(await _scenario.LoadAsync(), "hello", HostReasonCodes.Downgrade);
+    }
+
+    [Fact]
     public async Task A_newer_version_from_a_new_signer_awaits_approval()
     {
         _scenario.IsDevelopment = true;
@@ -388,6 +421,36 @@ public sealed class PluginHostTests : IDisposable
 
         AssertRefused(result, "broken", HostReasonCodes.ContributionInvalid);
         Assert.Equal([("hello", "hello")], result.SessionTypes.Select(t => (t.PluginId, t.Type.Id)));
+    }
+
+    [Theory]
+    [InlineData("action-id")]
+    [InlineData("action-label")]
+    [InlineData("action-session")]
+    [InlineData("action-credential")]
+    public async Task A_plugin_contributing_an_invalid_host_action_is_refused_and_registers_nothing(string rule)
+    {
+        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "broken", entryType: TestPlugins.InvalidServiceTypeType));
+
+        var (result, services) = await ConfigureAsync(("Plugins:Settings:broken:Break", rule));
+
+        AssertRefused(result, "broken", HostReasonCodes.ContributionInvalid);
+        Assert.Empty(result.ServiceTypes);
+        Assert.Empty(result.SessionTypes);
+        Assert.Empty(result.HostActions);
+        Assert.Empty(services);
+    }
+
+    [Fact]
+    public async Task A_host_action_ID_taken_by_an_earlier_plugin_is_refused()
+    {
+        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey));
+        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "broken", entryType: TestPlugins.InvalidServiceTypeType, dependsOn: ("hello", ">=1.0.0")));
+
+        var (result, _) = await ConfigureAsync(("Plugins:Settings:broken:Break", "action-taken"));
+
+        AssertRefused(result, "broken", HostReasonCodes.ContributionInvalid);
+        Assert.Equal([("hello", "hello.open", "hello")], result.HostActions.Select(a => (a.PluginId, a.Action.Id, a.Action.SessionType)));
     }
 
     [Fact]

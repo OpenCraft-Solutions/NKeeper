@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using NKeeper.Abstractions;
 using NKeeper.Connectivity.Ssh;
+using NKeeper.Core.Health;
 using NKeeper.Core.Inventory;
 using NKeeper.Core.Persistence;
 using NKeeper.Core.Sessions;
@@ -77,6 +78,7 @@ builder.Services.AddNKeeperIdentity(builder.Configuration, connectionString, key
 builder.Services.AddNKeeperInventory(plugins.ServiceTypes.Select(t => t.Type));
 builder.Services.AddNKeeperSshConnectivity();
 builder.Services.AddNKeeperSessions(plugins.SessionTypes.Select(t => (t.PluginId, t.Type)));
+builder.Services.AddNKeeperHealth(builder.Configuration);
 builder.Services.AddSingleton(plugins);
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.ConfigureHttpJsonOptions(options =>
@@ -86,6 +88,8 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 var app = builder.Build();
 await app.InitializeIdentityAsync(CancellationToken.None);
 
+// Behind nginx, the browser's own address and scheme, before anything reads them (architecture.md §8).
+app.UseNKeeperForwardedHeaders();
 app.UseSecurityHeaders();
 if (shell is not null)
 {
@@ -106,6 +110,7 @@ api.MapAuthEndpoints();
 api.MapUserEndpoints();
 api.MapInventoryEndpoints();
 api.MapStreamSessions();
+api.MapHealthEndpoints();
 api.MapPluginStatus();
 app.MapPluginFrontends();
 PluginHost.MapEndpoints(plugins, api, builder.Configuration, (group, id) => group.WithMetadata(new NKeeper.Core.Credentials.PluginEndpointMetadata(id)));

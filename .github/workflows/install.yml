@@ -1,0 +1,47 @@
+name: Install
+
+# The native installer end to end (docs/architecture.md §8), on a fresh Ubuntu runner: install, sign in
+# through nginx, see the built-in plugins load, then upgrade in place and check again.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: install-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  ubuntu:
+    name: Native install (Ubuntu 24.04)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      ADMIN_PASSWORD: Install-Check-Passw0rd-1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check the installer
+        run: shellcheck deploy/setup.sh
+
+      - name: Install
+        run: sudo deploy/setup.sh install --yes --server-name localhost --admin-password "$ADMIN_PASSWORD"
+
+      - name: Sign in through nginx and see the built-in plugins load
+        run: deploy/check-install.sh "$ADMIN_PASSWORD"
+
+      - name: Upgrade in place
+        run: sudo deploy/setup.sh install --yes --server-name localhost
+
+      - name: Check again after the upgrade
+        run: deploy/check-install.sh "$ADMIN_PASSWORD"
+
+      - name: The service's log
+        if: failure()
+        run: sudo journalctl -u nkeeper -n 200 --no-pager

@@ -28,6 +28,15 @@ jobs:
         with:
           global-json-file: global.json
 
+      # Building a plugin builds its frontend, so the backend build needs the npm packages too.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install npm packages (from the lock file)
+        run: npm ci
+
       - name: Restore (locked)
         run: dotnet restore NKeeper.slnx --locked-mode
 

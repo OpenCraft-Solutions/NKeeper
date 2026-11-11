@@ -15,6 +15,12 @@ public enum TrustedKeyKind
 
     /// <summary>A developer's or CI run's key: refused outright outside the Development environment.</summary>
     Development,
+
+    /// <summary>
+    /// The native installer's one-time key for the built-in plugins it built (§6.1): may sign exactly the IDs
+    /// it lists, official ones included. Its private key is deleted once those packages are signed.
+    /// </summary>
+    Install,
 }
 
 /// <summary>A public key trusted to sign plugin packages, with what it may sign.</summary>
@@ -39,7 +45,7 @@ public sealed class TrustedKey
 
     public TrustedKeyKind Kind { get; }
 
-    /// <summary>Third-party keys only: exact IDs or <c>prefix.*</c> patterns (§6.2).</summary>
+    /// <summary>Third-party keys: exact IDs or <c>prefix.*</c> patterns (§6.2). Install keys: exact IDs only.</summary>
     public IReadOnlyList<string> AllowedIds { get; }
 
     /// <summary>The last day (UTC) the key is valid on; null for no end.</summary>
@@ -62,6 +68,18 @@ public sealed class TrustedKey
         }
 
         return Create(publicKey, TrustedKeyKind.ThirdParty, allowedIds, notAfter, comment);
+    }
+
+    /// <summary>An install key, allowed to sign exactly the IDs in <paramref name="ids"/>, official ones included (§6.1).</summary>
+    public static TrustedKey Install(ReadOnlySpan<byte> publicKey, IReadOnlyList<string> ids, string? comment = null)
+    {
+        var invalid = ids.FirstOrDefault(id => id is null || !PluginId.IsValid(id));
+        if (ids.Count == 0 || ids.Any(id => id is null) || invalid is not null)
+        {
+            throw new TrustConfigurationException($"An install key needs at least one allowed ID, and each must be an exact plugin ID, not a pattern ('{invalid}' is not).");
+        }
+
+        return Create(publicKey, TrustedKeyKind.Install, ids, null, comment);
     }
 
     /// <summary>A development key: valid only on a server running in Development.</summary>
@@ -100,11 +118,17 @@ public sealed class TrustedKey
             notAfter = date;
         }
 
-        var key = file.Development == true
-            ? (file.AllowedIds is { Count: > 0 } || notAfter is not null
+        var key = (file.Development, file.Install) switch
+        {
+            (true, true) => throw new TrustConfigurationException("A key file can't be both a development key and an install key."),
+            (true, _) => file.AllowedIds is { Count: > 0 } || notAfter is not null
                 ? throw new TrustConfigurationException("A development key file can't limit IDs or set an end date: it is valid for any ID, in Development only.")
-                : Development(publicKey, file.Comment))
-            : ThirdParty(publicKey, file.AllowedIds ?? [], file.Comment, notAfter);
+                : Development(publicKey, file.Comment),
+            (_, true) => notAfter is not null
+                ? throw new TrustConfigurationException("An install key file can't set an end date: the next install replaces it.")
+                : Install(publicKey, file.AllowedIds ?? [], file.Comment),
+            _ => ThirdParty(publicKey, file.AllowedIds ?? [], file.Comment, notAfter),
+        };
 
         if (file.KeyId != key.KeyId)
         {
@@ -125,10 +149,11 @@ public sealed class TrustedKey
         var file = new KeyFile(
             KeyId,
             Convert.ToBase64String(PublicKey.Span),
-            Kind == TrustedKeyKind.ThirdParty ? AllowedIds : null,
+            Kind is TrustedKeyKind.ThirdParty or TrustedKeyKind.Install ? AllowedIds : null,
             NotAfter?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
             Comment,
-            Kind == TrustedKeyKind.Development ? true : null);
+            Kind == TrustedKeyKind.Development ? true : null,
+            Kind == TrustedKeyKind.Install ? true : null);
         return JsonSerializer.SerializeToUtf8Bytes(file, IndentedOptions);
     }
 
@@ -136,6 +161,7 @@ public sealed class TrustedKey
     public bool MaySign(string pluginId) => Kind switch
     {
         TrustedKeyKind.Official or TrustedKeyKind.Development => true,
+        TrustedKeyKind.Install => AllowedIds.Contains(pluginId, StringComparer.Ordinal),
         _ => !PluginId.IsOfficial(pluginId) && AllowedIds.Any(pattern => Matches(pattern, pluginId)),
     };
 
@@ -176,5 +202,5 @@ public sealed class TrustedKey
             ? id.StartsWith(pattern[..^1], StringComparison.Ordinal) && id.Length > pattern.Length - 1
             : id == pattern;
 
-    private sealed record KeyFile(string KeyId, string PublicKey, IReadOnlyList<string>? AllowedIds = null, string? NotAfter = null, string? Comment = null, bool? Development = null);
+    private sealed record KeyFile(string KeyId, string PublicKey, IReadOnlyList<string>? AllowedIds = null, string? NotAfter = null, string? Comment = null, bool? Development = null, bool? Install = null);
 }

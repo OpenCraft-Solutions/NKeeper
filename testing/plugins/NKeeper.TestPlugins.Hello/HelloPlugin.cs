@@ -28,9 +28,11 @@ public sealed class HelloPlugin : IPlugin
     {
         // Opens on its own service type, so packages of this plugin under different IDs don't collide here either.
         contributions.AddSessionType(new SessionType(context.Id, "Hello session", typeof(HelloSessionHandler)) { ServiceTypes = [context.Id] });
+        contributions.AddHostAction(new HostAction($"{context.Id}.open", "Open", SessionType: context.Id) { Credential = HostActionCredential.None });
         contributions.AddServiceType(new ServiceType(context.Id, "Hello")
         {
             DefaultPort = 7,
+            Health = HealthProbe.Tcp,
             SettingsVersion = 2,
             Settings =
             [
@@ -211,6 +213,22 @@ public sealed class InvalidServiceTypePlugin : IPlugin
 {
     public void Contribute(IPluginContributions contributions, PluginContext context)
     {
+        // Host action rules (SDK 0.1.6): a valid service and session type, and a host action that breaks one.
+        if (context.Configuration["Break"] is { } actionRule && actionRule.StartsWith("action-", StringComparison.Ordinal))
+        {
+            contributions.AddServiceType(new ServiceType("fine", "Fine"));
+            contributions.AddSessionType(new SessionType("fine", "Fine", typeof(HelloSessionHandler)) { ServiceTypes = ["fine"] });
+            contributions.AddHostAction(actionRule switch
+            {
+                "action-label" => new HostAction("fine.go", " ", "fine"),
+                "action-session" => new HostAction("fine.go", "Go", "elsewhere"),
+                "action-credential" => new HostAction("fine.go", "Go", "fine") { Credential = (HostActionCredential)7 },
+                "action-taken" => new HostAction("hello.open", "Open again", "fine"),
+                _ => new HostAction("Fine.Go", "Go", "fine"),
+            });
+            return;
+        }
+
         // Session type rules (SDK 0.1.5): a valid service type, and a session type that breaks one.
         if (context.Configuration["Break"] is { } rule && rule.StartsWith("session-", StringComparison.Ordinal))
         {

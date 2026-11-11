@@ -54,14 +54,21 @@ public static class TestPlugins
         return PackageBuilder.Build(Encoding.UTF8.GetBytes(manifest), files, key);
     }
 
-    /// <summary>The ssh plugin (plugins/ssh), packaged from its own manifest and build output, signed with <paramref name="key"/>.</summary>
+    /// <summary>
+    /// The ssh plugin (plugins/ssh), packaged from its own manifest and build output, its frontend
+    /// included, signed with <paramref name="key"/>. Building the plugin builds its frontend.
+    /// </summary>
     public static BuiltPackage SshPackage(PluginSigningKey key)
     {
         string Metadata(string name) => typeof(TestPlugins).Assembly.GetCustomAttributes<AssemblyMetadataAttribute>().Single(a => a.Key == name).Value!;
-        return PackageBuilder.Build(
-            File.ReadAllBytes(Metadata("SshPluginManifest")),
-            new Dictionary<string, byte[]> { ["backend/NKeeper.Plugins.Ssh.dll"] = File.ReadAllBytes(Metadata("SshPluginPath")) },
-            key);
+        var files = new Dictionary<string, byte[]> { ["backend/NKeeper.Plugins.Ssh.dll"] = File.ReadAllBytes(Metadata("SshPluginPath")) };
+        var frontend = Metadata("SshPluginFrontend");
+        foreach (var path in Directory.EnumerateFiles(frontend, "*", SearchOption.AllDirectories))
+        {
+            files["frontend/" + Path.GetRelativePath(frontend, path).Replace(Path.DirectorySeparatorChar, '/')] = File.ReadAllBytes(path);
+        }
+
+        return PackageBuilder.Build(File.ReadAllBytes(Metadata("SshPluginManifest")), files, key);
     }
 
     /// <summary>Writes a package into <paramref name="directory"/> and returns its path.</summary>
