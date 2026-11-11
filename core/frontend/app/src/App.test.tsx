@@ -184,6 +184,55 @@ describe('App', () => {
   })
 })
 
+describe('the users page', () => {
+  it('creates a user, and grants them a host and a tag group', async () => {
+    const created = { id: 'u2', userName: 'bob', email: 'bob@example.com', role: 'user', isDisabled: false, mustChangePassword: true, isLockedOut: false, createdAtUtc: '2026-01-01T00:00:00Z' }
+    let users: object[] = [{ ...created, id: 'u1', userName: 'admin', email: 'admin@example.com', role: 'administrator', mustChangePassword: false }]
+    const fetch = fakeApi({
+      'GET /api/auth/me': ADMIN,
+      'GET /api/plugins': [],
+      'GET /api/hosts': [host({ id: 'h1', name: 'web01' })],
+      'GET /api/health': [],
+      'GET /api/users': () => Response.json(users),
+      'POST /api/users': () => {
+        users = [...users, created]
+        return Response.json(created, { status: 201 })
+      },
+      'GET /api/users/u2/grants': [],
+      'PUT /api/users/u2/grants': () => new Response(null, { status: 204 }),
+    })
+    const user = userEvent.setup()
+
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: 'Users' }))
+    await user.click(screen.getByRole('button', { name: 'New user' }))
+    const form = screen.getByRole('form', { name: 'New user' })
+    await user.type(within(form).getByLabelText('User name'), 'bob')
+    await user.type(within(form).getByLabelText('Email'), 'bob@example.com')
+    await user.type(within(form).getByLabelText('Initial password'), 'Bob-Passw0rd-123')
+    await user.click(within(form).getByRole('button', { name: 'Create user' }))
+
+    const panel = await screen.findByRole('article', { name: 'bob' })
+    expect(bodyOf(fetch, 'POST /api/users')).toEqual({ userName: 'bob', email: 'bob@example.com', role: 'user', password: 'Bob-Passw0rd-123', mustChangePassword: true })
+    const grants = await within(panel).findByRole('form', { name: 'Grants' })
+    await user.click(within(grants).getByRole('button', { name: 'Add grant' }))
+    await user.selectOptions(within(grants).getByLabelText('Host'), 'h1')
+    await user.click(within(grants).getByRole('button', { name: 'Add grant' }))
+    const second = within(grants).getByRole('group', { name: 'Grant 2' })
+    await user.selectOptions(within(second).getByLabelText('On'), 'tag')
+    await user.type(within(second).getByLabelText('Tag name'), 'env')
+    await user.type(within(second).getByLabelText('Value (optional)'), 'prod')
+    await user.selectOptions(within(second).getByLabelText('Level'), 'manage')
+    await user.click(within(grants).getByRole('button', { name: 'Save grants' }))
+
+    expect(await within(grants).findByRole('status')).toHaveTextContent('Grants saved.')
+    expect(bodyOf(fetch, 'PUT /api/users/u2/grants')).toEqual([
+      { hostId: 'h1', level: 'use' },
+      { tagName: 'env', tagValue: 'prod', level: 'manage' },
+    ])
+  })
+})
+
 describe('a required password change', () => {
   it('comes before anything else', async () => {
     let changed = false
@@ -290,6 +339,30 @@ describe('the workspace', () => {
     // Closing the tab ends the session.
     await user.click(screen.getByRole('button', { name: 'Close web01 · Terminal' }))
     expect(screen.queryByRole('tab', { name: 'web01 · Terminal' })).not.toBeInTheDocument()
+  })
+
+  it('opens a host’s menu on right-click, its first entry on double-click, and says when there’s nothing to connect with', async () => {
+    vi.stubGlobal('WebSocket', FakeSocket)
+    signedIn()
+    const user = userEvent.setup()
+
+    render(<App importer={termImporter} />)
+    const tree = await screen.findByRole('navigation', { name: 'Hosts' })
+    await user.pointer({ keys: '[MouseRight]', target: within(tree).getByRole('button', { name: /^web01,/ }) })
+    expect(screen.getByRole('menu', { name: 'Connect to web01' })).toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+
+    // Double-click: the first saved credential, root.
+    await user.dblClick(within(tree).getByRole('button', { name: /^web01,/ }))
+    await waitFor(() => expect(FakeSocket.last).not.toBeNull())
+    act(() => FakeSocket.last!.open())
+    expect(FakeSocket.last!.sent[0]).toMatchObject({ type: 'start', hostId: 'h1', serviceId: 's1', credentialId: 'c1' })
+    expect(screen.getByRole('tab', { name: 'web01 · Terminal' })).toBeInTheDocument()
+
+    // db01 has no services.
+    await user.click(within(tree).getByRole('button', { name: /^db01,/ }))
+    expect(screen.getByRole('note')).toHaveTextContent('There’s nothing to connect with yet: add a service, such as SSH, with Edit.')
   })
 
   it('keeps sessions running behind the plugin list, and withdraws a dialog when its tab closes', async () => {

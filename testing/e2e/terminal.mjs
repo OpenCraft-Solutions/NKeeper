@@ -83,8 +83,8 @@ try {
   step('its health is checked on save')
   await page.getByRole('article', { name: hostName }).getByText(/^Up, \d+ ms$/).waitFor({ timeout: 15000 })
 
-  step('open a terminal with the saved credential, and trust the server key')
-  await connect(sshUser)
+  step('double-click the host to open a terminal with its saved credential, and trust the server key')
+  await page.getByRole('button', { name: new RegExp(`^${hostName},`) }).dblclick()
   const key = page.getByRole('dialog', { name: 'Trust this server key?' })
   await key.waitFor({ timeout: 30000 })
   console.log(`    ${await key.locator('.nk-mono').innerText()}`)
