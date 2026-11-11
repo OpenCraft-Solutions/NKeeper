@@ -29,6 +29,12 @@ public sealed class HelloPlugin : IPlugin
         // Opens on its own service type, so packages of this plugin under different IDs don't collide here either.
         contributions.AddSessionType(new SessionType(context.Id, "Hello session", typeof(HelloSessionHandler)) { ServiceTypes = [context.Id] });
         contributions.AddHostAction(new HostAction($"{context.Id}.open", "Open", SessionType: context.Id) { Credential = HostActionCredential.None });
+
+        // A session origin (SDK 0.1.8), only when its settings name a prefix: the tests package this plugin under many IDs.
+        if (context.Configuration["Origin"] is { } prefix)
+        {
+            contributions.AddSessionOrigin(new SessionOrigin(prefix, typeof(HelloOriginHandler)));
+        }
         contributions.AddServiceType(new ServiceType(context.Id, "Hello")
         {
             DefaultPort = 7,
@@ -58,6 +64,7 @@ public sealed class HelloPlugin : IPlugin
     {
         services.AddSingleton(new Greeting($"pong from {context.Id} {context.Version}"));
         services.AddScoped<HelloSessionHandler>();
+        services.AddSingleton<HelloOriginHandler>();
     }
 
     public void MapEndpoints(IEndpointRouteBuilder endpoints, PluginContext context)
@@ -233,6 +240,18 @@ public sealed class InvalidServiceTypePlugin : IPlugin
 {
     public void Contribute(IPluginContributions contributions, PluginContext context)
     {
+        // Session origin rules (SDK 0.1.8): an origin that breaks one.
+        if (context.Configuration["Break"] is { } originRule && originRule.StartsWith("origin-", StringComparison.Ordinal))
+        {
+            contributions.AddSessionOrigin(originRule switch
+            {
+                "origin-handler" => new SessionOrigin("fine", typeof(string)),
+                "origin-taken" => new SessionOrigin("hello", typeof(HelloOriginHandler)),
+                _ => new SessionOrigin("Not-Valid", typeof(HelloOriginHandler)),
+            });
+            return;
+        }
+
         // Host action rules (SDK 0.1.6, run actions 0.1.7): a valid service and session type, and a host action that breaks one.
         if (context.Configuration["Break"] is { } actionRule && actionRule.StartsWith("action-", StringComparison.Ordinal))
         {
@@ -446,3 +465,9 @@ public sealed class HelloSessionHandler(IConnectivity connectivity) : IStreamSes
 
 /// <summary>An audit event to record, for the plugin audit tests.</summary>
 public sealed record AuditProbe(string Action);
+
+/// <summary>Answers on the test plugin's session origin with the label it was given.</summary>
+public sealed class HelloOriginHandler : ISessionOriginHandler
+{
+    public Task HandleAsync(HttpContext context, string label) => context.Response.WriteAsync($"hello origin {label}");
+}

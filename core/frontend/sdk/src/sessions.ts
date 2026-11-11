@@ -25,6 +25,16 @@ export interface HostKeyPrompt {
   readonly fingerprint: string
 }
 
+/**
+ * A server identity no one trusted yet (docs/architecture.md §7.7, §7.16): an SSH key, or a TLS certificate with
+ * its subject and expiry. A plugin endpoint reports one when core refused to connect without it (SDK 0.1.8).
+ */
+export interface TrustPrompt extends HostKeyPrompt {
+  readonly kind: 'ssh-host-key' | 'tls-certificate'
+  readonly subject?: string
+  readonly notAfterUtc?: string
+}
+
 export interface OpenStreamOptions {
   /** Asks the user about a key no one trusted yet; resolves true to trust it. */
   readonly confirmHostKey: (prompt: HostKeyPrompt) => Promise<boolean>

@@ -17,6 +17,7 @@
 
   <ItemGroup Label="Connectivity">
     <PackageVersion Include="SSH.NET" Version="2026.0.0" />
+    <PackageVersion Include="Yarp.ReverseProxy" Version="2.3.0" />
   </ItemGroup>
 
   <ItemGroup Label="Tests">

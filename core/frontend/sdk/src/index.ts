@@ -7,5 +7,5 @@ export type { PluginContext, PluginDefinition, SessionViewProps } from './plugin
 export { ApiError, api, apiWebSocketUrl, onUnauthorized, readJsonLines, resetAntiforgeryToken } from './api'
 export type { ProblemDetails, RequestOptions } from './api'
 export { SessionError, openStreamSession } from './sessions'
-export type { HostKeyPrompt, OpenStreamOptions, StreamConnection, StreamStart } from './sessions'
+export type { HostKeyPrompt, OpenStreamOptions, StreamConnection, StreamStart, TrustPrompt } from './sessions'
 export { adoptStyles, mirrorInjectedStyles } from './styles'

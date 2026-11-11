@@ -81,6 +81,25 @@ public static class TestPlugins
             key);
     }
 
+    /// <summary>
+    /// The web plugin (plugins/web), packaged from its own manifest, the backend files its build staged for packing
+    /// (YARP included), and its frontend, signed with <paramref name="key"/>.
+    /// </summary>
+    public static BuiltPackage WebPackage(PluginSigningKey key)
+    {
+        string Metadata(string name) => typeof(TestPlugins).Assembly.GetCustomAttributes<AssemblyMetadataAttribute>().Single(a => a.Key == name).Value!;
+        var files = new Dictionary<string, byte[]>();
+        foreach (var (folder, prefix) in new[] { (Metadata("WebPluginOutput"), "backend/"), (Metadata("WebPluginFrontend"), "frontend/") })
+        {
+            foreach (var path in Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories))
+            {
+                files[prefix + Path.GetRelativePath(folder, path).Replace(Path.DirectorySeparatorChar, '/')] = File.ReadAllBytes(path);
+            }
+        }
+
+        return PackageBuilder.Build(File.ReadAllBytes(Metadata("WebPluginManifest")), files, key);
+    }
+
     /// <summary>Writes a package into <paramref name="directory"/> and returns its path.</summary>
     public static string WriteTo(this BuiltPackage package, string directory)
     {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import type { HostKeyPrompt } from '@nkeeper/sdk'
+import type { HostKeyPrompt, TrustPrompt } from '@nkeeper/sdk'
 import { DialogContext, type Dialogs, type TypedCredential } from './dialogContext'
 
 /**
@@ -8,7 +8,7 @@ import { DialogContext, type Dialogs, type TypedCredential } from './dialogConte
  */
 
 type Request =
-  | { id: number; kind: 'hostKey'; prompt: HostKeyPrompt; hostName: string; resolve: (trust: boolean) => void }
+  | { id: number; kind: 'hostKey'; prompt: HostKeyPrompt | TrustPrompt; hostName: string; resolve: (trust: boolean) => void }
   | { id: number; kind: 'credential'; hostName: string; serviceName: string; resolve: (credential: TypedCredential | null) => void }
 
 /** A request without its ID, for each kind of request. */
@@ -114,17 +114,32 @@ function Modal({ title, onCancel, children }: { title: string; onCancel: () => v
 }
 
 function HostKeyDialog({ request, onAnswer }: { request: Extract<Request, { kind: 'hostKey' }>; onAnswer: (trust: boolean) => void }) {
+  const prompt = request.prompt as Partial<TrustPrompt> & HostKeyPrompt
+  const certificate = prompt.kind === 'tls-certificate'
   return (
-    <Modal title="Trust this server key?" onCancel={() => onAnswer(false)}>
+    <Modal title={certificate ? 'Trust this certificate?' : 'Trust this server key?'} onCancel={() => onAnswer(false)}>
       <p>
-        <strong>{request.hostName}</strong> presented a key no one has trusted yet. Check its fingerprint with the server’s administrator before
-        trusting it.
+        <strong>{request.hostName}</strong>{' '}
+        {certificate
+          ? 'presented a certificate that isn’t publicly valid, and no one has trusted it yet. Check its fingerprint with the server’s administrator before trusting it.'
+          : 'presented a key no one has trusted yet. Check its fingerprint with the server’s administrator before trusting it.'}
       </p>
       <dl className="nk-facts">
-        <dt>Algorithm</dt>
-        <dd>{request.prompt.algorithm}</dd>
+        {certificate ? (
+          <>
+            <dt>Subject</dt>
+            <dd>{prompt.subject}</dd>
+            <dt>Expires</dt>
+            <dd>{prompt.notAfterUtc ? new Date(prompt.notAfterUtc).toLocaleString() : '—'}</dd>
+          </>
+        ) : (
+          <>
+            <dt>Algorithm</dt>
+            <dd>{prompt.algorithm}</dd>
+          </>
+        )}
         <dt>Fingerprint</dt>
-        <dd className="nk-mono">SHA256:{request.prompt.fingerprint}</dd>
+        <dd className="nk-mono">SHA256:{prompt.fingerprint}</dd>
       </dl>
       <div className="nk-actions">
         <button type="button" onClick={() => onAnswer(false)}>

@@ -13,6 +13,8 @@
   -->
   <PropertyGroup>
     <IsPackable>false</IsPackable>
+    <!-- A plugin's NuGet dependencies (YARP, for web) travel in its package, so they must be in its output. -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     <NKeeperRoot>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', '..'))</NKeeperRoot>
     <NKeeperDevelopmentKeys>$(NKeeperRoot).dev/keys/</NKeeperDevelopmentKeys>
     <NKeeperPluginPackages Condition="'$(NKeeperPluginPackages)' == ''">$(NKeeperRoot)artifacts/plugins/</NKeeperPluginPackages>
@@ -54,7 +56,12 @@
     <Exec Condition="'$(NKeeperSigningKey)' == '$(NKeeperDevelopmentKeys)dev.private.pem' And !Exists('$(NKeeperSigningKey)')"
           Command="dotnet &quot;$(NKeeperPluginTool)&quot; keygen --out &quot;$(NKeeperDevelopmentKeys).&quot; --name dev --comment &quot;local development key&quot;" />
     <RemoveDir Directories="$(NKeeperPackStaging);$(NKeeperPacked)" />
-    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(NKeeperPackStaging)" />
+    <ItemGroup>
+      <!-- The plugin and the assemblies it brings: never the SDK, which is shared from the server (§7.1). -->
+      <NKeeperBackendFile Include="$(TargetPath)" />
+      <NKeeperBackendFile Include="@(ReferenceCopyLocalPaths)" Condition="'%(Extension)' == '.dll' And '%(Filename)' != 'NKeeper.Abstractions'" />
+    </ItemGroup>
+    <Copy SourceFiles="@(NKeeperBackendFile)" DestinationFolder="$(NKeeperPackStaging)" />
     <Exec Command="dotnet &quot;$(NKeeperPluginTool)&quot; pack --manifest &quot;$(MSBuildProjectDirectory)/nkeeper-plugin.json&quot; --backend &quot;$(NKeeperPackStaging).&quot; $(NKeeperFrontendArgument) --key &quot;$(NKeeperSigningKey)&quot; --out &quot;$(NKeeperPacked).&quot;" />
     <ItemGroup>
       <NKeeperPackage Include="$(NKeeperPacked)*.nkp" />

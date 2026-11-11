@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react'
-import type { StreamConnection } from './sessions'
+import type { StreamConnection, TrustPrompt } from './sessions'
 
 /** The SDK version this build of the shell implements; plugin manifests declare a compatible range. */
 export const SDK_VERSION = '0.1.8'
@@ -24,6 +24,12 @@ export interface SessionViewProps {
   readonly connect: (options?: Record<string, unknown>, signal?: AbortSignal) => Promise<StreamConnection>
   /** Whether the view's tab is showing. A hidden view stays mounted, so its session keeps running. */
   readonly visible: boolean
+  /**
+   * For a view that opens its session through the plugin's own endpoints (SDK 0.1.8): shows core's dialog for a
+   * key or certificate the endpoint reported, and when the user trusts it, posts it to core. Resolves to whether
+   * it's now trusted.
+   */
+  readonly confirmTrust: (prompt: TrustPrompt) => Promise<boolean>
 }
 
 /**

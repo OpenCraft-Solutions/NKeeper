@@ -1,5 +1,5 @@
 import { createElement, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { api, ApiError, openStreamSession, SessionError, type StreamStart } from '@nkeeper/sdk'
+import { api, ApiError, openStreamSession, SessionError, type StreamStart, type TrustPrompt } from '@nkeeper/sdk'
 import type { Catalog, ConnectEntry, ConnectGroup, SessionCredential } from './catalog'
 import { useDialogs } from './dialogContext'
 import { HostDetails } from './HostDetails'
@@ -331,9 +331,26 @@ function SessionPanel({
     [dialogs, tab, hostName],
   )
 
+  // For views that open sessions through their plugin's endpoints: core's dialog, then core's trust endpoint.
+  const confirmTrust = useCallback(
+    async (prompt: TrustPrompt) => {
+      const name = prompt.hostId === tab.host.id ? tab.host.name : (hostName(prompt.hostId) ?? `the jump host of ${tab.host.name}`)
+      if (!(await dialogs.confirmHostKey(prompt, name))) {
+        return false
+      }
+      try {
+        await api.post(`/api/hosts/${prompt.hostId}/services/${prompt.serviceId}/trusted-keys`, { algorithm: prompt.algorithm, fingerprint: prompt.fingerprint })
+        return true
+      } catch {
+        return false
+      }
+    },
+    [dialogs, tab, hostName],
+  )
+
   if (!View) {
     return <p className="nk-alert nk-pad">The plugin that draws this session isn’t loaded any more.</p>
   }
   // The plugin's component, from the catalog: the same one each render.
-  return createElement(View, { host, serviceId: tab.serviceId, connect, visible })
+  return createElement(View, { host, serviceId: tab.serviceId, connect, visible, confirmTrust })
 }

@@ -18,6 +18,7 @@
   <Folder Name="/plugins/">
     <Project Path="plugins/ssh/backend/NKeeper.Plugins.Ssh.csproj" />
     <Project Path="plugins/wake-on-lan/backend/NKeeper.Plugins.WakeOnLan.csproj" />
+    <Project Path="plugins/web/backend/NKeeper.Plugins.Web.csproj" />
   </Folder>
   <Folder Name="/testing/">
     <Project Path="testing/NKeeper.Testing/NKeeper.Testing.csproj" />
