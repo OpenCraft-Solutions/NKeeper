@@ -734,7 +734,7 @@ Remote desktops go through guacd, Apache Guacamole's proxy daemon, which speaks 
 
 ```csharp
 await using var desktop = await connectivity.OpenDesktopAsync(host, serviceId, handle, new DesktopOptions(Width: 1280, Height: 800, Dpi: 96));
-// desktop.ReadAsync / WriteAsync: Guacamole instructions, after the handshake
+// desktop.ReceiveAsync: guacd's instructions for the browser; desktop.SendFromBrowserAsync: the browser's, filtered
 ```
 
 - `IConnectivity.OpenDesktopAsync(host, serviceId, handle, options)`, for an RDP service, so far:
@@ -742,7 +742,13 @@ await using var desktop = await connectivity.OpenDesktopAsync(host, serviceId, h
   - **checks the server's certificate first.** It reads the certificate RDP offers (an X.224 negotiation, then a TLS handshake), and checks it like an HTTPS one (§7.16): publicly valid, or the one trusted for the host. An unknown one fails with `DesktopConnectException` and `HostKeyUnknown`, carrying the certificate, which core remembers it presented. A changed one fails with `HostKeyChanged`, audited as `trust.mismatch`;
   - through a jump host, opens a tunnel (§7.16), and guacd connects to its loopback end;
   - connects to guacd (`Guacd:Address`, `127.0.0.1:4822` by default) and does the Guacamole handshake itself: it selects `rdp`, sends the browser's size, and the connection's parameters. These are the address, port, user name, domain and password, NLA security, and `cert-fingerprints` set to the certificate it just checked, so guacd accepts exactly that one. The browser can never choose the protocol, the target or a parameter;
-  - returns once guacd says `ready`, with an `IDesktopConnection`: the instruction stream after the handshake, and the `ready` instruction to pass on.
+  - returns once guacd says `ready`, with an `IDesktopConnection`:
+    - `ReceiveAsync` gives guacd's instructions for the browser, `ready` first, as Guacamole text;
+    - `SendFromBrowserAsync` takes the browser's instructions and passes on only what **1.x's allow-list** (`GuacamoleInstructionFilter`) allows. The filter is core's, in the connection, so no plugin can skip it:
+      - input, display and plain-text clipboard only: `key`, `mouse`, `touch`, `size`, `sync`, `ack`, `nop`, `clipboard`, `blob`, `end`, `disconnect`;
+      - stream data only for clipboard streams the browser opened, at most 16 of them, of at most 1 MB of text each;
+      - everything else is dropped: file uploads, audio input, argument changes, and anything unknown. It's a security control on a relay that's reachable from the browser, so it has its own negative tests;
+      - text that doesn't parse as instructions throws, and the session ends.
 - **Options** come from the plugin, and are checked: the size (between 200 × 200 and 8192 × 8192), DPI, the audio and image types the browser takes, and its time zone.
 - guacd that isn't running fails with `GatewayUnavailable`.
 - **The Guacamole protocol code** (parser, encoder, handshake) is core's, ported from 1.x's `GuacamoleProtocol` and `GuacdConnection`.
@@ -753,11 +759,7 @@ RDP through guacd, as a proof that the SDK carries a third kind of session (v2-p
 - **Service type** `rdp`, port 3389, TLS probe (§7.13).
 - **Session type** `rdp`, "Desktop", a stream session (§7.10) on `rdp` services, through jump hosts too.
 - **Host action** `rdp.desktop`, "Desktop", with a credential.
-- **The session** relays Guacamole instructions between the browser and core's desktop connection, as text frames. The browser's instructions pass through **1.x's allow-list** (`GuacamoleInstructionFilter`) first:
-  - input, display and plain-text clipboard only: `key`, `mouse`, `touch`, `size`, `sync`, `ack`, `nop`, `clipboard`, `blob`, `end`, `disconnect`;
-  - stream data only for clipboard streams the browser opened, at most 16 of them, of at most 1 MB of text each;
-  - everything else is dropped: file uploads, audio input, argument changes, and anything unknown. It's a security control on a relay that's reachable from the browser, so it has its own negative tests;
-  - an instruction that doesn't parse ends the session.
+- **The session** relays Guacamole instructions between the browser and core's desktop connection (§7.20), as text frames: the browser's through `SendFromBrowserAsync`, so through core's allow-list.
 - `options`: the browser's size, DPI and time zone.
 - **Its frontend** is the `rdp` session view: Guacamole's own JavaScript client (`guacamole-common-js`, Apache 2.0), bundled with the plugin, drawing into the tab and scaling to it.
 
