@@ -390,6 +390,36 @@ public sealed class PluginHostTests : IDisposable
         Assert.Equal([("hello", "hello")], result.SessionTypes.Select(t => (t.PluginId, t.Type.Id)));
     }
 
+    [Theory]
+    [InlineData("action-id")]
+    [InlineData("action-label")]
+    [InlineData("action-session")]
+    [InlineData("action-credential")]
+    public async Task A_plugin_contributing_an_invalid_host_action_is_refused_and_registers_nothing(string rule)
+    {
+        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "broken", entryType: TestPlugins.InvalidServiceTypeType));
+
+        var (result, services) = await ConfigureAsync(("Plugins:Settings:broken:Break", rule));
+
+        AssertRefused(result, "broken", HostReasonCodes.ContributionInvalid);
+        Assert.Empty(result.ServiceTypes);
+        Assert.Empty(result.SessionTypes);
+        Assert.Empty(result.HostActions);
+        Assert.Empty(services);
+    }
+
+    [Fact]
+    public async Task A_host_action_ID_taken_by_an_earlier_plugin_is_refused()
+    {
+        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey));
+        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "broken", entryType: TestPlugins.InvalidServiceTypeType, dependsOn: ("hello", ">=1.0.0")));
+
+        var (result, _) = await ConfigureAsync(("Plugins:Settings:broken:Break", "action-taken"));
+
+        AssertRefused(result, "broken", HostReasonCodes.ContributionInvalid);
+        Assert.Equal([("hello", "hello.open", "hello")], result.HostActions.Select(a => (a.PluginId, a.Action.Id, a.Action.SessionType)));
+    }
+
     [Fact]
     public async Task A_plugin_whose_contribute_throws_is_refused_and_registers_nothing()
     {

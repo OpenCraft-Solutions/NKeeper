@@ -28,6 +28,7 @@ public sealed class PluginHostResult
     private readonly List<string> _alerts = [];
     private readonly List<ContributedServiceType> _serviceTypes = [];
     private readonly List<ContributedSessionType> _sessionTypes = [];
+    private readonly List<ContributedHostAction> _hostActions = [];
 
     public IReadOnlyList<PluginStatus> Statuses => _statuses;
 
@@ -38,6 +39,10 @@ public sealed class PluginHostResult
     /// <summary>The session types the loaded plugins contributed, in load order (docs/architecture.md §7.10).</summary>
     public IReadOnlyList<ContributedSessionType> SessionTypes =>
         [.. _sessionTypes.Where(t => _loaded.Exists(p => p.Manifest.Id == t.PluginId))];
+
+    /// <summary>The host actions the loaded plugins contributed, in load order (docs/architecture.md §7.12).</summary>
+    public IReadOnlyList<ContributedHostAction> HostActions =>
+        [.. _hostActions.Where(a => _loaded.Exists(p => p.Manifest.Id == a.PluginId))];
 
     /// <summary>Loaded plugins, dependencies before dependants.</summary>
     public IReadOnlyList<LoadedPlugin> Loaded => _loaded;
@@ -61,6 +66,9 @@ public sealed class PluginHostResult
 
     internal void AddSessionTypes(string pluginId, IEnumerable<SessionType> types) =>
         _sessionTypes.AddRange(types.Select(t => new ContributedSessionType(pluginId, t)));
+
+    internal void AddHostActions(string pluginId, IEnumerable<HostAction> actions) =>
+        _hostActions.AddRange(actions.Select(a => new ContributedHostAction(pluginId, a)));
 
     /// <summary>Marks a loaded plugin as refused, with every loaded plugin that depends on it.</summary>
     internal IReadOnlyList<string> Fail(string id, string reasonCode, string message)
@@ -270,8 +278,28 @@ public sealed class PluginHost(
 
             if (code is null)
             {
+                var taken = result.HostActions.ToDictionary(a => a.Action.Id, a => a.PluginId, StringComparer.Ordinal);
+                foreach (var action in collected.HostActions)
+                {
+                    problem = ContributionRules.Check(action, collected.SessionTypes)
+                        ?? (taken.TryGetValue(action.Id, out var owner)
+                            ? $"The host action '{action.Id}' is already contributed by plugin {owner}."
+                            : null);
+                    if (problem is not null)
+                    {
+                        code = HostReasonCodes.ContributionInvalid;
+                        break;
+                    }
+
+                    taken[action.Id] = id;
+                }
+            }
+
+            if (code is null)
+            {
                 result.AddServiceTypes(id, collected.ServiceTypes);
                 result.AddSessionTypes(id, collected.SessionTypes);
+                result.AddHostActions(id, collected.HostActions);
                 continue;
             }
 

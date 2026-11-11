@@ -9,6 +9,9 @@ public sealed record ContributedServiceType(string PluginId, ServiceType Type);
 /// <summary>A session type, with the plugin that contributed it.</summary>
 public sealed record ContributedSessionType(string PluginId, SessionType Type);
 
+/// <summary>A host action, with the plugin that contributed it.</summary>
+public sealed record ContributedHostAction(string PluginId, HostAction Action);
+
 /// <summary>Collects one plugin's contributions while its <see cref="IPlugin.Contribute"/> runs.</summary>
 internal sealed class ContributionCollector : IPluginContributions
 {
@@ -26,6 +29,14 @@ internal sealed class ContributionCollector : IPluginContributions
     {
         ArgumentNullException.ThrowIfNull(sessionType);
         SessionTypes.Add(sessionType);
+    }
+
+    public List<HostAction> HostActions { get; } = [];
+
+    public void AddHostAction(HostAction hostAction)
+    {
+        ArgumentNullException.ThrowIfNull(hostAction);
+        HostActions.Add(hostAction);
     }
 }
 
@@ -143,9 +154,35 @@ public static partial class ContributionRules
         return null;
     }
 
+    public const int MaxActionIdLength = 64;
+
+    /// <param name="sessionTypes">The session types the same plugin contributes.</param>
+    public static string? Check(HostAction action, IReadOnlyCollection<SessionType> sessionTypes)
+    {
+        if (action.Id is null || action.Id.Length > MaxActionIdLength || !ActionId().IsMatch(action.Id))
+        {
+            return $"The host action ID '{action.Id}' isn't segments of lower-case letters, digits and '-', each starting with a letter, joined by '.', up to {MaxActionIdLength} characters.";
+        }
+
+        if (string.IsNullOrWhiteSpace(action.Label) || action.Label.Length > MaxLabelLength)
+        {
+            return $"Host action '{action.Id}' needs a label of at most {MaxLabelLength} characters.";
+        }
+
+        if (!sessionTypes.Any(t => t.Id == action.SessionType))
+        {
+            return $"Host action '{action.Id}' opens session type '{action.SessionType}', which the plugin doesn't contribute.";
+        }
+
+        return Enum.IsDefined(action.Credential) ? null : $"Host action '{action.Id}' has an unknown credential mode.";
+    }
+
     // \z, not $: in .NET, $ also matches before a final newline.
     [GeneratedRegex(@"^[a-z][a-z0-9-]{0,31}\z")]
     private static partial Regex TypeId();
+
+    [GeneratedRegex(@"^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)*\z")]
+    private static partial Regex ActionId();
 
     [GeneratedRegex(@"^[a-z][A-Za-z0-9]{0,63}\z")]
     private static partial Regex SettingKey();

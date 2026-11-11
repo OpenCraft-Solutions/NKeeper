@@ -11,6 +11,9 @@ public interface IPluginContributions
 
     /// <summary>Contributes a kind of session users open on a service (docs/architecture.md §7.10, SDK 0.1.5).</summary>
     void AddSessionType(SessionType sessionType);
+
+    /// <summary>Contributes an entry in hosts' Connect menu (docs/architecture.md §7.12, SDK 0.1.6).</summary>
+    void AddHostAction(HostAction hostAction);
 }
 
 /// <summary>
@@ -39,6 +42,9 @@ public sealed class ServiceType(string id, string label)
     /// Pure and deterministic: core calls it on read, and doesn't save the result.
     /// </summary>
     public Func<int, JsonObject, JsonObject>? Upgrade { get; init; }
+
+    /// <summary>How core checks that a service of this type is up (SDK 0.1.6); null for not at all.</summary>
+    public HealthProbe? Health { get; init; }
 }
 
 public enum ServiceSettingKind

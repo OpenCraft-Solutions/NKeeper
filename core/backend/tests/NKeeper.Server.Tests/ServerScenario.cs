@@ -100,6 +100,9 @@ internal sealed class ServerScenario : IAsyncDisposable
                 web.UseSetting(key, value);
             }
             web.UseSetting("Plugins:Directory", PluginDirectory);
+
+            // Tests check health on demand, so nothing probes in the background.
+            web.UseSetting("Health:Enabled", "false");
             web.UseSetting("Plugins:TrustDirectory", TrustDirectory);
             web.UseSetting("Plugins:DevelopmentTrustDirectory", DevelopmentTrustDirectory);
             if (FrontendRoot is not null)
