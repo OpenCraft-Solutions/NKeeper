@@ -120,6 +120,10 @@ internal sealed class ServerScenario : IAsyncDisposable
         return _factory.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = handleCookies, AllowAutoRedirect = false });
     }
 
+    /// <summary>A WebSocket client for the started server (start it with <see cref="Client"/> first).</summary>
+    public WebSocketClient WebSocketClient() =>
+        (_factory ?? throw new InvalidOperationException("Start the server first.")).Server.CreateWebSocketClient();
+
     /// <summary>A client signed in as the bootstrap administrator.</summary>
     public async Task<HttpClient> SignedInClientAsync()
     {

@@ -26,6 +26,8 @@ public static class AuditActions
     public const string TrustAdd = "trust.add";
     public const string TrustRemove = "trust.remove";
     public const string TrustMismatch = "trust.mismatch";
+    public const string SessionOpen = "session.open";
+    public const string SessionClose = "session.close";
 }
 
 /// <summary>

@@ -8,6 +8,7 @@ using NKeeper.Abstractions;
 using NKeeper.Core.Access;
 using NKeeper.Core.Credentials;
 using NKeeper.Core.Persistence;
+using NKeeper.Core.Sessions;
 using NKeeper.Core.Trust;
 
 namespace NKeeper.Core.Inventory;
@@ -66,15 +67,22 @@ public static class InventoryEndpoints
                 }))
             .RequireAuthorization(policy => policy.RequireRole(SystemRoles.Administrator));
 
-        hosts.MapPut("/{id:guid}", (Guid id, HostRequest? request, HostInventory inventory, HttpContext context) =>
+        // A host's tags, services, credentials and jump host all bear on who may keep a session open (§7.10).
+        hosts.MapPut("/{id:guid}", (Guid id, HostRequest? request, HostInventory inventory, SessionRegistry sessions, HttpContext context) =>
             Handled(async () =>
-                await inventory.UpdateAsync(id, request ?? new HostRequest(), RequestUser.From(context.User), context.RequestAborted) is { } host
-                    ? Results.Ok(host)
-                    : Results.NotFound()));
+            {
+                var host = await inventory.UpdateAsync(id, request ?? new HostRequest(), RequestUser.From(context.User), context.RequestAborted);
+                await sessions.RecheckAsync(_ => true, context.RequestAborted);
+                return host is null ? Results.NotFound() : Results.Ok(host);
+            }));
 
-        hosts.MapDelete("/{id:guid}", (Guid id, HostInventory inventory, HttpContext context) =>
+        hosts.MapDelete("/{id:guid}", (Guid id, HostInventory inventory, SessionRegistry sessions, HttpContext context) =>
             Handled(async () =>
-                await inventory.DeleteAsync(id, RequestUser.From(context.User), context.RequestAborted) ? Results.NoContent() : Results.NotFound()));
+            {
+                var deleted = await inventory.DeleteAsync(id, RequestUser.From(context.User), context.RequestAborted);
+                await sessions.RecheckAsync(_ => true, context.RequestAborted);
+                return deleted ? Results.NoContent() : Results.NotFound();
+            }));
 
         // The core credential prompt (§7.6): typed secrets come here, never to a plugin's endpoint.
         hosts.MapPost("/{hostId:guid}/services/{serviceId:guid}/credential-prompt", async (
@@ -160,11 +168,13 @@ public static class InventoryEndpoints
         grants.MapGet("/", async (Guid id, HostGrants hostGrants, HttpContext context) =>
             await hostGrants.GetAsync(id, context.RequestAborted) is { } list ? Results.Ok(list) : Results.NotFound());
 
-        grants.MapPut("/", (Guid id, List<HostGrantRequest>? request, HostGrants hostGrants, HttpContext context) =>
+        grants.MapPut("/", (Guid id, List<HostGrantRequest>? request, HostGrants hostGrants, SessionRegistry sessions, HttpContext context) =>
             Handled(async () =>
-                await hostGrants.ReplaceAsync(id, request ?? [], RequestUser.From(context.User).Id, context.RequestAborted) is { } list
-                    ? Results.Ok(list)
-                    : Results.NotFound()));
+            {
+                var list = await hostGrants.ReplaceAsync(id, request ?? [], RequestUser.From(context.User).Id, context.RequestAborted);
+                await sessions.RecheckAsync(s => s.UserId == id, context.RequestAborted);
+                return list is null ? Results.NotFound() : Results.Ok(list);
+            }));
     }
 
     /// <summary>Runs an operation, turning a broken rule, a denied change or a stale version into its problem response.</summary>

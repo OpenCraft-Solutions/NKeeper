@@ -76,7 +76,7 @@ dotnet run --project core/backend/NKeeper.Server   # http://localhost:5080
 
 In Development, `appsettings.Development.json` lets the session cookie work over plain `http://localhost` (`Authentication:RequireSecureCookies`); everywhere else it requires HTTPS. See [architecture.md §6](docs/architecture.md#6-identity-and-request-policies) for sign-in, sessions and the key ring.
 
-It starts without plugins until one is installed. In Development you can point `Plugins:Directory` at a folder of packages you built with `nkeeper-plugin`, and `Plugins:DevelopmentTrustDirectory` at the folder holding your development key's `.trust.json` (see [plugin-security.md §4, §5.7](docs/plugin-security.md)).
+It starts without plugins until one is installed. Building the solution packs and signs the built-in plugins (so far, `ssh`) into `artifacts/plugins/`, with a development key the build creates in `.dev/keys/` on first use. In Development, point `Plugins:Directory` at `artifacts/plugins` and `Plugins:DevelopmentTrustDirectory` at `.dev/keys` to load them (see [plugin-security.md §4, §5.7](docs/plugin-security.md)). On Linux the ownership and mode checks still apply in Development: set `Plugins:DevelopmentOwnerUid` to your user ID, and keep the directory and its parents writable only by you or root.
 
 NuGet versions are managed centrally in [`Directory.Packages.props`](Directory.Packages.props), and every project has a `packages.lock.json`. CI restores in locked mode, so commit the lock files whenever a dependency changes. Schema changes are EF Core migrations, committed with the code: `dotnet tool restore`, then `dotnet ef migrations add <Name> --project core/backend/NKeeper.Core.Persistence --output-dir Migrations`.
 
@@ -115,7 +115,7 @@ dotnet run --project tools/NKeeper.PluginTool -- --help
 
 CI runs all of the above on every pull request, along with CodeQL and a dependency review.
 
-Plugins are always signed, even in development. The build creates a local development key and signs the built-in plugins with it, so there is no unsigned mode to switch on.
+Plugins are always signed, even in development. The build creates a local development key and signs the built-in plugins with it, so there is no unsigned mode to switch on. CI verifies each package it builds against that run's key.
 
 ## Reporting bugs and requesting features
 

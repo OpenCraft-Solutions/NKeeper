@@ -24,7 +24,10 @@ public sealed class HelloPlugin : IPlugin
     /// A service type named after the plugin, so packages of this plugin under different IDs don't collide.
     /// At settings version 2: version 1 called the greeting "text".
     /// </summary>
-    public void Contribute(IPluginContributions contributions, PluginContext context) =>
+    public void Contribute(IPluginContributions contributions, PluginContext context)
+    {
+        // Opens on its own service type, so packages of this plugin under different IDs don't collide here either.
+        contributions.AddSessionType(new SessionType(context.Id, "Hello session", typeof(HelloSessionHandler)) { ServiceTypes = [context.Id] });
         contributions.AddServiceType(new ServiceType(context.Id, "Hello")
         {
             DefaultPort = 7,
@@ -47,9 +50,13 @@ public sealed class HelloPlugin : IPlugin
                 return settings;
             },
         });
+    }
 
-    public void ConfigureServices(IServiceCollection services, PluginContext context) =>
+    public void ConfigureServices(IServiceCollection services, PluginContext context)
+    {
         services.AddSingleton(new Greeting($"pong from {context.Id} {context.Version}"));
+        services.AddScoped<HelloSessionHandler>();
+    }
 
     public void MapEndpoints(IEndpointRouteBuilder endpoints, PluginContext context)
     {
@@ -202,7 +209,25 @@ public sealed class DuplicateServiceTypePlugin : IPlugin
 /// <summary>Contributes a service type that breaks a rule, chosen by its configuration's <c>Break</c>.</summary>
 public sealed class InvalidServiceTypePlugin : IPlugin
 {
-    public void Contribute(IPluginContributions contributions, PluginContext context) =>
+    public void Contribute(IPluginContributions contributions, PluginContext context)
+    {
+        // Session type rules (SDK 0.1.5): a valid service type, and a session type that breaks one.
+        if (context.Configuration["Break"] is { } rule && rule.StartsWith("session-", StringComparison.Ordinal))
+        {
+            contributions.AddServiceType(new ServiceType("fine", "Fine"));
+            contributions.AddSessionType(rule switch
+            {
+                "session-label" => new SessionType("fine", " ", typeof(HelloSessionHandler)) { ServiceTypes = ["fine"] },
+                "session-handler" => new SessionType("fine", "Fine", typeof(string)) { ServiceTypes = ["fine"] },
+                "session-interface" => new SessionType("fine", "Fine", typeof(IStreamSessionHandler)) { ServiceTypes = ["fine"] },
+                "session-none" => new SessionType("fine", "Fine", typeof(HelloSessionHandler)),
+                "session-service" => new SessionType("fine", "Fine", typeof(HelloSessionHandler)) { ServiceTypes = ["Not Valid"] },
+                "session-taken" => new SessionType("hello", "Hello again", typeof(HelloSessionHandler)) { ServiceTypes = ["fine"] },
+                _ => new SessionType("Not An Id", "Bad", typeof(HelloSessionHandler)) { ServiceTypes = ["fine"] },
+            });
+            return;
+        }
+
         contributions.AddServiceType(context.Configuration["Break"] switch
         {
             "label" => new ServiceType("fine", " "),
@@ -218,6 +243,7 @@ public sealed class InvalidServiceTypePlugin : IPlugin
             "key-newline" => new ServiceType("fine", "Fine") { Settings = [ServiceSetting.Switch("a\n", "A")] },
             _ => new ServiceType("Not An Id", "Bad"),
         });
+    }
 
     public void ConfigureServices(IServiceCollection services, PluginContext context) =>
         services.AddSingleton(new Greeting("must not be registered"));
@@ -271,5 +297,106 @@ public sealed class ThrowingConfigurePlugin : IPlugin
 
     public void MapEndpoints(IEndpointRouteBuilder endpoints, PluginContext context)
     {
+    }
+}
+
+/// <summary>
+/// The test plugin's stream session (SDK 0.1.5). With a credential, a shell over SSH through core's connectivity,
+/// like a terminal; without one, it echoes what the browser sends. <c>options.fail</c> makes opening throw.
+/// </summary>
+public sealed class HelloSessionHandler(IConnectivity connectivity) : IStreamSessionHandler
+{
+    public async Task<IStreamSession> OpenAsync(StreamSessionRequest request, CancellationToken cancellationToken)
+    {
+        if (request.Options.TryGetProperty("fail", out var fail) && fail.ValueKind == System.Text.Json.JsonValueKind.True)
+        {
+            throw new InvalidOperationException("Told to fail.");
+        }
+
+        if (request.Credential is null)
+        {
+            return new EchoSession(request.Host.Name);
+        }
+
+        var ssh = await connectivity.OpenSshAsync(request.Host, request.ServiceId, request.Credential, cancellationToken);
+        try
+        {
+            return new ShellSession(ssh, await ssh.OpenShellAsync(new SshTerminal(), cancellationToken));
+        }
+        catch
+        {
+            await ssh.DisposeAsync();
+            throw;
+        }
+    }
+
+    private sealed class EchoSession(string hostName) : IStreamSession
+    {
+        public async Task RunAsync(IStreamChannel channel, CancellationToken cancellationToken)
+        {
+            while (await channel.ReceiveAsync(cancellationToken) is { } frame)
+            {
+                if (frame.IsText)
+                {
+                    await channel.SendTextAsync($$"""{"type":"echo","host":{{System.Text.Json.JsonSerializer.Serialize(hostName)}},"text":{{System.Text.Json.JsonSerializer.Serialize(System.Text.Encoding.UTF8.GetString(frame.Data.Span))}}}""", cancellationToken);
+                }
+                else
+                {
+                    await channel.SendAsync(frame.Data, cancellationToken);
+                }
+            }
+        }
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class ShellSession(ISshConnection ssh, ISshShell shell) : IStreamSession
+    {
+        public async Task RunAsync(IStreamChannel channel, CancellationToken cancellationToken)
+        {
+            using var done = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+            // A shell stream's reads may not heed cancellation; closing it ends them.
+            using var close = done.Token.Register(() => shell.Stream.Dispose());
+            var output = Task.Run(
+                async () =>
+                {
+                    var buffer = new byte[4096];
+                    int read;
+                    while ((read = await shell.Stream.ReadAsync(buffer, done.Token)) > 0)
+                    {
+                        await channel.SendAsync(buffer.AsMemory(0, read), done.Token);
+                    }
+                },
+                done.Token);
+            try
+            {
+                while (await channel.ReceiveAsync(done.Token) is { } frame)
+                {
+                    if (!frame.IsText)
+                    {
+                        await shell.Stream.WriteAsync(frame.Data, done.Token);
+                        await shell.Stream.FlushAsync(done.Token);
+                    }
+                }
+            }
+            finally
+            {
+                await done.CancelAsync();
+                try
+                {
+                    await output;
+                }
+                catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException or IOException)
+                {
+                }
+            }
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            await shell.DisposeAsync();
+            await ssh.DisposeAsync();
+        }
     }
 }

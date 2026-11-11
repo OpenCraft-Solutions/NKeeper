@@ -15,6 +15,9 @@
     <Project Path="core/backend/tests/NKeeper.Plugins.Packaging.Tests/NKeeper.Plugins.Packaging.Tests.csproj" />
     <Project Path="core/backend/tests/NKeeper.Server.Tests/NKeeper.Server.Tests.csproj" />
   </Folder>
+  <Folder Name="/plugins/">
+    <Project Path="plugins/ssh/backend/NKeeper.Plugins.Ssh.csproj" />
+  </Folder>
   <Folder Name="/testing/">
     <Project Path="testing/NKeeper.Testing/NKeeper.Testing.csproj" />
     <Project Path="testing/plugins/NKeeper.TestPlugins.Hello/NKeeper.TestPlugins.Hello.csproj" />

@@ -12,6 +12,7 @@ namespace NKeeper.Server;
 /// <param name="FrontendEntry">The URL of the frontend entry module, for a loaded plugin that has a frontend.</param>
 /// <param name="FrontendEntrySha256">The entry module's SHA-256, for checking it if browsers gain module integrity for import().</param>
 /// <param name="ServiceTypes">For a loaded plugin, the service types it contributed (docs/architecture.md §7.4).</param>
+/// <param name="SessionTypes">For a loaded plugin, the session types it contributed (§7.10).</param>
 public sealed record PluginStatusResponse(
     string Id,
     string? Version,
@@ -22,7 +23,11 @@ public sealed record PluginStatusResponse(
     string? KeyId,
     string? FrontendEntry = null,
     string? FrontendEntrySha256 = null,
-    IReadOnlyList<ServiceTypeResponse>? ServiceTypes = null);
+    IReadOnlyList<ServiceTypeResponse>? ServiceTypes = null,
+    IReadOnlyList<SessionTypeResponse>? SessionTypes = null);
+
+/// <summary>A session type: what it is called, and the service types it opens on.</summary>
+public sealed record SessionTypeResponse(string Id, string Label, IReadOnlyList<string> ServiceTypes, bool SupportsJumpHost);
 
 /// <summary>A service type, with the schema the shell draws a service's settings form from.</summary>
 public sealed record ServiceTypeResponse(string Id, string Label, int? DefaultPort, int SettingsVersion, IReadOnlyList<ServiceSettingResponse> Settings)
@@ -98,7 +103,8 @@ internal static class PluginEndpoints
                     s.KeyId,
                     entry is null || s.PackageSha256 is null ? null : FrontendBase(loaded!, s.PackageSha256) + EscapePath(entry[PackageFormat.FrontendFolder.Length..]),
                     entry is null ? null : Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(loaded!.Files[entry].Span)),
-                    loaded is null ? null : [.. plugins.ServiceTypes.Where(t => t.PluginId == s.Id).Select(t => ServiceTypeResponse.From(t.Type))]);
+                    loaded is null ? null : [.. plugins.ServiceTypes.Where(t => t.PluginId == s.Id).Select(t => ServiceTypeResponse.From(t.Type))],
+                    loaded is null ? null : [.. plugins.SessionTypes.Where(t => t.PluginId == s.Id).Select(t => new SessionTypeResponse(t.Type.Id, t.Type.Label, t.Type.ServiceTypes, t.Type.SupportsJumpHost))]);
             })
             .ToList());
 

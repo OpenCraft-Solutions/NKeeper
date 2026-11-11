@@ -37,6 +37,17 @@ jobs:
       - name: Build
         run: dotnet build NKeeper.slnx --no-restore --configuration Release
 
+      # The build packs and signs the built-in plugins with a development key made fresh for this run
+      # (plugin-security.md §10); each package must verify against it.
+      - name: Verify the built-in plugin packages
+        run: |
+          shopt -s nullglob
+          packages=(artifacts/plugins/*.nkp)
+          if [ ${#packages[@]} -eq 0 ]; then echo "No plugin packages were built." >&2; exit 1; fi
+          for package in "${packages[@]}"; do
+            dotnet tools/NKeeper.PluginTool/bin/Release/net10.0/nkeeper-plugin.dll verify "$package" --trust .dev/keys --development
+          done
+
       - name: Test
         run: dotnet test NKeeper.slnx --no-build --configuration Release
 

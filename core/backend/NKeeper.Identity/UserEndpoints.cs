@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Routing;
 using NKeeper.Core.Persistence;
+using NKeeper.Core.Sessions;
 
 namespace NKeeper.Identity;
 
@@ -25,21 +26,30 @@ public static class UserEndpoints
                 return Results.Created($"/api/users/{user.Id}", user);
             }));
 
-        admin.MapPut("/{id:guid}", (Guid id, UpdateUserRequest? request, UserAdministration users, HttpContext context) =>
+        // Each of these can end the user's sign-in sessions or cut their access, and so their open sessions (§7.10).
+        admin.MapPut("/{id:guid}", (Guid id, UpdateUserRequest? request, UserAdministration users, SessionRegistry sessions, HttpContext context) =>
             Validated(async () =>
-                await users.UpdateAsync(id, request ?? new UpdateUserRequest(), context.User.UserId(), context.RequestAborted) is { } user
-                    ? Results.Ok(user)
-                    : Results.NotFound()));
+            {
+                var user = await users.UpdateAsync(id, request ?? new UpdateUserRequest(), context.User.UserId(), context.RequestAborted);
+                await sessions.RecheckAsync(s => s.UserId == id, context.RequestAborted);
+                return user is null ? Results.NotFound() : Results.Ok(user);
+            }));
 
-        admin.MapPost("/{id:guid}/password", (Guid id, ResetPasswordRequest? request, UserAdministration users, HttpContext context) =>
+        admin.MapPost("/{id:guid}/password", (Guid id, ResetPasswordRequest? request, UserAdministration users, SessionRegistry sessions, HttpContext context) =>
             Validated(async () =>
-                await users.ResetPasswordAsync(id, request ?? new ResetPasswordRequest(), context.User.UserId(), context.RequestAborted)
-                    ? Results.NoContent()
-                    : Results.NotFound()));
+            {
+                var reset = await users.ResetPasswordAsync(id, request ?? new ResetPasswordRequest(), context.User.UserId(), context.RequestAborted);
+                await sessions.RecheckAsync(s => s.UserId == id, context.RequestAborted);
+                return reset ? Results.NoContent() : Results.NotFound();
+            }));
 
-        admin.MapDelete("/{id:guid}", (Guid id, UserAdministration users, HttpContext context) =>
+        admin.MapDelete("/{id:guid}", (Guid id, UserAdministration users, SessionRegistry sessions, HttpContext context) =>
             Validated(async () =>
-                await users.DeleteAsync(id, context.User.UserId(), context.RequestAborted) ? Results.NoContent() : Results.NotFound()));
+            {
+                var deleted = await users.DeleteAsync(id, context.User.UserId(), context.RequestAborted);
+                await sessions.RecheckAsync(s => s.UserId == id, context.RequestAborted);
+                return deleted ? Results.NoContent() : Results.NotFound();
+            }));
 
         // Verifies the current password, so it's rate limited like sign-in.
         api.MapPost("/account/password", (ChangePasswordRequest? request, UserAdministration users, UserManager<ApplicationUser> accounts, SignInManager<ApplicationUser> signIn, HttpContext context) =>

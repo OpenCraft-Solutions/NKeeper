@@ -6,6 +6,9 @@ namespace NKeeper.Plugins.Host;
 /// <summary>A service type, with the plugin that contributed it.</summary>
 public sealed record ContributedServiceType(string PluginId, ServiceType Type);
 
+/// <summary>A session type, with the plugin that contributed it.</summary>
+public sealed record ContributedSessionType(string PluginId, SessionType Type);
+
 /// <summary>Collects one plugin's contributions while its <see cref="IPlugin.Contribute"/> runs.</summary>
 internal sealed class ContributionCollector : IPluginContributions
 {
@@ -15,6 +18,14 @@ internal sealed class ContributionCollector : IPluginContributions
     {
         ArgumentNullException.ThrowIfNull(serviceType);
         ServiceTypes.Add(serviceType);
+    }
+
+    public List<SessionType> SessionTypes { get; } = [];
+
+    public void AddSessionType(SessionType sessionType)
+    {
+        ArgumentNullException.ThrowIfNull(sessionType);
+        SessionTypes.Add(sessionType);
     }
 }
 
@@ -93,6 +104,39 @@ public static partial class ContributionRules
             if (problem is not null)
             {
                 return $"Setting '{setting.Key}' of service type '{type.Id}' {problem}.";
+            }
+        }
+
+        return null;
+    }
+
+    public static string? Check(SessionType type)
+    {
+        if (type.Id is null || !TypeId().IsMatch(type.Id))
+        {
+            return $"The session type ID '{type.Id}' isn't lower-case letters, digits and '-', starting with a letter, up to {MaxTypeIdLength} characters.";
+        }
+
+        if (string.IsNullOrWhiteSpace(type.Label) || type.Label.Length > MaxLabelLength)
+        {
+            return $"Session type '{type.Id}' needs a label of at most {MaxLabelLength} characters.";
+        }
+
+        if (type.Handler is null || !type.Handler.IsClass || type.Handler.IsAbstract || !typeof(IStreamSessionHandler).IsAssignableFrom(type.Handler))
+        {
+            return $"Session type '{type.Id}' has a handler that isn't a concrete {nameof(IStreamSessionHandler)}.";
+        }
+
+        if (type.ServiceTypes is null || type.ServiceTypes.Count == 0)
+        {
+            return $"Session type '{type.Id}' names no service types to open on.";
+        }
+
+        foreach (var serviceType in type.ServiceTypes)
+        {
+            if (serviceType is null || !TypeId().IsMatch(serviceType))
+            {
+                return $"Session type '{type.Id}' names a service type '{serviceType}' that isn't a valid ID.";
             }
         }
 
