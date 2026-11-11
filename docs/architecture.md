@@ -69,7 +69,7 @@ public sealed class WakeOnLanPlugin : IPlugin
 - `endpoints.MapHostGroup(HostPermission.Use)` (or `Manage`) gives a group at `hosts/{hostId}/` whose endpoints act on one host the user may use (or manage). See §7.3.
 - `Contribute(IPluginContributions, PluginContext)` declares what the plugin adds to core's catalogues: so far, service types (§7.4) with their health probes (§7.13), session types (§7.10) and host actions (§7.12). It has an empty default, so a plugin with nothing to declare leaves it out.
 - More contracts (settings, audit actions) arrive with their first real users ([v2-plan.md §4.2](v2-plan.md#42-contribution-catalogue)). The SDK may change until it is frozen as v1 at the end of Phase 3.
-- **SDK versions.** A manifest declares the SDK range it supports, and a package outside the server's `SdkVersion` is refused. Within v0, an addition raises the patch number (`0.1.1` added the host scope, `0.1.2` service types, `0.1.3` the credential broker, `0.1.4` SSH connections, `0.1.5` stream sessions, `0.1.6` host actions, health probes and, in the frontend SDK, session views, `0.1.7` run actions and plugin audit events) and a breaking change raises the minor one. So a plugin built for `>=0.1.0 <0.2.0` keeps loading, and one that uses an addition declares the version that brought it.
+- **SDK versions.** A manifest declares the SDK range it supports, and a package outside the server's `SdkVersion` is refused. Within v0, an addition raises the patch number (`0.1.1` added the host scope, `0.1.2` service types, `0.1.3` the credential broker, `0.1.4` SSH connections, `0.1.5` stream sessions, `0.1.6` host actions, health probes and, in the frontend SDK, session views, `0.1.7` run actions and plugin audit events, `0.1.8` HTTPS connections, stateful sessions, session origins and, in the frontend SDK, `confirmTrust`) and a breaking change raises the minor one. So a plugin built for `>=0.1.0 <0.2.0` keeps loading, and one that uses an addition declares the version that brought it.
 
 ## 5. Frontend extension point
 
@@ -343,11 +343,11 @@ Passing on the user's own sign-in arrives with directory sign-in; local accounts
 
 ### 7.7 The trust store
 
-Trust on first use, ported from 1.x: the first time a server presents an identity, the user checks it and decides; after that, core checks it on every connection. Phase 1 step 6 brings SSH host keys. TLS certificates join with their first user.
+Trust on first use, ported from 1.x: the first time a server presents an identity, the user checks it and decides; after that, core checks it on every connection. Phase 1 step 6 brought SSH host keys; TLS certificates joined with the web plugin (§7.16).
 
 **What's trusted.**
 - A trusted key belongs to one host. It's recorded per:
-  - kind: an SSH host key, so far;
+  - kind: an SSH host key, or a TLS certificate (§7.16);
   - endpoint: the service's own address, when it has one, or the host itself. So a management controller's key is never confused with its server's;
   - port;
   - algorithm (`ssh-ed25519`, say). A server presents one key per algorithm.
@@ -641,7 +641,8 @@ export default definePlugin({
 - The component gets:
   - the host's ID and name, and the service's ID, as the tab describes them;
   - `connect(options, signal)`, which opens the stream. It runs core's control phase, with core's dialogs for a key and a typed credential. It resolves to a connection once core says `connected`, and rejects with a `SessionError` carrying core's error code. Aborting `signal` (when the view goes) cancels it, and any dialog it was waiting on;
-  - whether its tab is showing.
+  - whether its tab is showing;
+  - `confirmTrust(prompt)` (SDK 0.1.8), for a view that opens its session through the plugin's own endpoints (§7.17): it shows core's dialog for a key or certificate a plugin endpoint reported, and when the user trusts it, posts it to core. It resolves to whether it's now trusted.
 - A connection sends binary frames and JSON text frames, and delivers the plugin's frames. Its `closed` promise gives core's reason. The view may call `connect` again to reconnect.
 - The SDK's `openStreamSession` implements the protocol (§7.10). `connect` is that function, with the shell's dialogs.
 - **Styles under the shell's policy.** The policy allows stylesheets only from the server (`style-src 'self'`), so a `<style>` element that a library adds is blocked. The SDK has two helpers that keep the policy as it is:
@@ -661,6 +662,72 @@ The smallest real plugin, in `plugins/wake-on-lan/`: it shows how little a plugi
 - It records `wake-on-lan.send` (§7.12.1), with the MAC address and where the packet went.
 - No frontend: the shell's run actions are enough.
 
+### 7.16 HTTPS connections and certificate trust
+
+Core opens HTTP connections for plugins, as it does SSH (D13), so certificate trust is core's, and no plugin can skip it (SDK 0.1.8).
+
+```csharp
+await using var http = await connectivity.OpenHttpAsync(host, serviceId, tls: true);
+var response = await http.Client.SendAsync(new HttpRequestMessage(HttpMethod.Get, new Uri(http.BaseAddress, "/")), ct);
+```
+
+- `IConnectivity.OpenHttpAsync(host, serviceId, tls)` connects to the service's effective address and port, and gives the plugin an `IHttpConnection`: an `HttpMessageInvoker` that sends every request to that endpoint and nowhere else, with its base address.
+  - It sends no cookies of its own, follows no redirects, and doesn't decompress, so a proxy can pass responses on as they came.
+  - Through a jump host it's refused for now (`JumpHostUnsupported`). Tunnelling HTTP through SSH follows within Phase 2.
+- **Certificates** (when `tls` is true):
+  - one that's publicly valid for the address is accepted, as in 1.x;
+  - otherwise only a certificate the user trusted for the host is: the trust store (§7.7) gains a second kind, `TlsCertificate`, recorded per endpoint and port. Its "algorithm" is `x509`, and its fingerprint the SHA-256 of the certificate, in the same unpadded base64;
+  - core checks before it hands the connection over. A handshake that shows an untrusted certificate fails with `HttpConnectException` and `HostKeyUnknown`, carrying the certificate's fingerprint, subject and expiry, and core remembers it presented it, as for SSH keys. A different certificate than the trusted one fails with `HostKeyChanged`, audited as `trust.mismatch`.
+  - every later request on the connection is checked against the same rule, so a certificate that changes mid-session is refused too.
+- The user trusts a certificate the way they trust a key: the shell posts it to core's trusted-keys endpoint, which takes the kind from what core presented. The shell's dialog says "certificate" and shows its subject and expiry.
+
+**TLS health probe.** `HealthProbe.Tls`: a TCP connection and a TLS handshake that accepts any certificate, so an expired or self-signed one still counts as up. The result adds the certificate's subject and expiry, and the host's details show how long it has left.
+
+### 7.17 Stateful sessions
+
+Some sessions live in the plugin rather than on a WebSocket: a web session is a run of HTTP requests through the plugin's proxy. Core still owns their limits, revocation and audit (v2-plan.md §7.1), through `IPluginSessions` (SDK 0.1.8):
+
+```csharp
+using var session = sessions.Open(host, serviceId, sessionType: "web");   // from the plugin's host endpoint
+// … later, on every request: if (session.Ended.IsCancellationRequested) refuse
+```
+
+- `Open` registers the session in core's session registry (§7.10) for the signed-in user, the request's auth session, the host, the service and the jump host, and audits `session.open`. It can only be called from the plugin's own host-scoped endpoint, for the host core authorized, and only for a session type the plugin contributes.
+- It counts toward the user's 20 sessions, stream sessions included. Over the limit, it throws `SessionLimitException`, and the plugin answers `409` with `too_many_sessions`.
+- Core re-checks it with every other session, and ends it when access changes: its `Ended` token is cancelled, with the reason (`access_revoked`). The plugin then refuses its requests.
+- Disposing it unregisters it and audits `session.close` with the reason: `closed`, `access_revoked`, or what the plugin gives (`idle`).
+- A session type that's stateful says so: `SessionType.Stateful(id, label)`, with no stream handler. Core opens no WebSocket for it; its view (§7.14) talks to the plugin's own endpoints.
+
+### 7.18 Session origins
+
+A web session's pages are served on an origin of their own, so the site can never read NKeeper's cookies or call its API (ported from 1.x, SDK 0.1.8):
+
+```csharp
+contributions.AddSessionOrigin(new SessionOrigin("nkw", typeof(WebOriginHandler)));
+```
+
+- **The web domain** is an install setting, `Origins:BaseDomain` (`setup.sh --web-domain`), because it needs wildcard DNS, a certificate and nginx to match. Without it, session origins are off, and a plugin that needs one says so.
+- A plugin claims a **prefix**: lower-case letters and digits, 2 to 16 of them, unique across plugins. Core sends every request for `<prefix>-<label>.<web domain>`, where the label is 1 to 63 lower-case letters and digits, to the plugin's `ISessionOriginHandler.HandleAsync(context, label)`.
+- Core does this first, before its own pipeline: those requests never reach NKeeper's sign-in, antiforgery, API, shell or security headers, and NKeeper's cookies are never sent to them, since they're scoped to NKeeper's own host. The plugin's handler is the whole of what answers there.
+- `ISessionOrigins.UrlFor(prefix, label)` gives a plugin the origin's URL (`https://nkw-<label>.<web domain>`), or null when there's no web domain.
+- The shell's policy allows frames from `https://*.<web domain>` when one is set, and from nowhere else (`frame-src`).
+
+### 7.19 The `web` plugin
+
+Web interfaces through NKeeper, in a tab: ported from 1.x's `Web/` (YARP).
+- **Service types** `http` (port 80, TCP probe) and `https` (port 443, TLS probe), as 1.x had them.
+- **Session type** `web`, "Web page", stateful (§7.17), on both. It can't go through a jump host yet (§7.16).
+- **Host action** `web.open`, "Web page", with no credential.
+- **Opening** (`POST /api/p/web/hosts/{hostId}/sessions`, Use): core opens the connection (§7.16) and registers the session (§7.17). The plugin answers with a one-time launch URL on the session's origin (§7.18), valid for 2 minutes. An untrusted certificate answers `409` with `host_key_unknown` and the certificate, for the shell's dialog; after the user trusts it, the view opens again.
+- **The session origin** `nkw-<session ID>.<web domain>`, where the ID is 128 random bits:
+  - the launch link sets the session's cookie (HttpOnly, Secure, `SameSite=None`, Partitioned, since NKeeper frames it) and redirects to `/`;
+  - every other request must carry that cookie. Without it, or for an unknown or ended session, the handler shows a short page instead;
+  - requests go to the target through core's connection, with `Host`, `Origin` and `Referer` rewritten to the target's, NKeeper's cookie removed, and redirects and cookies rewritten to stay on the session origin. Responses may be framed only by NKeeper's own origin;
+  - a session idle for 30 minutes ends, as does one whose access ends (§7.17).
+- **Closing** (`DELETE /api/p/web/hosts/{hostId}/sessions/{id}`): the view calls it when its tab closes.
+- **Its frontend** is the `web` session view: it opens the session, asks the shell to trust a certificate when it must, and shows the site in a frame.
+- A capability for other plugins to open web sessions (1.x's iDRAC console) arrives with its first user, in Phase 4.
+
 ## 8. The native install
 
 `deploy/setup.sh` installs NKeeper on a Linux server, from a checkout of the repository, as root. It's an early version of the Phase 6 installer (v2-plan.md §8). NKeeper installs natively only (D8): systemd, nginx and PostgreSQL, no containers.
@@ -677,7 +744,7 @@ The smallest real plugin, in `plugins/wake-on-lan/`: it shows how little a plugi
    - the server is published self-contained for the machine's architecture;
    - the shell and the built-in plugins are built as in development.
 4. **Signs the built-in plugins** with a one-time install key (plugin-security.md §6.1), and deletes its private key.
-5. Lays out the files below, and writes the settings file, the key ring certificate (on a fresh install only), the systemd unit and nginx's site. nginx gets a self-signed certificate unless one is given (`--cert`, `--key`).
+5. Lays out the files below, and writes the settings file (with `Origins:BaseDomain` when given `--web-domain`, §7.18), the key ring certificate (on a fresh install only), the systemd unit and nginx's site. nginx gets a self-signed certificate unless one is given (`--cert`, `--key`).
 6. **Starts NKeeper.** On a fresh install it creates the first administrator: the installer asks for a password, or generates one and prints it once. Once the server is up, it turns the bootstrap off and removes the password from the settings file.
 
 | Path | Owner / mode | Contents |
@@ -694,7 +761,7 @@ The smallest real plugin, in `plugins/wake-on-lan/`: it shows how little a plugi
 **The service** (`deploy/systemd/nkeeper.service`) runs the server as the unprivileged `nkeeper` user, listening on `127.0.0.1:5080` only. It has the hardening of plugin-security.md §4: `ProtectSystem=strict` with only `/var/lib/nkeeper` writable, `NoNewPrivileges`, `PrivateTmp`, `ProtectHome` and an empty `CapabilityBoundingSet`. It also has `PrivateDevices`, the kernel protections, `RestrictSUIDSGID`, `LockPersonality`, and network families limited to IPv4, IPv6 and Unix sockets.
 
 **nginx** (`deploy/nginx/nkeeper.conf`), with HTTP/2 turned on in the form the installed version expects:
-- terminates TLS 1.2 and 1.3 on port 443, and redirects port 80 to it;
+- terminates TLS 1.2 and 1.3 on port 443, and redirects port 80 to it. With a web domain, it also answers `*.<web domain>`, and its self-signed certificate covers that wildcard. The wildcard DNS record is the administrator's to make;
 - proxies everything to the server, WebSocket upgrades included, with read timeouts long enough for idle sessions. It serves no files itself (plugin-security.md §7.3);
 - sends `X-Forwarded-For` and `X-Forwarded-Proto`, and HSTS.
 

@@ -566,6 +566,7 @@ Each phase ends in a state that builds, passes tests, **installs as a native Lin
 
 ### Phase 2: Prove different plugin shapes
 - **web**: stateful session kind, separate `nkw-*` origins and middleware, a service type without credentials, plugin settings (base domain), `IWebSessionLauncher` capability.
+  - *As built (architecture.md §7.16–7.19):* the base domain became an install setting, `Origins:BaseDomain`, since wildcard DNS, the certificate and nginx must match it; so plugin settings wait for their first administrator-editable user. `IWebSessionLauncher` waits for iDRAC, in Phase 4. Core opens the HTTP connection and owns certificate trust, as it does for SSH.
 - **wake-on-lan**: an action-only plugin, the minimum size.
 - **desktop, proof only:** RDP connects through guacd with a pinned certificate and a saved credential, **with the browser instruction allow-list (1.x `GuacamoleInstructionFilter`) and its negative tests from the start**, because it is a security control on a deployable relay, not a parity feature. That exercises the external-daemon requirement, the certificate probe in the trust store, and the credential path. AD sign-in pass-through, VNC and clipboard follow in Phase 4, so desktop parity doesn't hold up the SDK freeze.
 - **guacd as a native service (D11):** build guacd 1.6 from source on each supported distribution family in CI, and run the RDP proof against that build. If a family can't build or run it reliably, that family falls back to guacd in a container, and the plan records the result.
