@@ -30,7 +30,8 @@ readonly GUACD_PREFIX=/usr/lib/nkeeper/guacd
 # crashes on FreeRDP 3.31 and newer. Its SHA-256 matched both pub.freerdp.com's copy and its GitHub release's.
 readonly FREERDP_VERSION=2.11.7
 readonly FREERDP_SHA256=5a2d54e1ca0f1facd1632bcc94c73b9f071a80c5fdbbb3f26e79f02aaa586ca3
-readonly GUACD_BUILD="guacd-$GUACD_VERSION+freerdp-$FREERDP_VERSION"
+# Bumped when the build itself changes, so upgrades rebuild it.
+readonly GUACD_BUILD="guacd-$GUACD_VERSION+freerdp-$FREERDP_VERSION-2"
 
 usage() {
     cat <<'EOF'
@@ -406,12 +407,13 @@ build_guacd() {
     tar -xzf "$work/$freerdp" -C "$work/freerdp" --strip-components=1
     tar -xzf "$work/$guacd" -C "$work/guacd" --strip-components=1
 
-    # FreeRDP, as Apache's own guacd images build it: a client library only, no X11, server or sound.
+    # FreeRDP, as Apache's own guacd images build it: a client library only, no X11, server or sound. NLA's NTLM
+    # needs MD4 and RC4, which OpenSSL 3 leaves out by default, so FreeRDP uses its own.
     (cmake -S "$work/freerdp" -B "$work/freerdp/build" -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX="$GUACD_PREFIX" -DCMAKE_INSTALL_LIBDIR=lib -DCMAKE_INSTALL_RPATH="$GUACD_PREFIX/lib" \
         -DCMAKE_C_FLAGS="-Wno-error=incompatible-pointer-types -Wno-error=int-conversion" \
         -DBUILTIN_CHANNELS=OFF -DCHANNEL_URBDRC=OFF -DWITH_CHANNELS=ON -DWITH_CLIENT=ON -DWITH_CAIRO=ON -DWITH_JPEG=ON \
-        -DWITH_OPENSSL=ON -DWITH_ZLIB=ON -DWITH_SERVER=OFF -DWITH_SERVER_INTERFACE=OFF -DWITH_SAMPLE=OFF -DWITH_X11=OFF \
+        -DWITH_OPENSSL=ON -DWITH_INTERNAL_MD4=ON -DWITH_INTERNAL_RC4=ON \n        -DWITH_ZLIB=ON -DWITH_SERVER=OFF -DWITH_SERVER_INTERFACE=OFF -DWITH_SAMPLE=OFF -DWITH_X11=OFF \
         -DWITH_WAYLAND=OFF -DWITH_ALSA=OFF -DWITH_PULSE=OFF -DWITH_OSS=OFF -DWITH_CUPS=OFF -DWITH_PCSC=OFF -DWITH_FFMPEG=OFF \
         -DWITH_DSP_FFMPEG=OFF -DWITH_SWSCALE=OFF -DWITH_GSM=OFF -DWITH_GSSAPI=OFF -DWITH_KRB5=OFF -DWITH_OPENH264=OFF \
         -DWITH_X264=OFF -DWITH_LIBSYSTEMD=OFF -DWITH_MANPAGES=OFF -DWITH_SHADOW_X11=OFF -DWITH_SHADOW_MAC=OFF \
