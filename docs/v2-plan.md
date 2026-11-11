@@ -561,7 +561,8 @@ Each phase ends in a state that builds, passes tests, **installs as a native Lin
   9. **Native install:**
      - the hardened systemd unit, nginx, PostgreSQL;
      - the root-owned plugin and trust directories;
-     - `setup.sh` for Debian/Ubuntu and RHEL-family.
+     - `setup.sh` for Debian/Ubuntu and RHEL-family;
+     - forwarded headers from nginx, and a one-time install key for the built-in plugins it builds (architecture.md §8, plugin-security.md §6.1).
 
 ### Phase 2: Prove different plugin shapes
 - **web**: stateful session kind, separate `nkw-*` origins and middleware, a service type without credentials, plugin settings (base domain), `IWebSessionLauncher` capability.

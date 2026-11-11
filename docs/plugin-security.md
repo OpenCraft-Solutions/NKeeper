@@ -174,11 +174,16 @@ The host refuses for reasons that concern the server rather than one package:
   - **In `Development`** (and the test environment), a development key in the configured development trust directory may sign official, unprefixed IDs. This is the only way anything but an official key can sign them.
   - **In any other environment**, development keys are refused outright, whatever they claim to be allowed to sign (`untrusted_key`). So this authority can't exist in production.
   - The development trust directory is configurable only in `Development`. Production always uses `/etc/nkeeper/plugin-trust/`.
+- **Install keys:** made by the native installer when it builds the built-in plugins from source, before there are release-signed packages to install (architecture.md §8). They're marked `"install": true`.
+  - The installer makes a fresh key pair and signs only the packages it has just built. Then it deletes the private key, so nothing can sign with the key again. The key never leaves the machine.
+  - Its key file lists exact IDs only (`["ssh"]`): no patterns. It may sign those IDs, official ones included, in any environment.
+  - Each install or upgrade makes a new key and replaces the previous key file, so packages signed with an earlier install key stop verifying (`untrusted_key`).
+  - Only root can write the trust directory (§4), and root could install any key anyway. So an install key adds no authority that the machine's root doesn't already have, and once its private key is gone, it can't be used by anyone.
 
 ### 6.2 Plugin IDs and key scope
 
 - IDs are lowercase `[a-z0-9-]` segments separated by dots.
-- **IDs without a dot** (`ssh`, `db-mssql`, `zabbix`) are reserved for official plugins. Only an official key may sign them, or a development key on a server running in `Development` (§6.1).
+- **IDs without a dot** (`ssh`, `db-mssql`, `zabbix`) are reserved for official plugins. Only an official key may sign them, an install key that lists them exactly, or a development key on a server running in `Development` (§6.1).
 - Everyone else uses a reverse-domain ID (`com.example.netbox`). A non-official key may sign only IDs matching its `allowedIds` patterns, and a pattern must name at least two fixed segments before any wildcard (`com.example.*` is allowed, `com.*` and `*` are not).
 
 So a compromised or careless third-party key can never stand in for an official plugin, or for another publisher's.
@@ -253,6 +258,8 @@ At every start:
 - **newer version, different signing key:** awaiting signer approval. An administrator must approve the new key before it loads;
 - **older version:** refused (`downgrade`), unless root has run `nkeeper plugin allow-downgrade <id> <version>`, which allows exactly that version once.
 
+**Packages signed by an install key** (§6.1) are rebuilt and re-signed with a new key on every install, often at the same version. So for them, the first two cases differ: a package signed by the trust directory's current install key loads, and updates the record, whether its hash or its key changed. That's audited as `plugin.updated`. A downgrade is still refused. This doesn't weaken tamper detection: only root can write the plugin and trust directories, and a package signed with any earlier install key no longer verifies.
+
 Until administrators exist (Phase 1), nothing can enable a plugin or approve a signer, so only built-in plugins load. The `allow-downgrade` command arrives with the rest of the command line in Phase 6; until then a downgrade is always refused.
 
 Removing a package from the directory keeps the plugin's data. The plugin shows as missing until its package returns.
@@ -280,7 +287,7 @@ Removing a package from the directory keeps the plugin's data. The plugin shows 
 ## 10. Tooling
 
 `tools/NKeeper.PluginTool` is a thin command line over `NKeeper.Plugins.Packaging`, the library that also holds the server's verifier, so the tool and the server can't disagree:
-- `keygen`: a development key by default, or `--release` for the official key (D12). The private key is written with owner-only permissions;
+- `keygen`: a development key by default, `--allow <pattern>` for a third-party key, `--install --allow <id>` for an install key (§6.1), or `--release` for the official key (D12). The private key is written with owner-only permissions;
 - `pack`: builds the canonical `files.json` and the archive, and signs it in the same step. Everything but the signature is deterministic: ECDSA signatures are randomized, so two builds of the same plugin differ only in `files.json.sig`;
 - `verify`: runs the same checks as the server and prints the reason code.
 

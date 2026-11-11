@@ -615,7 +615,50 @@ export default definePlugin({
   - `adoptStyles(css)` adds a stylesheet from text, as a constructable stylesheet, which the policy allows;
   - `mirrorInjectedStyles(element)` copies the `<style>` elements that a library adds under `element` (xterm.js does) into constructable stylesheets. It keeps them in step until it's called off.
 
-## 8. Where to read more
+## 8. The native install
+
+`deploy/setup.sh` installs NKeeper on a Linux server, from a checkout of the repository, as root. It's an early version of the Phase 6 installer (v2-plan.md §8). NKeeper installs natively only (D8): systemd, nginx and PostgreSQL, no containers.
+- **Supported:** Debian 12 and later, Ubuntu 24.04 and later (apt), and the RHEL 9 family and Fedora (dnf), on x64 and arm64.
+- **Commands:**
+  - `install`, which also upgrades an existing install;
+  - `uninstall`, which keeps the database and `/etc/nkeeper`. `--purge` removes them too.
+
+**What `install` does, in order.**
+1. Installs PostgreSQL, nginx and OpenSSL from the distribution.
+2. Sets up PostgreSQL: a role and database `nkeeper` with a random password, and password sign-in over loopback only.
+3. **Builds NKeeper** from a copy of the checkout, so the checkout gets no root-owned files:
+   - with the .NET 10 SDK and Node.js, fetched into `/var/cache/nkeeper-build`. Node.js is checked against its published SHA-256;
+   - the server is published self-contained for the machine's architecture;
+   - the shell and the built-in plugins are built as in development.
+4. **Signs the built-in plugins** with a one-time install key (plugin-security.md §6.1), and deletes its private key.
+5. Lays out the files below, and writes the settings file, the key ring certificate (on a fresh install only), the systemd unit and nginx's site. nginx gets a self-signed certificate unless one is given (`--cert`, `--key`).
+6. **Starts NKeeper.** On a fresh install it creates the first administrator: the installer asks for a password, or generates one and prints it once. Once the server is up, it turns the bootstrap off and removes the password from the settings file.
+
+| Path | Owner / mode | Contents |
+| --- | --- | --- |
+| `/usr/lib/nkeeper/server/` | `root:root` `0755` | the server |
+| `/usr/lib/nkeeper/shell/` | `root:root` `0755` | the shell's files (`Frontend:Root`) |
+| `/usr/lib/nkeeper/plugins/` | `root:root` `0755` | the built-in plugin packages, `0644` |
+| `/etc/nkeeper/plugin-trust/` | `root:root` `0755` | the install key's public key file, `0644` |
+| `/etc/nkeeper/nkeeper.env` | `root:root` `0600` | the settings, with the database password. systemd reads it as root |
+| `/etc/nkeeper/data-protection.pem` | `root:nkeeper` `0640` | the key ring certificate (§6.3). Back it up apart from the database |
+| `/etc/nkeeper/tls/` | `root:root` `0700` | nginx's certificate and key |
+| `/var/lib/nkeeper/` | `nkeeper:nkeeper` `0750` | the only place the service writes |
+
+**The service** (`deploy/systemd/nkeeper.service`) runs the server as the unprivileged `nkeeper` user, listening on `127.0.0.1:5080` only. It has the hardening of plugin-security.md §4: `ProtectSystem=strict` with only `/var/lib/nkeeper` writable, `NoNewPrivileges`, `PrivateTmp`, `ProtectHome` and an empty `CapabilityBoundingSet`. It also has `PrivateDevices`, the kernel protections, `RestrictSUIDSGID`, `LockPersonality`, and network families limited to IPv4, IPv6 and Unix sockets.
+
+**nginx** (`deploy/nginx/nkeeper.conf`):
+- terminates TLS 1.2 and 1.3 on port 443, and redirects port 80 to it;
+- proxies everything to the server, WebSocket upgrades included, with read timeouts long enough for idle sessions. It serves no files itself (plugin-security.md §7.3);
+- sends `X-Forwarded-For` and `X-Forwarded-Proto`, and HSTS.
+
+**Forwarded headers.** With `ForwardedHeaders:Enabled`, which the installer sets, the server takes the client's address and scheme from `X-Forwarded-For` and `X-Forwarded-Proto`. It accepts them from a proxy on the loopback address only, for one hop. Without this, the server would see nginx's plain-HTTP request from `127.0.0.1`. Then the WebSocket origin check (§7.10) would refuse every session, the sign-in rate limit (§6.4) would count every user as one client, and the audit would record no real addresses.
+
+**SELinux** (RHEL family): the installer labels the server's executable as a program systemd may start, and lets nginx connect to the server.
+
+The rest of the installer is Phase 6: release-signed packages, guacd (D11), and install and upgrade tested end to end on both distribution families.
+
+## 9. Where to read more
 
 - [v2-plan.md](v2-plan.md): the audit of 1.x, the core/plugin boundary, the contribution catalogue, phases and decisions.
 - [plugin-security.md](plugin-security.md): package format, signing, trust, directory checks, verification order and reason codes, loading and states.
