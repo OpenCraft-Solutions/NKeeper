@@ -161,8 +161,8 @@ internal sealed class StreamSessionRunner(HttpContext context, SessionSocket soc
         {
             // A refused key prompt, say, may really be access ending meanwhile.
             var error = open?.EndReason is not null ? Revoked() : (SessionStartException)ex;
-            await socket.SendErrorAndCloseAsync(error.Code, error.Message, CancellationToken.None);
             await AbandonAsync(session, open, registry, audited);
+            await socket.SendErrorAndCloseAsync(error.Code, error.Message, CancellationToken.None);
             return;
         }
         catch (Exception ex) when (ex is OperationCanceledException or WebSocketException)
