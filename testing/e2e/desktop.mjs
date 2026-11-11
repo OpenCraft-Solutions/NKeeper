@@ -65,7 +65,7 @@ try {
   await page.getByRole('navigation', { name: 'Main' }).waitFor({ timeout: 15000 })
 
   step(`create ${hostName}, with an RDP service on ${rdpAddress}:3389 and a saved credential`)
-  await page.getByRole('button', { name: 'New host' }).click()
+  await page.getByRole('complementary', { name: 'Host inventory' }).getByRole('button', { name: 'New host' }).click()
   const form = page.getByRole('form', { name: 'New host' })
   await form.getByLabel('Name', { exact: true }).fill(hostName)
   await form.getByLabel('IP address').fill(rdpAddress)
