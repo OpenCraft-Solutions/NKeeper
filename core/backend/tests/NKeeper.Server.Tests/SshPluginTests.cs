@@ -62,6 +62,8 @@ public sealed class SshPluginTests(PostgresFixture postgres, SshServerFixture ss
         await terminal.SendBinaryAsync(Encoding.UTF8.GetBytes("echo size-$(stty size | tr ' ' x) $TERM\n"));
         await terminal.ReadUntilAsync("size-30x100 xterm-256color");
 
+        // A resize with dimensions of the wrong kind falls back, rather than ending the terminal.
+        await terminal.SendAsync(new { type = "resize", columns = "120", rows = true });
         await terminal.SendAsync(new { type = "resize", columns = 120, rows = 40 });
         await terminal.SendBinaryAsync(Encoding.UTF8.GetBytes("echo size-$(stty size | tr ' ' x)\n"));
         await terminal.ReadUntilAsync("size-40x120");

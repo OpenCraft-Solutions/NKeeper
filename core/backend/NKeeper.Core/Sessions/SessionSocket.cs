@@ -176,11 +176,11 @@ internal sealed class SessionSocket(WebSocket socket) : IDisposable
     }
 
     /// <summary>Answers a close the browser started.</summary>
-    public async Task AcknowledgeCloseAsync()
+    public async Task AcknowledgeCloseAsync(CancellationToken cancellationToken)
     {
         if (socket.State == WebSocketState.CloseReceived)
         {
-            await socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "Session closed", CancellationToken.None);
+            await socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "Session closed", cancellationToken);
         }
     }
 

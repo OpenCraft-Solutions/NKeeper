@@ -27,7 +27,11 @@
       <NKeeperPackStaging>$(MSBuildProjectDirectory)/$(IntermediateOutputPath)package/</NKeeperPackStaging>
       <NKeeperPacked>$(MSBuildProjectDirectory)/$(IntermediateOutputPath)packed/</NKeeperPacked>
     </PropertyGroup>
-    <!-- Builds the packaging tool here rather than referencing it: a plugin references only the SDK. -->
+    <!--
+      Builds the packaging tool here rather than referencing it: a plugin references only the SDK. Restoring it
+      first, in its own evaluation, lets the plugin build on a clean checkout.
+    -->
+    <MSBuild Projects="$(NKeeperRoot)tools/NKeeper.PluginTool/NKeeper.PluginTool.csproj" Targets="Restore" Properties="MSBuildRestoreSessionId=$([System.Guid]::NewGuid())" />
     <MSBuild Projects="$(NKeeperRoot)tools/NKeeper.PluginTool/NKeeper.PluginTool.csproj" Targets="Build" />
     <Exec Condition="!Exists('$(NKeeperDevelopmentKeys)dev.private.pem')"
           Command="dotnet &quot;$(NKeeperPluginTool)&quot; keygen --out &quot;$(NKeeperDevelopmentKeys).&quot; --name dev --comment &quot;local development key&quot;" />

@@ -59,7 +59,7 @@ public sealed class TerminalSessionHandler(IConnectivity connectivity) : IStream
 
     /// <summary>A terminal dimension from the options, kept within bounds.</summary>
     internal static int Size(JsonElement options, string name, int fallback) =>
-        options.ValueKind == JsonValueKind.Object && options.TryGetProperty(name, out var value) && value.TryGetInt32(out var size)
+        options.ValueKind == JsonValueKind.Object && options.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var size)
             ? Math.Clamp(size, MinSize, MaxSize)
             : fallback;
 }

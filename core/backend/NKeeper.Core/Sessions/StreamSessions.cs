@@ -124,6 +124,7 @@ internal sealed class StreamSessionRunner(HttpContext context, SessionSocket soc
         using var place = registry.TryReserve(user.Id);
         IStreamSession? session = null;
         OpenSession? open = null;
+        var audited = false;
         try
         {
             if (place is null)
@@ -132,30 +133,65 @@ internal sealed class StreamSessionRunner(HttpContext context, SessionSocket soc
             }
 
             var start = await socket.ReceiveStartAsync(aborted);
-            var host = await AuthorizeAsync(start, user, aborted);
+            var (host, jumpHostId) = await AuthorizeAsync(start, user, aborted);
             await socket.SendJsonAsync(new { type = "status", status = "connecting" }, aborted);
             var handle = await ResolveCredentialAsync(host, start, aborted);
-            session = await OpenAsync(host, start, handle, user, aborted);
 
-            open = new OpenSession(Guid.NewGuid(), user.Id, authSessionKey, host.Id, start.ServiceId, start.CredentialId, sessionType.Id, pluginId, _services.GetRequiredService<TimeProvider>().GetUtcNow());
+            // Registered while it opens, so a change of access during a key prompt ends it too.
+            open = new OpenSession(Guid.NewGuid(), user.Id, authSessionKey, host.Id, start.ServiceId, start.CredentialId, jumpHostId, sessionType.Id, pluginId, _services.GetRequiredService<TimeProvider>().GetUtcNow());
             registry.Add(open);
+            using (var opening = CancellationTokenSource.CreateLinkedTokenSource(aborted, open.Ended))
+            {
+                session = await OpenAsync(host, start, handle, user, opening.Token);
+            }
+
+            // Anything that changed before it was registered, or while the plugin connected.
+            var openId = open.Id;
+            await registry.RecheckAsync(s => s.Id == openId, aborted);
+            if (open.EndReason is not null)
+            {
+                throw Revoked();
+            }
+
             await AuditAsync(AuditActions.SessionOpen, host.Id, $"{sessionType.Id} on service {start.ServiceId}, plugin {pluginId}, {(start.CredentialId is { } id ? $"credential {id}" : start.PromptReference is null ? "no credential" : "a typed credential")}");
+            audited = true;
             await socket.SendJsonAsync(new { type = "connected" }, aborted);
         }
-        catch (SessionStartException ex)
+        catch (Exception ex) when (ex is SessionStartException || (ex is OperationCanceledException && open?.EndReason is not null))
         {
-            await socket.SendErrorAndCloseAsync(ex.Code, ex.Message, CancellationToken.None);
-            await DisposeAsync(session);
+            // A refused key prompt, say, may really be access ending meanwhile.
+            var error = open?.EndReason is not null ? Revoked() : (SessionStartException)ex;
+            await socket.SendErrorAndCloseAsync(error.Code, error.Message, CancellationToken.None);
+            await AbandonAsync(session, open, registry, audited);
             return;
         }
         catch (Exception ex) when (ex is OperationCanceledException or WebSocketException)
         {
             // The browser went away before the session opened.
-            await DisposeAsync(session);
+            await AbandonAsync(session, open, registry, audited);
             return;
         }
 
         await RunOpenAsync(session, open, registry);
+    }
+
+    private static SessionStartException Revoked() =>
+        new(SessionEndReasons.AccessRevoked, "Your access changed, so the session didn't open.");
+
+    /// <summary>Cleans up after a session that never reached its data phase.</summary>
+    private async Task AbandonAsync(IStreamSession? session, OpenSession? open, SessionRegistry registry, bool audited)
+    {
+        await DisposeAsync(session);
+        if (open is null)
+        {
+            return;
+        }
+
+        registry.Remove(open);
+        if (audited)
+        {
+            await AuditCloseAsync(open, SessionEndReasons.Closed);
+        }
     }
 
     /// <summary>The plugin's data phase, until either side is done or core ends it.</summary>
@@ -169,12 +205,17 @@ internal sealed class StreamSessionRunner(HttpContext context, SessionSocket soc
         {
             var run = session.RunAsync(channel, stop.Token);
 
-            // A plugin that doesn't stop when told is given a few seconds, then left behind, so it can't hold the session open.
-            await Task.WhenAny(run, Task.Delay(Timeout.Infinite, stop.Token)).ContinueWith(_ => { }, TaskScheduler.Default);
-            if (!run.IsCompleted && await Task.WhenAny(run, Task.Delay(StopGrace, CancellationToken.None)) != run)
+            // The browser closing, or core ending it, stops the plugin. One that doesn't stop when told is given
+            // a few seconds, then left behind, so it can't hold the session open.
+            await Task.WhenAny(run, pump, Task.Delay(Timeout.Infinite, stop.Token)).ContinueWith(_ => { }, TaskScheduler.Default);
+            if (!run.IsCompleted)
+            {
+                await stop.CancelAsync();
+            }
+
+            if (!await CompletesWithinAsync(run, StopGrace))
             {
                 _logger.LogWarning("Session {SessionId} of type {SessionType} didn't stop within {Grace}; leaving it behind", open.Id, sessionType.Id, StopGrace);
-                _ = run.ContinueWith(t => t.Exception, TaskScheduler.Default);
             }
             else
             {
@@ -197,23 +238,23 @@ internal sealed class StreamSessionRunner(HttpContext context, SessionSocket soc
             registry.Remove(open);
         }
 
-        await AuditAsync(
-            AuditActions.SessionClose,
-            open.HostId,
-            $"{sessionType.Id} on service {open.ServiceId}: {reason}, after {(_services.GetRequiredService<TimeProvider>().GetUtcNow() - open.OpenedAtUtc).TotalSeconds:0} s");
+        await AuditCloseAsync(open, reason);
         try
         {
-            // The pump, still reading, receives the browser's answer to our close.
-            await socket.SendJsonAsync(new { type = "closed", reason }, CancellationToken.None);
-            await socket.BeginCloseAsync(reason, CancellationToken.None);
-            await socket.AcknowledgeCloseAsync();
+            // The pump, still reading, receives the browser's answer to our close. A browser that stops reading,
+            // or a plugin left behind in a blocked send, mustn't keep us here.
+            using var deadline = new CancellationTokenSource(SessionSocket.CloseHandshakeTimeout);
+            await socket.SendJsonAsync(new { type = "closed", reason }, deadline.Token);
+            await socket.BeginCloseAsync(reason, deadline.Token);
+            await socket.AcknowledgeCloseAsync(deadline.Token);
         }
-        catch (Exception ex) when (ex is WebSocketException or OperationCanceledException or SessionStartException or InvalidOperationException)
+        catch (Exception ex) when (ex is WebSocketException or OperationCanceledException or SessionStartException or InvalidOperationException or ObjectDisposedException)
         {
-            // The browser is already gone.
+            // The browser is already gone, or too slow.
+            socket.Abort();
         }
 
-        if (await Task.WhenAny(pump, Task.Delay(SessionSocket.CloseHandshakeTimeout)) != pump)
+        if (!await CompletesWithinAsync(pump, SessionSocket.CloseHandshakeTimeout))
         {
             socket.Abort();
         }
@@ -221,8 +262,27 @@ internal sealed class StreamSessionRunner(HttpContext context, SessionSocket soc
         await pump;
     }
 
+    /// <summary>Whether <paramref name="task"/> finishes within <paramref name="limit"/>. If not, its failure is observed when it comes.</summary>
+    private static async Task<bool> CompletesWithinAsync(Task task, TimeSpan limit)
+    {
+        if (await Task.WhenAny(task, Task.Delay(limit, CancellationToken.None)) == task)
+        {
+            return true;
+        }
+
+        _ = task.ContinueWith(t => t.Exception, TaskScheduler.Default);
+        return false;
+    }
+
+    private Task AuditCloseAsync(OpenSession open, string reason) =>
+        AuditAsync(
+            AuditActions.SessionClose,
+            open.HostId,
+            $"{sessionType.Id} on service {open.ServiceId}: {reason}, after {(_services.GetRequiredService<TimeProvider>().GetUtcNow() - open.OpenedAtUtc).TotalSeconds:0} s");
+
     /// <summary>The host, if the user can use it, and the service, if this session type opens on it.</summary>
-    private async Task<HostContext> AuthorizeAsync(SessionStartMessage start, RequestUser user, CancellationToken cancellationToken)
+    /// <remarks>Also returns the host's jump host: the route the session takes.</remarks>
+    private async Task<(HostContext Host, Guid? JumpHostId)> AuthorizeAsync(SessionStartMessage start, RequestUser user, CancellationToken cancellationToken)
     {
         var permission = await _services.GetRequiredService<HostAccess>().GetPermissionAsync(start.HostId, user, cancellationToken);
         var host = permission == Access.HostPermission.None
@@ -238,8 +298,8 @@ internal sealed class StreamSessionRunner(HttpContext context, SessionSocket soc
             throw new SessionStartException(SessionErrorCodes.WrongService, $"“{host.Name}” has no such service for a {sessionType.Label} session. Reload the host and try again.");
         }
 
-        if (!sessionType.SupportsJumpHost
-            && await _services.GetRequiredService<CoreDbContext>().Hosts.AnyAsync(h => h.Id == host.Id && h.JumpHostId != null, cancellationToken))
+        var jumpHostId = await _services.GetRequiredService<CoreDbContext>().Hosts.Where(h => h.Id == host.Id).Select(h => h.JumpHostId).FirstOrDefaultAsync(cancellationToken);
+        if (!sessionType.SupportsJumpHost && jumpHostId is not null)
         {
             throw new SessionStartException(SessionErrorCodes.JumpHostUnsupported, $"{sessionType.Label} sessions can't go through a jump host, and “{host.Name}” is reached through one.");
         }
@@ -247,7 +307,7 @@ internal sealed class StreamSessionRunner(HttpContext context, SessionSocket soc
         // From here on, this request acts on this host, for the session type's plugin (§7.6).
         context.Features.Set(host);
         context.Features.Set(new SessionPluginFeature(pluginId));
-        return host;
+        return (host, jumpHostId);
     }
 
     private async Task<CredentialHandle?> ResolveCredentialAsync(HostContext host, SessionStartMessage start, CancellationToken cancellationToken)
@@ -268,12 +328,14 @@ internal sealed class StreamSessionRunner(HttpContext context, SessionSocket soc
     /// <summary>Opens the plugin's session, asking the user in-band about keys no one trusted yet (§7.7).</summary>
     private async Task<IStreamSession> OpenAsync(HostContext host, SessionStartMessage start, CredentialHandle? handle, RequestUser user, CancellationToken cancellationToken)
     {
-        var handler = (IStreamSessionHandler)_services.GetRequiredService(sessionType.Handler);
+        IStreamSessionHandler? handler = null;
         var request = new StreamSessionRequest(host, start.ServiceId, handle, start.Options ?? JsonDocument.Parse("{}").RootElement);
         for (var prompts = 0; ; prompts++)
         {
             try
             {
+                // Resolved here, so a plugin's broken registration or constructor is reported like any failure.
+                handler ??= (IStreamSessionHandler)_services.GetRequiredService(sessionType.Handler);
                 return await handler.OpenAsync(request, cancellationToken);
             }
             catch (SshConnectException ex) when (ex.Reason == SshConnectFailure.HostKeyUnknown && ex.PresentedKey is { } key && prompts < MaxKeyPrompts)
@@ -308,7 +370,16 @@ internal sealed class StreamSessionRunner(HttpContext context, SessionSocket soc
 
         try
         {
-            await session.DisposeAsync();
+            // A plugin that won't let go is left behind, like one whose RunAsync won't stop.
+            var dispose = session.DisposeAsync().AsTask();
+            if (!await CompletesWithinAsync(dispose, StopGrace))
+            {
+                _logger.LogWarning("A {SessionType} session didn't close within {Grace}; leaving it behind", sessionType.Id, StopGrace);
+            }
+            else
+            {
+                await dispose;
+            }
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {

@@ -84,7 +84,7 @@ internal sealed class SessionClient(WebSocket socket) : IAsyncDisposable
                 await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "done", CancellationToken.None);
             }
         }
-        catch (Exception ex) when (ex is WebSocketException or OperationCanceledException)
+        catch (Exception ex) when (ex is WebSocketException or OperationCanceledException or IOException or ObjectDisposedException)
         {
         }
 

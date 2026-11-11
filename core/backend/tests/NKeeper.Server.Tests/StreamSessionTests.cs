@@ -177,6 +177,59 @@ public sealed class StreamSessionTests(PostgresFixture postgres, SshServerFixtur
     }
 
     [Fact]
+    public async Task Access_taken_away_during_a_key_prompt_stops_the_session_opening()
+    {
+        await using var server = await ServerAsync();
+        var (admin, _) = await SignInAsync(server, ServerScenario.AdminUserName, ServerScenario.AdminPassword);
+        var host = await CreateHostAsync(admin, port: ssh.Port, credential: new { username = SshServerFixture.UserName, password = SshServerFixture.Password });
+        var bobId = await server.CreateUserAsync("bob", BobPassword);
+        (await admin.SendWithTokenAsync(HttpMethod.Put, $"/api/users/{bobId}/grants", new object[] { new { hostId = Id(host), level = "use" } })).EnsureSuccessStatusCode();
+        var (_, bob) = await SignInAsync(server, "bob", BobPassword);
+
+        await using var session = await SessionClient.ConnectAsync(server, bob);
+        await session.SendAsync(new { type = "start", hostId = Id(host), serviceId = ServiceId(host), credentialId = CredentialId(host) });
+        await session.ExpectAsync("hostKey");
+        await WaitForAsync(() => server.Services.GetRequiredService<SessionRegistry>().Open.Count == 1);
+
+        (await admin.SendWithTokenAsync(HttpMethod.Put, $"/api/users/{bobId}/grants", Array.Empty<object>())).EnsureSuccessStatusCode();
+        Assert.Equal("access_revoked", (await session.ExpectAsync("error")).GetProperty("code").GetString());
+        Assert.Empty(await AuditAsync(server, AuditActions.TrustAdd));
+        Assert.Empty(await AuditAsync(server, AuditActions.SessionOpen));
+        await WaitForAsync(() => server.Services.GetRequiredService<SessionRegistry>().Open.Count == 0);
+    }
+
+    [Fact]
+    public async Task Sessions_end_when_their_jump_host_changes_or_is_taken_away()
+    {
+        await using var server = await ServerAsync();
+        var (admin, _) = await SignInAsync(server, ServerScenario.AdminUserName, ServerScenario.AdminPassword);
+        var host = await CreateHostAsync(admin);
+        var jumpHost = await CreateHostAsync(admin, credential: new { username = "jump", password = "jump-password" });
+        var jump = new { hostId = Id(jumpHost), serviceId = ServiceId(jumpHost), credentialId = CredentialId(jumpHost) };
+        var bobId = await server.CreateUserAsync("bob", BobPassword);
+        async Task GrantAsync(params Guid[] hostIds) =>
+            (await admin.SendWithTokenAsync(HttpMethod.Put, $"/api/users/{bobId}/grants", hostIds.Select(id => new { hostId = id, level = "use" }).ToArray())).EnsureSuccessStatusCode();
+        await GrantAsync(Id(host), Id(jumpHost));
+        var (_, bob) = await SignInAsync(server, "bob", BobPassword);
+
+        // The route changed: the session's tunnel stays on the old one.
+        await using (var session = await OpenEchoAsync(server, bob, host))
+        {
+            host = await UpdateTagsAsync(admin, host, [], jump);
+            Assert.Equal("access_revoked", (await session.ExpectAsync("closed")).GetProperty("reason").GetString());
+        }
+
+        // The user can no longer use the jump host the session goes through, though they can still use the host.
+        await using (var session = await OpenEchoAsync(server, bob, host))
+        {
+            await GrantAsync(Id(host));
+            Assert.Equal("access_revoked", (await session.ExpectAsync("closed")).GetProperty("reason").GetString());
+        }
+
+        await WaitForAsync(() => server.Services.GetRequiredService<SessionRegistry>().Open.Count == 0);
+    }
+
+    [Fact]
     public async Task A_user_has_at_most_twenty_sessions()
     {
         await using var server = await ServerAsync();
@@ -267,7 +320,7 @@ public sealed class StreamSessionTests(PostgresFixture postgres, SshServerFixtur
         return await response.Content.ReadFromJsonAsync<JsonElement>(Token);
     }
 
-    private static async Task<JsonElement> UpdateTagsAsync(HttpClient admin, JsonElement host, object[] tags)
+    private static async Task<JsonElement> UpdateTagsAsync(HttpClient admin, JsonElement host, object[] tags, object? jump = null)
     {
         var current = await admin.GetFromJsonAsync<JsonElement>(new Uri($"/api/hosts/{Id(host)}", UriKind.Relative), Token);
         using var response = await admin.SendWithTokenAsync(HttpMethod.Put, $"/api/hosts/{Id(host)}", new
@@ -275,6 +328,7 @@ public sealed class StreamSessionTests(PostgresFixture postgres, SshServerFixtur
             name = "ssh",
             ipAddress = SshServerFixture.Address,
             tags,
+            jump,
             services = current.GetProperty("services").EnumerateArray().Select(s => new { id = s.GetProperty("id").GetGuid(), type = "hello", port = s.GetProperty("port").GetInt32(), settings = s.GetProperty("settings") }),
             version = current.GetProperty("version").GetUInt32(),
         });

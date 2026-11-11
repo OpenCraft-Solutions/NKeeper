@@ -18,7 +18,8 @@ public static class SessionEndReasons
 
 /// <summary>An open stream session (docs/architecture.md §7.10). Its <see cref="Ended"/> token is cancelled when core ends it.</summary>
 /// <param name="CredentialId">The saved credential it was opened with; null for a typed one or none.</param>
-public sealed class OpenSession(Guid id, Guid userId, string authSessionKey, Guid hostId, Guid serviceId, Guid? credentialId, string type, string pluginId, DateTimeOffset openedAtUtc) : IDisposable
+/// <param name="JumpHostId">The jump host it went through; null when it went direct.</param>
+public sealed class OpenSession(Guid id, Guid userId, string authSessionKey, Guid hostId, Guid serviceId, Guid? credentialId, Guid? jumpHostId, string type, string pluginId, DateTimeOffset openedAtUtc) : IDisposable
 {
     private readonly CancellationTokenSource _ended = new();
     private string? _endReason;
@@ -34,6 +35,8 @@ public sealed class OpenSession(Guid id, Guid userId, string authSessionKey, Gui
     public Guid ServiceId { get; } = serviceId;
 
     public Guid? CredentialId { get; } = credentialId;
+
+    public Guid? JumpHostId { get; } = jumpHostId;
 
     public string Type { get; } = type;
 
@@ -169,16 +172,18 @@ public sealed class SessionAccessCheck(CoreDbContext db, HostAccess access, Time
         }
 
         // The service, and the saved credential, are still the host's.
-        var host = await db.Hosts.AsNoTracking().Where(h => h.Id == session.HostId).Select(h => new { h.JumpHostId }).FirstAsync(cancellationToken);
-        if (!await db.HostServices.AnyAsync(s => s.Id == session.ServiceId && s.HostId == session.HostId, cancellationToken)
+        var host = await db.Hosts.AsNoTracking().Where(h => h.Id == session.HostId).Select(h => new { h.JumpHostId }).FirstOrDefaultAsync(cancellationToken);
+        if (host is null
+            || !await db.HostServices.AnyAsync(s => s.Id == session.ServiceId && s.HostId == session.HostId, cancellationToken)
             || (session.CredentialId is { } credentialId && !await db.HostCredentials.AnyAsync(c => c.Id == credentialId && c.HostId == session.HostId, cancellationToken)))
         {
             return false;
         }
 
-        // A jump host the user can no longer use cuts the route too.
-        return host.JumpHostId is not { } jumpHostId
-            || await access.GetPermissionAsync(jumpHostId, requestUser, cancellationToken) != Access.HostPermission.None;
+        // Its tunnel stays on the jump host it went through: a changed route, or one the user can no longer use, cuts it.
+        return host.JumpHostId == session.JumpHostId
+            && (session.JumpHostId is not { } jumpHostId
+                || await access.GetPermissionAsync(jumpHostId, requestUser, cancellationToken) != Access.HostPermission.None);
     }
 }
 
