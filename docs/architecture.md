@@ -688,11 +688,11 @@ var response = await http.Client.SendAsync(new HttpRequestMessage(HttpMethod.Get
 Some sessions live in the plugin rather than on a WebSocket: a web session is a run of HTTP requests through the plugin's proxy. Core still owns their limits, revocation and audit (v2-plan.md §7.1), through `IPluginSessions` (SDK 0.1.8):
 
 ```csharp
-using var session = sessions.Open(host, serviceId, sessionType: "web");   // from the plugin's host endpoint
+using var session = await sessions.OpenAsync(host, serviceId, sessionType: "web");   // from the plugin's host endpoint
 // … later, on every request: if (session.Ended.IsCancellationRequested) refuse
 ```
 
-- `Open` registers the session in core's session registry (§7.10) for the signed-in user, the request's auth session, the host, the service and the jump host, and audits `session.open`. It can only be called from the plugin's own host-scoped endpoint, for the host core authorized, and only for a session type the plugin contributes.
+- `OpenAsync` registers the session in core's session registry (§7.10) for the signed-in user, the request's auth session, the host, the service and the jump host, and audits `session.open`. It can only be called from the plugin's own host-scoped endpoint, for the host core authorized, and only for a session type the plugin contributes.
 - It counts toward the user's 20 sessions, stream sessions included. Over the limit, it throws `SessionLimitException`, and the plugin answers `409` with `too_many_sessions`.
 - Core re-checks it with every other session, and ends it when access changes: its `Ended` token is cancelled, with the reason (`access_revoked`). The plugin then refuses its requests.
 - Disposing it unregisters it and audits `session.close` with the reason: `closed`, `access_revoked`, or what the plugin gives (`idle`).
