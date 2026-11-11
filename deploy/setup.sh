@@ -393,7 +393,9 @@ build_guacd() {
     tar -xzf "$src/$tarball" -C "$src" --strip-components=1
 
     # RDP and VNC only: NKeeper has its own SSH, and guacd needs no terminal, Kubernetes or recording tools.
-    (cd "$src" && ./configure --prefix="$GUACD_PREFIX" --with-freerdp-plugin-dir="$GUACD_PREFIX/lib/freerdp" \
+    # guacd builds with warnings as errors; FreeRDP 3 releases newer than guacd deprecate callbacks it still uses,
+    # which still work, so those warnings alone stay warnings.
+    (cd "$src" && CFLAGS="-O2 -Wno-error=deprecated-declarations" ./configure --prefix="$GUACD_PREFIX" --with-freerdp-plugin-dir="$GUACD_PREFIX/lib/freerdp" \
         --without-ssh --without-telnet --without-websockets --without-pango --without-terminal \
         --disable-guacenc --disable-guaclog --disable-kubernetes >"$src/configure.log" 2>&1) ||
         { tail -n 30 "$src/configure.log" >&2; die "guacamole-server's configure failed (above)."; }
@@ -413,7 +415,11 @@ install_guacd() {
         return
     fi
     if [ "$(cat "$GUACD_PREFIX/.version" 2>/dev/null)" != "$GUACD_VERSION" ] || [ ! -x "$GUACD_PREFIX/sbin/guacd" ]; then
-        build_guacd
+        # In a subshell: a failed build mustn't stop NKeeper itself from installing and starting.
+        if ! (build_guacd); then
+            warn "guacd couldn't be built (above): NKeeper carries on, and remote desktops say the gateway is unavailable."
+            [ -x "$GUACD_PREFIX/sbin/guacd" ] || return 0
+        fi
     else
         ok "guacd $GUACD_VERSION is already built."
     fi
