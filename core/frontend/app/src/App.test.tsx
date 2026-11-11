@@ -259,7 +259,9 @@ describe('the workspace', () => {
     const user = userEvent.setup()
 
     render(<App importer={termImporter} />)
-    await user.click(await screen.findByRole('button', { name: 'Connect to web01' }))
+    const connectButton = await screen.findByRole('button', { name: 'Connect to web01' })
+    expect(connectButton).toHaveTextContent(/^Connect$/)
+    await user.click(connectButton)
     expect(screen.getByRole('menuitem', { name: 'root' })).toBeInTheDocument()
     await user.click(screen.getByRole('menuitem', { name: 'Type a credential…' }))
 
@@ -377,6 +379,8 @@ describe('the workspace', () => {
     await user.clear(within(form).getByLabelText(/^Port/))
     await user.click(within(form).getByRole('button', { name: 'Create host' }))
     expect(await screen.findByRole('article', { name: 'new01' })).toBeInTheDocument()
+    // It's checked at once, rather than at the next background round.
+    await waitFor(() => expect(fetch.mock.calls.some(([url, init]) => url === '/api/hosts/h9/health' && init?.method === 'POST')).toBe(true))
   })
 
   it('sends the version an edit started from, and offers to reload after a conflict', async () => {

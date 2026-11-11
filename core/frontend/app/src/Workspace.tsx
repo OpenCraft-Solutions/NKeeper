@@ -1,4 +1,4 @@
-import { createElement, useCallback, useEffect, useMemo, useState } from 'react'
+import { createElement, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, ApiError, openStreamSession, SessionError, type StreamStart } from '@nkeeper/sdk'
 import type { Catalog, ConnectEntry, ConnectGroup, SessionCredential } from './catalog'
 import { useDialogs } from './dialogContext'
@@ -37,6 +37,8 @@ export function Workspace({ catalog, canCreate }: { catalog: Catalog; canCreate:
   const [pane, setPane] = useState<Pane>({ kind: 'details' })
   const [sessions, setSessions] = useState<SessionTab[]>([])
   const [activeTab, setActiveTab] = useState<string>('host')
+  // The latest health check asked for, by host.
+  const checks = useRef(new Map<string, number>())
 
   const [reloads, setReloads] = useState(0)
   const loadHosts = useCallback(() => setReloads((n) => n + 1), [])
@@ -112,15 +114,31 @@ export function Workspace({ catalog, canCreate }: { catalog: Catalog; canCreate:
     setActiveTab((current) => (current === id ? 'host' : current))
   }
 
-  async function checkSelected() {
-    if (!selected) {
+  async function checkHost(hostId: string) {
+    // Only the latest check of a host counts: an older one that finishes later is ignored.
+    const generation = (checks.current.get(hostId) ?? 0) + 1
+    checks.current.set(hostId, generation)
+    const results = await api.post<ServiceHealth[]>(`/api/hosts/${hostId}/health`)
+    if (checks.current.get(hostId) !== generation) {
       return
     }
-    const results = await api.post<ServiceHealth[]>(`/api/hosts/${selected.id}/health`)
     setHealth((current) => {
-      const next = new Map([...current].filter(([, r]) => r.hostId !== selected.id))
+      const next = new Map([...current].filter(([, r]) => r.hostId !== hostId))
       results.forEach((r) => next.set(r.serviceId, r))
       return next
+    })
+  }
+
+  async function checkSelected() {
+    if (selected) {
+      await checkHost(selected.id)
+    }
+  }
+
+  /** A host just created or saved is checked at once, rather than at the next background round. */
+  function checkSaved(host: Host) {
+    checkHost(host.id).catch(() => {
+      // Health is a nicety: the host is saved either way.
     })
   }
 
@@ -178,6 +196,7 @@ export function Workspace({ catalog, canCreate }: { catalog: Catalog; canCreate:
                 setHosts((current) => [...(current ?? []), host].sort((a, b) => a.name.localeCompare(b.name)))
                 setSelectedId(host.id)
                 setPane({ kind: 'details' })
+                checkSaved(host)
               }}
               onCancel={() => setPane({ kind: 'details' })}
               onReload={loadHosts}
@@ -191,6 +210,7 @@ export function Workspace({ catalog, canCreate }: { catalog: Catalog; canCreate:
               onSaved={(host) => {
                 replaceHost(host)
                 setPane({ kind: 'details' })
+                checkSaved(host)
               }}
               onCancel={() => setPane({ kind: 'details' })}
               onReload={loadHosts}

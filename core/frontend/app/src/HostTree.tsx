@@ -105,7 +105,7 @@ export function HostTree({
                     <span className="nk-tree-name">{host.name}</span>
                     <span className="nk-tree-address">{hostAddress(host)}</span>
                   </button>
-                  <ConnectMenu label={`Connect to ${host.name}`} groups={connectMenu(host, catalog)} onChoose={(g, e) => onConnect(host, g, e)} />
+                  <ConnectMenu name={`Connect to ${host.name}`} groups={connectMenu(host, catalog)} onChoose={(g, e) => onConnect(host, g, e)} />
                 </li>
               ))}
             </ul>

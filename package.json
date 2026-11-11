@@ -8,7 +8,8 @@
   },
   "workspaces": [
     "core/frontend/*",
-    "plugins/*/frontend"
+    "plugins/*/frontend",
+    "testing/e2e"
   ],
   "scripts": {
     "lint": "oxlint --deny-warnings",

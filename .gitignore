@@ -48,3 +48,6 @@ docker-compose.override.yml
 
 # --- Local development keys (plugin signing) ---
 .dev/
+
+# Screenshots from the browser test.
+testing/e2e/*.png

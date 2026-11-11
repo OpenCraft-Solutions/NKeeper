@@ -19,7 +19,10 @@ get "$base/" | grep -q '<div id="root">' || { echo "The shell isn't served at $b
 antiforgery=$(get "$base/api/auth/antiforgery")
 token=$(sed -n 's/.*"token":"\([^"]*\)".*/\1/p' <<<"$antiforgery")
 header=$(sed -n 's/.*"headerName":"\([^"]*\)".*/\1/p' <<<"$antiforgery")
-[ -n "$token" ] && [ -n "$header" ] || { echo "No antiforgery token: $antiforgery" >&2; exit 1; }
+if [ -z "$token" ] || [ -z "$header" ]; then
+    echo "No antiforgery token: $antiforgery" >&2
+    exit 1
+fi
 
 get -X POST -H "$header: $token" -H 'Content-Type: application/json' \
     -d "{\"userNameOrEmail\":\"$user\",\"password\":\"$password\",\"rememberMe\":false}" \
