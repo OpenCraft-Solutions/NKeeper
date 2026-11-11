@@ -69,7 +69,7 @@ public sealed class WakeOnLanPlugin : IPlugin
 - `endpoints.MapHostGroup(HostPermission.Use)` (or `Manage`) gives a group at `hosts/{hostId}/` whose endpoints act on one host the user may use (or manage). See §7.3.
 - `Contribute(IPluginContributions, PluginContext)` declares what the plugin adds to core's catalogues: so far, service types (§7.4) with their health probes (§7.13), session types (§7.10) and host actions (§7.12). It has an empty default, so a plugin with nothing to declare leaves it out.
 - More contracts (settings, audit actions) arrive with their first real users ([v2-plan.md §4.2](v2-plan.md#42-contribution-catalogue)). The SDK may change until it is frozen as v1 at the end of Phase 3.
-- **SDK versions.** A manifest declares the SDK range it supports, and a package outside the server's `SdkVersion` is refused. Within v0, an addition raises the patch number (`0.1.1` added the host scope, `0.1.2` service types, `0.1.3` the credential broker, `0.1.4` SSH connections, `0.1.5` stream sessions, `0.1.6` host actions, health probes and, in the frontend SDK, session views) and a breaking change raises the minor one. So a plugin built for `>=0.1.0 <0.2.0` keeps loading, and one that uses an addition declares the version that brought it.
+- **SDK versions.** A manifest declares the SDK range it supports, and a package outside the server's `SdkVersion` is refused. Within v0, an addition raises the patch number (`0.1.1` added the host scope, `0.1.2` service types, `0.1.3` the credential broker, `0.1.4` SSH connections, `0.1.5` stream sessions, `0.1.6` host actions, health probes and, in the frontend SDK, session views, `0.1.7` run actions and plugin audit events) and a breaking change raises the minor one. So a plugin built for `>=0.1.0 <0.2.0` keeps loading, and one that uses an addition declares the version that brought it.
 
 ## 5. Frontend extension point
 
@@ -547,7 +547,31 @@ contributions.AddHostAction(new HostAction("ssh.terminal", "Terminal", SessionTy
   - "Type a credential…", which asks for one in core's dialog when the session opens (§7.6).
 
   The plugin only names the session type; it never sees the menu or the credential.
-- Other locations (Tools, Tasks), and actions that run a dialog instead of a session, arrive with their first users.
+- Other locations (Tools, Tasks), and actions that open a dialog of the plugin's own, arrive with their first users.
+
+**Run actions (SDK 0.1.7).** An action can run one of the plugin's endpoints instead of opening a session:
+
+```csharp
+contributions.AddHostAction(new HostAction("wake-on-lan.wake", "Wake") { Endpoint = "wake", ServiceTypes = ["wake-on-lan"], Credential = HostActionCredential.None });
+```
+
+- A host action names exactly one of a session type or an `Endpoint`. A run action names the service types it applies to (at least one). An `Endpoint` is a path of lower-case segments, relative to the plugin's host group.
+- The shell calls it as `POST /api/p/<plugin>/hosts/<hostId>/<endpoint>`, with `{ serviceId }`, plus `credentialId` or `promptReference` when the action needs a credential. The plugin maps that endpoint in a host group (`MapHostGroup(HostPermission.Use)`), so core authorizes it like any plugin endpoint (§7.3).
+- The endpoint answers `{ message }`, which the shell shows. A refusal is a problem response, and the shell shows its detail.
+- Run actions are listed in the same menu as Connect, each under its own heading. Double-clicking a host opens only a session, never a run action, so nothing runs by accident.
+
+### 7.12.1 Plugin audit events
+
+Plugins record their own operations in core's audit trail (v2-plan.md §4.2, SDK 0.1.7):
+
+```csharp
+await audit.RecordAsync("wake-on-lan.send", host.Id, $"{mac} to {targets}");
+```
+
+- `IPluginAudit` is available to a plugin's endpoints. Core knows which plugin is calling from the endpoint's route group, as the credential broker does (§7.6), not from anything the plugin says.
+- An action's name must be the plugin's ID, a dot, then lower-case letters, digits, `-` and `_` (`wake-on-lan.send`). So a plugin can't record an event that looks like core's (`host.update`) or another plugin's. Anything else is refused with an `ArgumentException`.
+- The event records the signed-in user and the client's address, like core's own. Outside a plugin's endpoint (a background job, say), recording is refused until a first user needs it.
+- Core still records every lifecycle and security event itself (sessions, credentials, trust), so a plugin can't leave those out.
 
 ### 7.13 Health probes
 
@@ -623,6 +647,19 @@ export default definePlugin({
 - **Styles under the shell's policy.** The policy allows stylesheets only from the server (`style-src 'self'`), so a `<style>` element that a library adds is blocked. The SDK has two helpers that keep the policy as it is:
   - `adoptStyles(css)` adds a stylesheet from text, as a constructable stylesheet, which the policy allows;
   - `mirrorInjectedStyles(element)` copies the `<style>` elements that a library adds under `element` (xterm.js does) into constructable stylesheets. It keeps them in step until it's called off.
+
+### 7.15 The `wake-on-lan` plugin
+
+The smallest real plugin, in `plugins/wake-on-lan/`: it shows how little a plugin needs, and it changes no core file (v2-plan.md, Phase 2). Ported from 1.x's `Health/WakeOnLan`.
+- **Service type** `wake-on-lan`, "Wake-on-LAN", UDP port 9 by default, with one required setting: the MAC address. Hosts in 1.x had a MAC address field; in 2.0, a host gets Wake-on-LAN by having this service, so core keeps no field for it.
+- **Run action** `wake-on-lan.wake`, "Wake", on `wake-on-lan` services, with no credential (§7.12).
+- **Its endpoint** `POST /api/p/wake-on-lan/hosts/{hostId}/wake` needs Use. It sends the magic packet from the NKeeper server (six `0xFF` bytes, then the MAC address 16 times) over UDP to the service's port, to:
+  - the local broadcast address;
+  - for a service with an IPv4 address, its `/24` subnet's broadcast address and the address itself, for routers that forward directed broadcasts or keep a static ARP entry.
+
+  A MAC address that isn't six hexadecimal bytes (with `:` or `-` between them) is refused with `400`.
+- It records `wake-on-lan.send` (§7.12.1), with the MAC address and where the packet went.
+- No frontend: the shell's run actions are enough.
 
 ## 8. The native install
 
