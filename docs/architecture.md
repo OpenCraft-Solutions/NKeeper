@@ -69,7 +69,7 @@ public sealed class WakeOnLanPlugin : IPlugin
 - `endpoints.MapHostGroup(HostPermission.Use)` (or `Manage`) gives a group at `hosts/{hostId}/` whose endpoints act on one host the user may use (or manage). See §7.3.
 - `Contribute(IPluginContributions, PluginContext)` declares what the plugin adds to core's catalogues: so far, service types (§7.4) with their health probes (§7.13), session types (§7.10) and host actions (§7.12). It has an empty default, so a plugin with nothing to declare leaves it out.
 - More contracts (settings, audit actions) arrive with their first real users ([v2-plan.md §4.2](v2-plan.md#42-contribution-catalogue)). The SDK may change until it is frozen as v1 at the end of Phase 3.
-- **SDK versions.** A manifest declares the SDK range it supports, and a package outside the server's `SdkVersion` is refused. Within v0, an addition raises the patch number (`0.1.1` added the host scope, `0.1.2` service types, `0.1.3` the credential broker, `0.1.4` SSH connections, `0.1.5` stream sessions, `0.1.6` host actions, health probes and, in the frontend SDK, session views, `0.1.7` run actions and plugin audit events, `0.1.8` HTTPS connections, stateful sessions, session origins and, in the frontend SDK, `confirmTrust`) and a breaking change raises the minor one. So a plugin built for `>=0.1.0 <0.2.0` keeps loading, and one that uses an addition declares the version that brought it.
+- **SDK versions.** A manifest declares the SDK range it supports, and a package outside the server's `SdkVersion` is refused. Within v0, an addition raises the patch number (`0.1.1` added the host scope, `0.1.2` service types, `0.1.3` the credential broker, `0.1.4` SSH connections, `0.1.5` stream sessions, `0.1.6` host actions, health probes and, in the frontend SDK, session views, `0.1.7` run actions and plugin audit events, `0.1.8` HTTPS connections, stateful sessions, session origins and, in the frontend SDK, `confirmTrust`, `0.1.9` desktop connections) and a breaking change raises the minor one. So a plugin built for `>=0.1.0 <0.2.0` keeps loading, and one that uses an addition declares the version that brought it.
 
 ## 5. Frontend extension point
 
@@ -728,6 +728,39 @@ Web interfaces through NKeeper, in a tab: ported from 1.x's `Web/` (YARP).
 - **Its frontend** is the `web` session view: it opens the session, asks the shell to trust a certificate when it must, and shows the site in a frame.
 - A capability for other plugins to open web sessions (1.x's iDRAC console) arrives with its first user, in Phase 4.
 
+### 7.20 Desktop connections
+
+Remote desktops go through guacd, Apache Guacamole's proxy daemon, which speaks RDP and VNC to the server and the Guacamole protocol to NKeeper (D11). Core makes the connection, as it does SSH and HTTP (D13): guacd needs the credential's secrets, and a plugin never sees them (SDK 0.1.9).
+
+```csharp
+await using var desktop = await connectivity.OpenDesktopAsync(host, serviceId, handle, new DesktopOptions(Width: 1280, Height: 800, Dpi: 96));
+// desktop.ReadAsync / WriteAsync: Guacamole instructions, after the handshake
+```
+
+- `IConnectivity.OpenDesktopAsync(host, serviceId, handle, options)`, for an RDP service, so far:
+  - checks the handle, as for SSH (§7.9), and audits `credential.use`;
+  - **checks the server's certificate first.** It reads the certificate RDP offers (an X.224 negotiation, then a TLS handshake), and checks it like an HTTPS one (§7.16): publicly valid, or the one trusted for the host. An unknown one fails with `DesktopConnectException` and `HostKeyUnknown`, carrying the certificate, which core remembers it presented. A changed one fails with `HostKeyChanged`, audited as `trust.mismatch`;
+  - through a jump host, opens a tunnel (§7.16), and guacd connects to its loopback end;
+  - connects to guacd (`Guacd:Address`, `127.0.0.1:4822` by default) and does the Guacamole handshake itself: it selects `rdp`, sends the browser's size, and the connection's parameters. These are the address, port, user name, domain and password, NLA security, and `cert-fingerprints` set to the certificate it just checked, so guacd accepts exactly that one. The browser can never choose the protocol, the target or a parameter;
+  - returns once guacd says `ready`, with an `IDesktopConnection`: the instruction stream after the handshake, and the `ready` instruction to pass on.
+- **Options** come from the plugin, and are checked: the size (between 200 × 200 and 8192 × 8192), DPI, the audio and image types the browser takes, and its time zone.
+- guacd that isn't running fails with `GatewayUnavailable`.
+- **The Guacamole protocol code** (parser, encoder, handshake) is core's, ported from 1.x's `GuacamoleProtocol` and `GuacdConnection`.
+
+### 7.21 The `desktop` plugin
+
+RDP through guacd, as a proof that the SDK carries a third kind of session (v2-plan.md, Phase 2): ported from 1.x's `Desktop/`. VNC, sign-in pass-through and clipboard settings follow in Phase 4.
+- **Service type** `rdp`, port 3389, TLS probe (§7.13).
+- **Session type** `rdp`, "Desktop", a stream session (§7.10) on `rdp` services, through jump hosts too.
+- **Host action** `rdp.desktop`, "Desktop", with a credential.
+- **The session** relays Guacamole instructions between the browser and core's desktop connection, as text frames. The browser's instructions pass through **1.x's allow-list** (`GuacamoleInstructionFilter`) first:
+  - input, display and plain-text clipboard only: `key`, `mouse`, `touch`, `size`, `sync`, `ack`, `nop`, `clipboard`, `blob`, `end`, `disconnect`;
+  - stream data only for clipboard streams the browser opened, at most 16 of them, of at most 1 MB of text each;
+  - everything else is dropped: file uploads, audio input, argument changes, and anything unknown. It's a security control on a relay that's reachable from the browser, so it has its own negative tests;
+  - an instruction that doesn't parse ends the session.
+- `options`: the browser's size, DPI and time zone.
+- **Its frontend** is the `rdp` session view: Guacamole's own JavaScript client (`guacamole-common-js`, Apache 2.0), bundled with the plugin, drawing into the tab and scaling to it.
+
 ## 8. The native install
 
 `deploy/setup.sh` installs NKeeper on a Linux server, from a checkout of the repository, as root. It's an early version of the Phase 6 installer (v2-plan.md §8). NKeeper installs natively only (D8): systemd, nginx and PostgreSQL, no containers.
@@ -766,6 +799,15 @@ Web interfaces through NKeeper, in a tab: ported from 1.x's `Web/` (YARP).
 - sends `X-Forwarded-For` and `X-Forwarded-Proto`, and HSTS.
 
 **Forwarded headers.** With `ForwardedHeaders:Enabled`, which the installer sets, the server takes the client's address and scheme from `X-Forwarded-For` and `X-Forwarded-Proto`. It accepts them from a proxy on the loopback address only, for one hop. Without this, the server would see nginx's plain-HTTP request from `127.0.0.1`. Then the WebSocket origin check (§7.10) would refuse every session, the sign-in rate limit (§6.4) would count every user as one client, and the audit would record no real addresses.
+
+**guacd, as a native service** (D11). Remote desktops need guacd (§7.20). Distributions don't ship guacd 1.6, so the installer builds it:
+- from the Apache Guacamole source release, checked against its published SHA-256, with the distribution's FreeRDP (version 3 where there is one, else 2) and libvncserver. It's built with RDP and VNC support only: no SSH, telnet or Kubernetes, since NKeeper has its own SSH;
+- on the RHEL family, FreeRDP and libvncserver's development packages come from CRB and EPEL, which the installer enables;
+- into `/usr/lib/nkeeper/guacd/`, root-owned, rebuilt only when its version changes;
+- it runs as `nkeeper-guacd.service`: its own unprivileged user, listening on `127.0.0.1:4822` only, with the same hardening as NKeeper's service, plus `ProtectProc`, and no write access but its own state directory;
+- `--no-guacd` skips it, and remote desktops then say the gateway is unavailable.
+
+If guacd can't be built and run reliably on a distribution family, that family falls back to guacd alone in a Podman container, as D11 allows, and v2-plan.md records the result.
 
 **SELinux** (RHEL family): the installer labels the server's executable as a program systemd may start, and lets nginx connect to the server.
 
