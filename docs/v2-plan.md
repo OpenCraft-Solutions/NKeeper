@@ -580,11 +580,10 @@ Each phase ends in a state that builds, passes tests, **installs as a native Lin
 - Review what hurt in Phases 1–2. Remove abstractions nothing used, fix the ones that leaked, and rename freely while there are only four plugins.
 - Write `docs/plugin-authoring.md` with ssh and wake-on-lan as worked examples. Freeze `sdkVersion` 1. From here, SDK changes are additive or versioned.
 - **Exit:** SDK v1 documented, with contract and architecture tests green.
-- *As built (2026-11-11):* the review found two things to change before the freeze:
-  - **one connect failure.** SSH, HTTP and desktop connections each had an exception, a failure enum and (for two of them) a type for the identity a server presented. Core caught all three, and each new protocol would have added a fourth. They became one `ConnectException` with one `ConnectFailure` and one `PresentedIdentity`, matching the one trust prompt the shell already had;
-  - **unused parts removed:** the credential broker's `DescribeAsync`, with `CredentialDescription` and `CredentialSource`. No plugin asked who a handle refers to. It can return as an addition.
+- *As built (2026-11-11):* the review found one thing to change before the freeze:
+  - **one connect failure.** SSH, HTTP and desktop connections each had an exception, a failure enum and (for two of them) a type for the identity a server presented. Core caught all three, and each new protocol would have added a fourth. They became one `ConnectException` with one `ConnectFailure` and one `PresentedIdentity`, matching the one trust prompt the shell already had.
 
-  Everything else was used by at least one of the four plugins, or by core on their behalf. The SDK froze as 1.0.0, and the built-in plugins declare `>=1.0.0 <2.0.0`.
+  Everything else was used by at least one of the four plugins, or by core on their behalf. The credential broker's `DescribeAsync` has no plugin user yet, but stays: it's the one way to check a handle without connecting, which the broker's own tests rely on. The SDK froze as 1.0.0, and the built-in plugins declare `>=1.0.0 <2.0.0`.
 
 ### Phase 4: Port the remaining features
 Each extension point is introduced with its first user (§4.2), and each plugin ports its 1.x tests. Suggested order, cheapest proofs first:

@@ -307,6 +307,7 @@ Plugins use credentials without seeing them (D13, [plugin-security.md §12](plug
 use.MapPost("/connect", async (HostContext host, ConnectRequest request, ICredentialBroker broker, IConnectivity connectivity) =>
 {
     var handle = await broker.ResolveSavedAsync(host, request.ServiceId, request.CredentialId);
+    var who = await broker.DescribeAsync(host, request.ServiceId, handle);   // username, domain, source; never a secret
     await using var ssh = await connectivity.OpenSshAsync(host, request.ServiceId, handle);   // §7.9
 });
 ```
@@ -327,7 +328,7 @@ Passing on the user's own sign-in arrives with directory sign-in; local accounts
   - the request: a handle is dropped when the request that obtained it ends.
 
   Tying a handle to a plugin session instead arrives with sessions, in step 7. So does ending it when the user's access to the host changes.
-- Every use of a handle checks all its bindings. Every connection opened with it (§7.9) takes the host and the service again. A mismatch, an unknown handle, or an expired one is refused with `CredentialDeniedException` and audited as `credential.denied`.
+- Every use of a handle checks all its bindings. `DescribeAsync`, and every connection opened with it (§7.9), takes the host and the service again. A mismatch, an unknown handle, or an expired one is refused with `CredentialDeniedException` and audited as `credential.denied`.
 - Outside a plugin's own endpoint (a background job, say), the broker refuses to resolve. Credential use outside requests is designed with its first user.
 
 **The credential prompt.**
