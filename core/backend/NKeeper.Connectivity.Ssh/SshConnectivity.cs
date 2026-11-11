@@ -41,9 +41,9 @@ public sealed class SshConnectivity(SshConnectionPlanner planner, TrustStore tru
         {
             plan = await planner.PlanTunnelAsync(host, cancellationToken);
         }
-        catch (SshConnectException ex)
+        catch (ConnectException ex)
         {
-            throw new HttpConnectException(HttpConnectFailure.JumpHostUnavailable, ex.Message);
+            throw new ConnectException(ConnectFailure.JumpHostUnavailable, ex.Message);
         }
 
         if (plan is null)
@@ -64,13 +64,13 @@ public sealed class SshConnectivity(SshConnectionPlanner planner, TrustStore tru
                     cancellationToken);
                 return new Tunnel(forward, jump);
             }
-            catch (SshConnectException ex)
+            catch (ConnectException ex)
             {
                 jump?.Dispose();
-                var message = ex.Reason == SshConnectFailure.HostKeyUnknown
+                var message = ex.Reason == ConnectFailure.HostKeyUnknown
                     ? $"The jump host “{jumpEnd.Name}”'s SSH key isn't trusted yet. Open a terminal to it once to check and trust it."
                     : ex.Message;
-                throw new HttpConnectException(HttpConnectFailure.JumpHostUnavailable, message);
+                throw new ConnectException(ConnectFailure.JumpHostUnavailable, message);
             }
             finally
             {
@@ -147,15 +147,15 @@ public sealed class SshConnectivity(SshConnectionPlanner planner, TrustStore tru
             {
                 case { Verdict: TrustVerdict.Unknown } unknown:
                     trust.Presented(plan.SessionKey, end.Trust, unknown.Algorithm, unknown.Fingerprint);
-                    throw new SshConnectException(
-                        SshConnectFailure.HostKeyUnknown,
+                    throw new ConnectException(
+                        ConnectFailure.HostKeyUnknown,
                         $"The SSH host key of {who} ({where}) isn't trusted yet. Check its fingerprint, SHA256:{unknown.Fingerprint}, and trust it to connect.",
-                        new PresentedHostKey(end.Trust.HostId, end.Trust.ServiceId, unknown.Algorithm, unknown.Fingerprint));
+                        new PresentedIdentity(end.Trust.HostId, end.Trust.ServiceId, PresentedIdentityKind.SshHostKey, unknown.Algorithm, unknown.Fingerprint));
                 case { Verdict: TrustVerdict.Changed } changed:
                     var knownFingerprint = end.KnownKeys.First(k => k.Algorithm == changed.Algorithm).Fingerprint;
                     await trust.MismatchAsync(end.Trust, changed.Algorithm, knownFingerprint, changed.Fingerprint, CancellationToken.None);
-                    throw new SshConnectException(
-                        SshConnectFailure.HostKeyChanged,
+                    throw new ConnectException(
+                        ConnectFailure.HostKeyChanged,
                         $"The SSH host key of {who} ({where}) has changed since it was trusted. This happens when a server is reinstalled, "
                         + "but it can also mean someone is intercepting the connection. If the change is expected, remove the trusted key from the host and connect again.");
             }
@@ -186,8 +186,8 @@ public sealed class SshConnectivity(SshConnectionPlanner planner, TrustStore tru
             }
             catch (Exception ex) when (ex is SshException or ArgumentException or InvalidOperationException or FormatException or NotSupportedException)
             {
-                throw new SshConnectException(
-                    isJump ? SshConnectFailure.JumpHostUnavailable : SshConnectFailure.InvalidPrivateKey,
+                throw new ConnectException(
+                    isJump ? ConnectFailure.JumpHostUnavailable : ConnectFailure.InvalidPrivateKey,
                     $"The SSH private key{(isJump ? $" of the jump host “{end.Name}”'s credential" : string.Empty)} couldn't be read. "
                     + "Check its format, and that the credential's password is the key's passphrase if it has one.");
             }
@@ -225,25 +225,25 @@ public sealed class SshConnectivity(SshConnectionPlanner planner, TrustStore tru
         catch (Exception ex) when (ex is SshException or SocketException or InvalidOperationException)
         {
             forward.Dispose();
-            throw new SshConnectException(
-                SshConnectFailure.JumpHostUnavailable,
+            throw new ConnectException(
+                ConnectFailure.JumpHostUnavailable,
                 $"The jump host “{end.Name}” wouldn't forward to {address}:{port}. It must allow TCP forwarding.");
         }
     }
 
-    private static SshConnectException Translate(Exception ex, string who, string where, string username, bool isJump)
+    private static ConnectException Translate(Exception ex, string who, string where, string username, bool isJump)
     {
         var (reason, message) = ex switch
         {
-            SshAuthenticationException => (SshConnectFailure.AuthenticationFailed, $"{who} refused the sign-in for {username}. Check the username, password or key."),
-            SocketException => (SshConnectFailure.Unreachable, $"Couldn't connect to {who} at {where}."),
-            SshOperationTimeoutException or OperationCanceledException or TimeoutException => (SshConnectFailure.TimedOut, $"Timed out connecting to {who} at {where}."),
-            SshConnectionException => (SshConnectFailure.Unreachable, $"The SSH connection to {who} at {where} failed."),
-            _ => (SshConnectFailure.Unreachable, $"Couldn't open an SSH connection to {who} at {where}."),
+            SshAuthenticationException => (ConnectFailure.AuthenticationFailed, $"{who} refused the sign-in for {username}. Check the username, password or key."),
+            SocketException => (ConnectFailure.Unreachable, $"Couldn't connect to {who} at {where}."),
+            SshOperationTimeoutException or OperationCanceledException or TimeoutException => (ConnectFailure.TimedOut, $"Timed out connecting to {who} at {where}."),
+            SshConnectionException => (ConnectFailure.Unreachable, $"The SSH connection to {who} at {where} failed."),
+            _ => (ConnectFailure.Unreachable, $"Couldn't open an SSH connection to {who} at {where}."),
         };
 
         // A jump host that can't be used makes the host unreachable, whatever the reason.
-        return new SshConnectException(isJump ? SshConnectFailure.JumpHostUnavailable : reason, message);
+        return new ConnectException(isJump ? ConnectFailure.JumpHostUnavailable : reason, message);
     }
 
     internal static void Close(ForwardedPortLocal? forward, SshClient? jump)

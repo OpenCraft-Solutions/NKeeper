@@ -67,9 +67,9 @@ public sealed class WebPlugin : IPlugin
         {
             connection = await connectivity.OpenHttpAsync(host, service.Id, tls: service.Type == "https", http.RequestAborted);
         }
-        catch (HttpConnectException ex)
+        catch (ConnectException ex)
         {
-            return ex.PresentedCertificate is { } certificate
+            return ex.Presented is { } certificate
                 ? Problem(StatusCodes.Status409Conflict, "host_key_unknown", ex.Message, certificate)
                 : Problem(StatusCodes.Status502BadGateway, Code(ex.Reason), ex.Message);
         }
@@ -95,22 +95,22 @@ public sealed class WebPlugin : IPlugin
     private static Guid UserId(HttpContext http) =>
         Guid.TryParse(http.User.FindFirstValue(ClaimTypes.NameIdentifier), out var id) ? id : Guid.Empty;
 
-    private static IResult Problem(int status, string code, string detail, PresentedCertificate? certificate = null)
+    private static IResult Problem(int status, string code, string detail, PresentedIdentity? certificate = null)
     {
         var extensions = new Dictionary<string, object?> { ["code"] = code };
         if (certificate is not null)
         {
-            extensions["presentedCertificate"] = certificate;
+            extensions["presented"] = certificate;
         }
 
         return Results.Problem(statusCode: status, detail: detail, extensions: extensions);
     }
 
-    private static string Code(HttpConnectFailure reason) => reason switch
+    private static string Code(ConnectFailure reason) => reason switch
     {
-        HttpConnectFailure.HostKeyChanged => "host_key_changed",
-        HttpConnectFailure.TimedOut => "timeout",
-        HttpConnectFailure.JumpHostUnavailable => "jump_host_unavailable",
+        ConnectFailure.HostKeyChanged => "host_key_changed",
+        ConnectFailure.TimedOut => "timeout",
+        ConnectFailure.JumpHostUnavailable => "jump_host_unavailable",
         _ => "unreachable",
     };
 

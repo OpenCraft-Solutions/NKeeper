@@ -29,7 +29,7 @@ public sealed class DesktopConnector(
     public const string GuacdAddressSetting = "Guacd:Address";
     public const string DefaultGuacdAddress = "127.0.0.1:4822";
 
-    /// <exception cref="DesktopConnectException">The certificate isn't trusted, guacd isn't running, or the server can't be reached.</exception>
+    /// <exception cref="ConnectException">The certificate isn't trusted, guacd isn't running, or the server can't be reached.</exception>
     /// <exception cref="CredentialDeniedException">The handle isn't valid here.</exception>
     public async Task<IDesktopConnection> OpenAsync(HostContext host, Guid serviceId, CredentialHandle handle, DesktopOptions options, CancellationToken cancellationToken)
     {
@@ -38,14 +38,14 @@ public sealed class DesktopConnector(
         var material = entry.Material;
         if (string.IsNullOrEmpty(material.Username) || material.Password is null)
         {
-            throw new DesktopConnectException(DesktopConnectFailure.NoSecret, "Remote desktops need a username and a password. Edit the credential, or type one.");
+            throw new ConnectException(ConnectFailure.NoSecret, "Remote desktops need a username and a password. Edit the credential, or type one.");
         }
 
         var service = host.Services.First(s => s.Id == serviceId);
         var stored = await db.HostServices.AsNoTracking().Where(s => s.Id == serviceId && s.HostId == host.Id).Select(s => new { s.Address }).FirstOrDefaultAsync(cancellationToken);
         if (service.Address is null || service.Port is not { } port || stored is null)
         {
-            throw new DesktopConnectException(DesktopConnectFailure.Unreachable, $"This service of “{host.Name}” has no address or port. Edit the host to set them.");
+            throw new ConnectException(ConnectFailure.Unreachable, $"This service of “{host.Name}” has no address or port. Edit the host to set them.");
         }
 
         IJumpTunnel? tunnel;
@@ -53,9 +53,9 @@ public sealed class DesktopConnector(
         {
             tunnel = await tunnels.OpenAsync(host, service.Address, port, cancellationToken);
         }
-        catch (HttpConnectException ex)
+        catch (ConnectException ex)
         {
-            throw new DesktopConnectException(DesktopConnectFailure.JumpHostUnavailable, ex.Message);
+            throw new ConnectException(ConnectFailure.JumpHostUnavailable, ex.Message);
         }
 
         GuacdConnection? guacd = null;
@@ -104,19 +104,19 @@ public sealed class DesktopConnector(
     private async Task CheckTrustAsync(HostContext host, Guid serviceId, TrustEndpoint endpoint, RdpServerIdentity identity, CancellationToken cancellationToken)
     {
         var known = await trust.KnownAsync(endpoint, cancellationToken);
-        switch (TrustStore.Check(known, HttpConnector.CertificateAlgorithm, identity.TrustFingerprint))
+        switch (TrustStore.Check(known, PresentedIdentity.CertificateAlgorithm, identity.TrustFingerprint))
         {
             case TrustVerdict.Unknown:
-                trust.Presented(sessions.CurrentSessionKey(http.HttpContext!), endpoint, HttpConnector.CertificateAlgorithm, identity.TrustFingerprint);
-                throw new DesktopConnectException(
-                    DesktopConnectFailure.HostKeyUnknown,
+                trust.Presented(sessions.CurrentSessionKey(http.HttpContext!), endpoint, PresentedIdentity.CertificateAlgorithm, identity.TrustFingerprint);
+                throw new ConnectException(
+                    ConnectFailure.HostKeyUnknown,
                     $"“{host.Name}” presented a Remote Desktop certificate no one has trusted yet.",
-                    new PresentedCertificate(host.Id, serviceId, identity.TrustFingerprint, identity.Subject, identity.NotAfter));
+                    PresentedIdentity.Certificate(host.Id, serviceId, identity.TrustFingerprint, identity.Subject, identity.NotAfter));
             case TrustVerdict.Changed:
-                var trusted = known.First(k => k.Algorithm == HttpConnector.CertificateAlgorithm).Fingerprint;
-                await trust.MismatchAsync(endpoint, HttpConnector.CertificateAlgorithm, trusted, identity.TrustFingerprint, CancellationToken.None);
-                throw new DesktopConnectException(
-                    DesktopConnectFailure.HostKeyChanged,
+                var trusted = known.First(k => k.Algorithm == PresentedIdentity.CertificateAlgorithm).Fingerprint;
+                await trust.MismatchAsync(endpoint, PresentedIdentity.CertificateAlgorithm, trusted, identity.TrustFingerprint, CancellationToken.None);
+                throw new ConnectException(
+                    ConnectFailure.HostKeyChanged,
                     $"“{host.Name}” presented a different Remote Desktop certificate than the one trusted for it. Someone who manages the host must remove the old one first.");
         }
     }

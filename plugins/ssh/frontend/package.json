@@ -1,6 +1,6 @@
 {
   "name": "@nkeeper/plugin-ssh",
-  "description": "The ssh plugin's frontend: the terminal tab (docs/architecture.md §7.11).",
+  "description": "The ssh plugin's frontend: the terminal tab (docs/architecture.md Â§7.11).",
   "private": true,
   "license": "MIT",
   "version": "0.1.0",
@@ -10,7 +10,7 @@
     "typecheck": "tsc -b"
   },
   "dependencies": {
-    "@nkeeper/sdk": "*",
+    "@nkeeper/sdk": "^1.0.0",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "react": "^19.2.8"

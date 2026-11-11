@@ -3,7 +3,7 @@
   "id": "desktop",
   "name": "Desktop",
   "version": "0.1.0",
-  "sdkVersion": ">=0.1.9 <0.2.0",
+  "sdkVersion": ">=1.0.0 <2.0.0",
   "builtIn": true,
   "frontend": {
     "entry": "frontend/index.js"

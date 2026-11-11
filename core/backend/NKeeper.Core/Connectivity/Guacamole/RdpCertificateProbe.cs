@@ -32,7 +32,7 @@ public static class RdpCertificateProbe
 
     /// <param name="address">The server's own address: the certificate is read for it.</param>
     /// <param name="dial">Where to dial instead, a jump host tunnel's end.</param>
-    /// <exception cref="DesktopConnectException">The server can't be reached, isn't an RDP server, or won't agree on security.</exception>
+    /// <exception cref="ConnectException">The server can't be reached, isn't an RDP server, or won't agree on security.</exception>
     public static async Task<RdpServerIdentity> ProbeAsync(string address, int port, DesktopSecurity mode, CancellationToken cancellationToken, HttpConnector.DialTo? dial = null)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -72,15 +72,15 @@ public static class RdpCertificateProbe
         }
         catch (SocketException ex)
         {
-            throw new DesktopConnectException(DesktopConnectFailure.Unreachable, $"Couldn't connect to {address}:{port} ({ex.SocketErrorCode}).");
+            throw new ConnectException(ConnectFailure.Unreachable, $"Couldn't connect to {address}:{port} ({ex.SocketErrorCode}).");
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            throw new DesktopConnectException(DesktopConnectFailure.TimedOut, $"Timed out connecting to {address}:{port}.");
+            throw new ConnectException(ConnectFailure.TimedOut, $"Timed out connecting to {address}:{port}.");
         }
         catch (Exception ex) when (ex is IOException or System.Security.Authentication.AuthenticationException or EndOfStreamException)
         {
-            throw new DesktopConnectException(DesktopConnectFailure.Unreachable, $"{address}:{port} didn't complete a secure Remote Desktop handshake. Is it an RDP server?");
+            throw new ConnectException(ConnectFailure.Unreachable, $"{address}:{port} didn't complete a secure Remote Desktop handshake. Is it an RDP server?");
         }
     }
 
@@ -105,7 +105,7 @@ public static class RdpCertificateProbe
         var length = BinaryPrimitives.ReadUInt16BigEndian(header.AsSpan(2));
         if (header[0] != 3 || length is < 11 or > 512)
         {
-            throw new DesktopConnectException(DesktopConnectFailure.Unreachable, "The server's reply isn't a Remote Desktop response.");
+            throw new ConnectException(ConnectFailure.Unreachable, "The server's reply isn't a Remote Desktop response.");
         }
 
         var packet = new byte[length];
@@ -119,7 +119,7 @@ public static class RdpCertificateProbe
     {
         if (packet[5] != 0xD0)
         {
-            throw new DesktopConnectException(DesktopConnectFailure.Unreachable, "The server's reply isn't a Remote Desktop response.");
+            throw new ConnectException(ConnectFailure.Unreachable, "The server's reply isn't a Remote Desktop response.");
         }
 
         if (packet.Length < 19)
@@ -134,11 +134,11 @@ public static class RdpCertificateProbe
             throw value switch
             {
                 // HYBRID_REQUIRED_BY_SERVER / SSL_WITH_USER_AUTH_REQUIRED_BY_SERVER
-                5 or 6 => new DesktopConnectException(DesktopConnectFailure.SecurityNegotiationFailed,
+                5 or 6 => new ConnectException(ConnectFailure.SecurityNegotiationFailed,
                     "The server requires Network Level Authentication (NLA). Set this service's security to Automatic or NLA."),
                 // SSL_NOT_ALLOWED_BY_SERVER / SSL_CERT_NOT_ON_SERVER
                 2 or 3 => Insecure(),
-                _ => new DesktopConnectException(DesktopConnectFailure.SecurityNegotiationFailed, $"The server refused the security negotiation (code {value})."),
+                _ => new ConnectException(ConnectFailure.SecurityNegotiationFailed, $"The server refused the security negotiation (code {value})."),
             };
         }
 
@@ -150,14 +150,14 @@ public static class RdpCertificateProbe
         var nla = (value & (ProtocolNla | ProtocolNlaExtended)) != 0;
         if (mode == DesktopSecurity.Nla && !nla)
         {
-            throw new DesktopConnectException(DesktopConnectFailure.SecurityNegotiationFailed,
+            throw new ConnectException(ConnectFailure.SecurityNegotiationFailed,
                 "The server doesn't offer Network Level Authentication (NLA). If that's expected (e.g. xrdp), set this service's security to TLS.");
         }
 
         return nla ? ProtocolNla : ProtocolTls;
     }
 
-    private static DesktopConnectException Insecure() => new(
-        DesktopConnectFailure.SecurityNegotiationFailed,
+    private static ConnectException Insecure() => new(
+        ConnectFailure.SecurityNegotiationFailed,
         "The server only offers legacy RDP security, which can't be verified and isn't supported. Enable TLS or NLA on the server.");
 }

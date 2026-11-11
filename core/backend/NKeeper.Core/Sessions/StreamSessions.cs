@@ -48,36 +48,17 @@ public static class SessionErrorCodes
     public const string SecurityNegotiationFailed = "security_negotiation_failed";
     public const string GatewayUnavailable = "gateway_unavailable";
 
-    public static string For(DesktopConnectFailure failure) => failure switch
+    public static string For(ConnectFailure failure) => failure switch
     {
-        DesktopConnectFailure.HostKeyUnknown => HostKeyRejected,
-        DesktopConnectFailure.HostKeyChanged => HostKeyChanged,
-        DesktopConnectFailure.NoSecret => NoSecret,
-        DesktopConnectFailure.SecurityNegotiationFailed => SecurityNegotiationFailed,
-        DesktopConnectFailure.TimedOut => Timeout,
-        DesktopConnectFailure.GatewayUnavailable => GatewayUnavailable,
-        DesktopConnectFailure.JumpHostUnavailable => JumpHostUnavailable,
-        _ => Unreachable,
-    };
-
-    public static string For(HttpConnectFailure failure) => failure switch
-    {
-        HttpConnectFailure.HostKeyUnknown => HostKeyRejected,
-        HttpConnectFailure.HostKeyChanged => HostKeyChanged,
-        HttpConnectFailure.TimedOut => Timeout,
-        HttpConnectFailure.JumpHostUnavailable => JumpHostUnavailable,
-        _ => Unreachable,
-    };
-
-    public static string For(SshConnectFailure failure) => failure switch
-    {
-        SshConnectFailure.HostKeyUnknown => HostKeyRejected,
-        SshConnectFailure.HostKeyChanged => HostKeyChanged,
-        SshConnectFailure.AuthenticationFailed => AuthenticationFailed,
-        SshConnectFailure.NoSecret => NoSecret,
-        SshConnectFailure.InvalidPrivateKey => InvalidPrivateKey,
-        SshConnectFailure.TimedOut => Timeout,
-        SshConnectFailure.JumpHostUnavailable => JumpHostUnavailable,
+        ConnectFailure.HostKeyUnknown => HostKeyRejected,
+        ConnectFailure.HostKeyChanged => HostKeyChanged,
+        ConnectFailure.AuthenticationFailed => AuthenticationFailed,
+        ConnectFailure.NoSecret => NoSecret,
+        ConnectFailure.InvalidPrivateKey => InvalidPrivateKey,
+        ConnectFailure.SecurityNegotiationFailed => SecurityNegotiationFailed,
+        ConnectFailure.TimedOut => Timeout,
+        ConnectFailure.GatewayUnavailable => GatewayUnavailable,
+        ConnectFailure.JumpHostUnavailable => JumpHostUnavailable,
         _ => Unreachable,
     };
 }
@@ -364,27 +345,11 @@ internal sealed class StreamSessionRunner(HttpContext context, SessionSocket soc
                 handler ??= (IStreamSessionHandler)_services.GetRequiredService(sessionType.Handler!);
                 return await handler.OpenAsync(request, cancellationToken);
             }
-            catch (SshConnectException ex) when (ex.Reason == SshConnectFailure.HostKeyUnknown && ex.PresentedKey is { } key && prompts < MaxKeyPrompts)
+            catch (ConnectException ex) when (ex.Reason == ConnectFailure.HostKeyUnknown && ex.Presented is { } presented && prompts < MaxKeyPrompts)
             {
-                await AskToTrustAsync(new TrustQuestion(key.HostId, key.ServiceId, "ssh-host-key", key.Algorithm, key.Fingerprint, null, null), user, cancellationToken);
+                await AskToTrustAsync(presented, user, cancellationToken);
             }
-            catch (SshConnectException ex)
-            {
-                throw new SessionStartException(SessionErrorCodes.For(ex.Reason), ex.Message);
-            }
-            catch (DesktopConnectException ex) when (ex.Reason == DesktopConnectFailure.HostKeyUnknown && ex.PresentedCertificate is { } certificate && prompts < MaxKeyPrompts)
-            {
-                await AskToTrustAsync(Certificate(certificate), user, cancellationToken);
-            }
-            catch (DesktopConnectException ex)
-            {
-                throw new SessionStartException(SessionErrorCodes.For(ex.Reason), ex.Message);
-            }
-            catch (HttpConnectException ex) when (ex.Reason == HttpConnectFailure.HostKeyUnknown && ex.PresentedCertificate is { } certificate && prompts < MaxKeyPrompts)
-            {
-                await AskToTrustAsync(Certificate(certificate), user, cancellationToken);
-            }
-            catch (HttpConnectException ex)
+            catch (ConnectException ex)
             {
                 throw new SessionStartException(SessionErrorCodes.For(ex.Reason), ex.Message);
             }
@@ -396,19 +361,13 @@ internal sealed class StreamSessionRunner(HttpContext context, SessionSocket soc
         }
     }
 
-    /// <summary>An unknown key or certificate, as the browser's <c>hostKey</c> message shows it.</summary>
-    private sealed record TrustQuestion(Guid HostId, Guid ServiceId, string Kind, string Algorithm, string Fingerprint, string? Subject, DateTimeOffset? NotAfterUtc);
-
-    private static TrustQuestion Certificate(PresentedCertificate certificate) =>
-        new(certificate.HostId, certificate.ServiceId, "tls-certificate", Connectivity.HttpConnector.CertificateAlgorithm, certificate.Fingerprint, certificate.Subject, certificate.NotAfterUtc);
-
     /// <summary>Asks the user, in-band (§7.7, §7.10), and trusts the key or certificate through the trust store when they say so.</summary>
-    private async Task AskToTrustAsync(TrustQuestion question, RequestUser user, CancellationToken cancellationToken)
+    private async Task AskToTrustAsync(PresentedIdentity question, RequestUser user, CancellationToken cancellationToken)
     {
         // Only someone who can manage the host may trust for it (§7.7), so no one else is asked.
         if (await _services.GetRequiredService<HostAccess>().GetPermissionAsync(question.HostId, user, cancellationToken) != Access.HostPermission.Manage)
         {
-            var what = question.Kind == "tls-certificate" ? "certificate" : "key";
+            var what = question.Kind == PresentedIdentityKind.TlsCertificate ? "certificate" : "key";
             throw new SessionStartException(
                 SessionErrorCodes.HostKeyUntrusted,
                 $"The server's {what} isn't trusted yet. Someone who can manage the host must connect once and trust it.");
@@ -430,7 +389,7 @@ internal sealed class StreamSessionRunner(HttpContext context, SessionSocket soc
         {
             throw new SessionStartException(
                 SessionErrorCodes.HostKeyRejected,
-                question.Kind == "tls-certificate" ? "The server's certificate wasn't trusted, so the session didn't open." : "The server's key wasn't trusted, so the session didn't open.");
+                question.Kind == PresentedIdentityKind.TlsCertificate ? "The server's certificate wasn't trusted, so the session didn't open." : "The server's key wasn't trusted, so the session didn't open.");
         }
     }
 

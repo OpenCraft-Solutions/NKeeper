@@ -7,6 +7,9 @@ namespace NKeeper.Abstractions;
 /// </summary>
 public static class SdkVersion
 {
-    /// <summary>SDK v0: unstable until it is frozen as v1 at the end of Phase 3 (docs/v2-plan.md §8).</summary>
-    public const string Current = "0.1.9";
+    /// <summary>
+    /// SDK v1, frozen at the end of Phase 3 (docs/architecture.md §4): from here an addition raises the minor
+    /// number, and a breaking change the major one.
+    /// </summary>
+    public const string Current = "1.0.0";
 }

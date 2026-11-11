@@ -3,7 +3,7 @@
   "id": "web",
   "name": "Web",
   "version": "0.1.0",
-  "sdkVersion": ">=0.1.8 <0.2.0",
+  "sdkVersion": ">=1.0.0 <2.0.0",
   "builtIn": true,
   "frontend": {
     "entry": "frontend/index.js"

@@ -20,10 +20,9 @@ namespace NKeeper.Core.Connectivity;
 /// </summary>
 public sealed class HttpConnector(CoreDbContext db, TrustStore trust, IAuthSessionAccessor sessions, IHttpContextAccessor http, IJumpTunnels tunnels)
 {
-    public const string CertificateAlgorithm = "x509";
     public static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(15);
 
-    /// <exception cref="HttpConnectException">The certificate isn't trusted, or the service can't be reached.</exception>
+    /// <exception cref="ConnectException">The certificate isn't trusted, or the service can't be reached.</exception>
     public async Task<IHttpConnection> OpenAsync(HostContext host, Guid serviceId, bool tls, CancellationToken cancellationToken)
     {
         var context = http.HttpContext;
@@ -38,12 +37,12 @@ public sealed class HttpConnector(CoreDbContext db, TrustStore trust, IAuthSessi
         var stored = await db.HostServices.AsNoTracking().Where(s => s.Id == serviceId && s.HostId == host.Id).Select(s => new { s.Address }).FirstOrDefaultAsync(cancellationToken);
         if (service?.Address is null || stored is null)
         {
-            throw new HttpConnectException(HttpConnectFailure.Unreachable, $"“{host.Name}” has no such service any more. Reload the host and try again.");
+            throw new ConnectException(ConnectFailure.Unreachable, $"“{host.Name}” has no such service any more. Reload the host and try again.");
         }
 
         if (service.Port is not { } port)
         {
-            throw new HttpConnectException(HttpConnectFailure.Unreachable, $"This service of “{host.Name}” has no port. Edit the host to set one.");
+            throw new ConnectException(ConnectFailure.Unreachable, $"This service of “{host.Name}” has no port. Edit the host to set one.");
         }
 
         // Through the jump host, when there is one: requests still name the service, and its certificate is still
@@ -76,25 +75,25 @@ public sealed class HttpConnector(CoreDbContext db, TrustStore trust, IAuthSessi
         if (!presented.PubliclyValid)
         {
             var fingerprint = Fingerprint(presented.Certificate);
-            switch (TrustStore.Check(known, CertificateAlgorithm, fingerprint))
+            switch (TrustStore.Check(known, PresentedIdentity.CertificateAlgorithm, fingerprint))
             {
                 case TrustVerdict.Unknown:
-                    trust.Presented(sessions.CurrentSessionKey(context), endpoint, CertificateAlgorithm, fingerprint);
-                    throw new HttpConnectException(
-                        HttpConnectFailure.HostKeyUnknown,
+                    trust.Presented(sessions.CurrentSessionKey(context), endpoint, PresentedIdentity.CertificateAlgorithm, fingerprint);
+                    throw new ConnectException(
+                        ConnectFailure.HostKeyUnknown,
                         $"“{host.Name}” presented a certificate that isn't publicly valid, and no one has trusted it yet.",
-                        new PresentedCertificate(host.Id, serviceId, fingerprint, presented.Certificate.Subject, presented.Certificate.NotAfter.ToUniversalTime()));
+                        PresentedIdentity.Certificate(host.Id, serviceId, fingerprint, presented.Certificate.Subject, presented.Certificate.NotAfter.ToUniversalTime()));
                 case TrustVerdict.Changed:
-                    var trusted = known.First(k => k.Algorithm == CertificateAlgorithm).Fingerprint;
-                    await trust.MismatchAsync(endpoint, CertificateAlgorithm, trusted, fingerprint, CancellationToken.None);
-                    throw new HttpConnectException(
-                        HttpConnectFailure.HostKeyChanged,
+                    var trusted = known.First(k => k.Algorithm == PresentedIdentity.CertificateAlgorithm).Fingerprint;
+                    await trust.MismatchAsync(endpoint, PresentedIdentity.CertificateAlgorithm, trusted, fingerprint, CancellationToken.None);
+                    throw new ConnectException(
+                        ConnectFailure.HostKeyChanged,
                         $"“{host.Name}” presented a different certificate than the one trusted for it. Someone who manages the host must remove the old one first.");
             }
         }
 
         // Every later request: publicly valid, or the certificate trusted for the host, read once here.
-        var trustedFingerprints = known.Where(k => k.Algorithm == CertificateAlgorithm).Select(k => k.Fingerprint).ToHashSet(StringComparer.Ordinal);
+        var trustedFingerprints = known.Where(k => k.Algorithm == PresentedIdentity.CertificateAlgorithm).Select(k => k.Fingerprint).ToHashSet(StringComparer.Ordinal);
         if (!presented.PubliclyValid)
         {
             trustedFingerprints.Add(Fingerprint(presented.Certificate));
@@ -139,16 +138,16 @@ public sealed class HttpConnector(CoreDbContext db, TrustStore trust, IAuthSessi
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             certificate?.Dispose();
-            throw new HttpConnectException(HttpConnectFailure.TimedOut, $"{address}:{port} didn't answer within {ConnectTimeout.TotalSeconds:0} seconds.");
+            throw new ConnectException(ConnectFailure.TimedOut, $"{address}:{port} didn't answer within {ConnectTimeout.TotalSeconds:0} seconds.");
         }
         catch (Exception ex) when (ex is SocketException or IOException or System.Security.Authentication.AuthenticationException)
         {
             certificate?.Dispose();
-            throw new HttpConnectException(HttpConnectFailure.Unreachable, $"Couldn't open a TLS connection to {address}:{port}: {ex.Message}");
+            throw new ConnectException(ConnectFailure.Unreachable, $"Couldn't open a TLS connection to {address}:{port}: {ex.Message}");
         }
 
         return certificate is null
-            ? throw new HttpConnectException(HttpConnectFailure.Unreachable, $"{address}:{port} presented no certificate.")
+            ? throw new ConnectException(ConnectFailure.Unreachable, $"{address}:{port} presented no certificate.")
             : new PresentedTls(certificate, errors == SslPolicyErrors.None);
     }
 

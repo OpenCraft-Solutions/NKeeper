@@ -40,7 +40,7 @@ public sealed class TerminalSessionHandler(IConnectivity connectivity) : IStream
         if (request.Credential is null)
         {
             // Core reports this like any other failure to open; the shell always sends a credential.
-            throw new SshConnectException(SshConnectFailure.NoSecret, "Choose a credential, or type one, to open a terminal.");
+            throw new ConnectException(ConnectFailure.NoSecret, "Choose a credential, or type one, to open a terminal.");
         }
 
         var terminal = new SshTerminal(

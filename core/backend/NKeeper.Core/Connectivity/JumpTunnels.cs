@@ -9,7 +9,7 @@ namespace NKeeper.Core.Connectivity;
 public interface IJumpTunnels
 {
     /// <summary>A loopback port forwarded through the host's jump host to address:port; null when the host has none.</summary>
-    /// <exception cref="HttpConnectException">With <see cref="HttpConnectFailure.JumpHostUnavailable"/>: the jump host can't be used.</exception>
+    /// <exception cref="ConnectException">With <see cref="ConnectFailure.JumpHostUnavailable"/>: the jump host can't be used.</exception>
     Task<IJumpTunnel?> OpenAsync(HostContext host, string address, int port, CancellationToken cancellationToken);
 }
 
@@ -25,6 +25,6 @@ internal sealed class NoJumpTunnels(Persistence.CoreDbContext db) : IJumpTunnels
 {
     public async Task<IJumpTunnel?> OpenAsync(HostContext host, string address, int port, CancellationToken cancellationToken) =>
         await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.AnyAsync(db.Hosts, h => h.Id == host.Id && h.JumpHostId != null, cancellationToken)
-            ? throw new HttpConnectException(HttpConnectFailure.JumpHostUnavailable, $"“{host.Name}” is reached through a jump host, and this server can't open tunnels.")
+            ? throw new ConnectException(ConnectFailure.JumpHostUnavailable, $"“{host.Name}” is reached through a jump host, and this server can't open tunnels.")
             : null;
 }

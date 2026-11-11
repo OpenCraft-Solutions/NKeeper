@@ -43,17 +43,9 @@ export function WebView({ host, serviceId, confirmTrust }: SessionViewProps) {
         setState({ kind: 'open', ...session })
         touch = setInterval(() => void api.post(`${base}/${session.id}/touch`).catch(() => undefined), TOUCH_MS)
       } catch (error) {
-        const certificate = error instanceof ApiError && error.code === 'host_key_unknown' ? (error.problem as { presentedCertificate?: Certificate } | undefined)?.presentedCertificate : undefined
-        if (certificate && !cancelled) {
-          const prompt: TrustPrompt = {
-            kind: 'tls-certificate',
-            hostId: certificate.hostId,
-            serviceId: certificate.serviceId,
-            algorithm: 'x509',
-            fingerprint: certificate.fingerprint,
-            subject: certificate.subject,
-            notAfterUtc: certificate.notAfterUtc,
-          }
+        // Core's presented identity is a trust prompt as it stands (SDK 1.0).
+        const prompt = error instanceof ApiError && error.code === 'host_key_unknown' ? (error.problem as { presented?: TrustPrompt } | undefined)?.presented : undefined
+        if (prompt && !cancelled) {
           if (await confirmTrust(prompt)) {
             return open()
           }
@@ -105,13 +97,4 @@ export function WebView({ host, serviceId, confirmTrust }: SessionViewProps) {
       </div>
     </div>
   )
-}
-
-/** A certificate as the plugin's endpoint reports it. */
-interface Certificate {
-  hostId: string
-  serviceId: string
-  fingerprint: string
-  subject: string
-  notAfterUtc: string
 }

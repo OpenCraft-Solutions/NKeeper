@@ -41,7 +41,7 @@ public sealed class DesktopSessionHandler(IConnectivity connectivity) : IStreamS
     {
         if (request.Credential is not { } credential)
         {
-            throw new DesktopConnectException(DesktopConnectFailure.NoSecret, "Choose a credential, or type one, to open a desktop.");
+            throw new ConnectException(ConnectFailure.NoSecret, "Choose a credential, or type one, to open a desktop.");
         }
 
         var service = request.Host.Services.First(s => s.Id == request.ServiceId);

@@ -40,7 +40,8 @@ public sealed class WebTests(PostgresFixture postgres, SshServerFixture ssh) : I
         Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
         var problem = await refused.Content.ReadFromJsonAsync<JsonElement>(Token);
         Assert.Equal("host_key_unknown", problem.GetProperty("code").GetString());
-        var certificate = problem.GetProperty("presentedCertificate");
+        var certificate = problem.GetProperty("presented");
+        Assert.Equal(("tls-certificate", "x509"), (certificate.GetProperty("kind").GetString(), certificate.GetProperty("algorithm").GetString()));
         Assert.Equal(target.Fingerprint, certificate.GetProperty("fingerprint").GetString());
         Assert.Equal("CN=nkeeper-web-target", certificate.GetProperty("subject").GetString());
 

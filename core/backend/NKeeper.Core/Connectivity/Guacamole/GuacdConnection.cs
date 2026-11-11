@@ -49,8 +49,8 @@ public sealed class GuacdConnection : IAsyncDisposable
         catch (SocketException)
         {
             client.Dispose();
-            throw new DesktopConnectException(
-                DesktopConnectFailure.GatewayUnavailable,
+            throw new ConnectException(
+                ConnectFailure.GatewayUnavailable,
                 "NKeeper's remote desktop gateway (guacd) isn't running. An administrator can check: systemctl status nkeeper-guacd.");
         }
     }
@@ -71,7 +71,7 @@ public sealed class GuacdConnection : IAsyncDisposable
         var args = await ReadInstructionAsync(timeout.Token);
         if (args is not { Opcode: "args" })
         {
-            throw new DesktopConnectException(DesktopConnectFailure.GatewayUnavailable, "The remote desktop gateway (guacd) didn't respond as expected.");
+            throw new ConnectException(ConnectFailure.GatewayUnavailable, "The remote desktop gateway (guacd) didn't respond as expected.");
         }
 
         var handshake = new StringBuilder()
@@ -92,8 +92,8 @@ public sealed class GuacdConnection : IAsyncDisposable
         var reply = await ReadInstructionAsync(timeout.Token);
         if (reply is not { Opcode: "ready" })
         {
-            throw new DesktopConnectException(
-                DesktopConnectFailure.Unreachable,
+            throw new ConnectException(
+                ConnectFailure.Unreachable,
                 reply is { Opcode: "error", Args.Count: > 0 } ? $"The connection failed: {reply.Args[0]}" : "The remote desktop gateway (guacd) refused the connection.");
         }
 

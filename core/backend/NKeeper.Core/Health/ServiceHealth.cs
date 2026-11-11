@@ -251,7 +251,7 @@ public sealed class ServiceHealthChecker(
                 using var presented = await Connectivity.HttpConnector.HandshakeAsync(address, port, cancellationToken);
                 return probe with { CertificateSubject = presented.Certificate.Subject, CertificateExpiresAtUtc = presented.Certificate.NotAfter.ToUniversalTime() };
             }
-            catch (HttpConnectException)
+            catch (ConnectException)
             {
                 return probe;
             }

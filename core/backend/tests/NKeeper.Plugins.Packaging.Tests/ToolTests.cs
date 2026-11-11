@@ -153,7 +153,8 @@ public sealed class ToolTests : IDisposable
         File.WriteAllBytes(Path.Combine(backend, "Sample.Plugin.dll"), TestPackages.PluginAssembly);
         File.WriteAllText(Path.Combine(frontend, "index.js"), "/* sample frontend */");
         var manifest = Path.Combine(source, "nkeeper-plugin.json");
-        File.WriteAllBytes(manifest, TestPackages.Manifest(id: id));
+        // The tool checks against the SDK this build implements.
+        File.WriteAllBytes(manifest, TestPackages.Manifest(id: id, sdk: ">=1.0.0 <2.0.0"));
         var output = Path.Combine(_root, "out");
 
         var (code, text) = RunWithOutput("pack", "--manifest", manifest, "--backend", backend, "--frontend", frontend, "--key", keyPath, "--out", output, "--force");

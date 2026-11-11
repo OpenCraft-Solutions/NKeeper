@@ -183,9 +183,9 @@ public sealed class HelloPlugin : IPlugin
 
                 return Results.Json(new { output = output.ToString() });
             }
-            catch (SshConnectException ex)
+            catch (ConnectException ex)
             {
-                return Results.Json(new { reason = ex.Reason.ToString(), message = ex.Message, presentedKey = ex.PresentedKey }, statusCode: StatusCodes.Status502BadGateway);
+                return Results.Json(new { reason = ex.Reason.ToString(), message = ex.Message, presentedKey = ex.Presented }, statusCode: StatusCodes.Status502BadGateway);
             }
             catch (CredentialDeniedException ex)
             {

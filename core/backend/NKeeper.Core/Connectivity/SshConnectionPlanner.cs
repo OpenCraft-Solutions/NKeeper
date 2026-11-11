@@ -53,7 +53,7 @@ public sealed class SshConnectionPlanner(
     IHttpContextAccessor http)
 {
     /// <exception cref="CredentialDeniedException">The handle isn't valid here.</exception>
-    /// <exception cref="SshConnectException">The credential can't sign in, or the jump host can't be used.</exception>
+    /// <exception cref="ConnectException">The credential can't sign in, or the jump host can't be used.</exception>
     public async Task<SshPlan> PlanAsync(HostContext host, Guid serviceId, CredentialHandle handle, CancellationToken cancellationToken)
     {
         var (pluginId, _, entry) = await broker.UseAsync(host, serviceId, handle, cancellationToken);
@@ -63,23 +63,23 @@ public sealed class SshConnectionPlanner(
         var row = await db.Hosts.AsNoTracking().Where(h => h.Id == host.Id).Select(h => new { h.JumpHostId, h.JumpServiceId, h.JumpCredentialId }).FirstOrDefaultAsync(cancellationToken);
         if (stored is null || row is null || service.Address is null)
         {
-            throw new SshConnectException(SshConnectFailure.Unreachable, $"“{host.Name}” or this service was removed meanwhile. Reload the host and try again.");
+            throw new ConnectException(ConnectFailure.Unreachable, $"“{host.Name}” or this service was removed meanwhile. Reload the host and try again.");
         }
 
         if (service.Port is not { } port)
         {
-            throw new SshConnectException(SshConnectFailure.Unreachable, $"This service of “{host.Name}” has no port. Edit the host to set one.");
+            throw new ConnectException(ConnectFailure.Unreachable, $"This service of “{host.Name}” has no port. Edit the host to set one.");
         }
 
         var material = entry.Material;
         if (string.IsNullOrEmpty(material.Username))
         {
-            throw new SshConnectException(SshConnectFailure.AuthenticationFailed, "This credential has no username. Edit the host to add one, or type one.");
+            throw new ConnectException(ConnectFailure.AuthenticationFailed, "This credential has no username. Edit the host to add one, or type one.");
         }
 
         if (material.Password is null && material.PrivateKey is null)
         {
-            throw new SshConnectException(SshConnectFailure.NoSecret, "This credential has no password or private key.");
+            throw new ConnectException(ConnectFailure.NoSecret, "This credential has no password or private key.");
         }
 
         var endpoint = new TrustEndpoint(host.Id, serviceId, TrustedKeyKind.SshHostKey, stored.Address ?? string.Empty, port);
@@ -110,7 +110,7 @@ public sealed class SshConnectionPlanner(
     /// §7.16): null when the host has no jump host. The plan's <see cref="SshPlan.Target"/> is the jump host, and
     /// disposing the plan clears its secrets.
     /// </summary>
-    /// <exception cref="SshConnectException">The jump host can't be used.</exception>
+    /// <exception cref="ConnectException">The jump host can't be used.</exception>
     public async Task<SshPlan?> PlanTunnelAsync(HostContext host, CancellationToken cancellationToken)
     {
         var context = http.HttpContext!;
@@ -135,30 +135,30 @@ public sealed class SshConnectionPlanner(
     {
         if (await access.GetPermissionAsync(jumpHostId, user, cancellationToken) == Access.HostPermission.None)
         {
-            throw new SshConnectException(
-                SshConnectFailure.JumpHostUnavailable,
+            throw new ConnectException(
+                ConnectFailure.JumpHostUnavailable,
                 "This host is reached through a jump host you can't use. Ask an administrator for access to the jump host too.");
         }
 
         var jump = await db.Hosts.AsNoTracking().Include(h => h.Services).Include(h => h.Credentials).AsSplitQuery()
             .FirstAsync(h => h.Id == jumpHostId, cancellationToken);
         var service = jump.Services.FirstOrDefault(s => s.Id == serviceId)
-            ?? throw new SshConnectException(SshConnectFailure.JumpHostUnavailable, $"The jump host “{jump.Name}”'s service was removed. Edit the host to choose another.");
+            ?? throw new ConnectException(ConnectFailure.JumpHostUnavailable, $"The jump host “{jump.Name}”'s service was removed. Edit the host to choose another.");
         var credential = jump.Credentials.FirstOrDefault(c => c.Id == credentialId)
-            ?? throw new SshConnectException(SshConnectFailure.JumpHostUnavailable, $"The jump host “{jump.Name}”'s credential was removed. Edit the host to choose another.");
+            ?? throw new ConnectException(ConnectFailure.JumpHostUnavailable, $"The jump host “{jump.Name}”'s credential was removed. Edit the host to choose another.");
         if (credential.ServiceIds is { } scope && !scope.Contains(service.Id))
         {
-            throw new SshConnectException(SshConnectFailure.JumpHostUnavailable, $"The jump host “{jump.Name}”'s credential isn't used with its service any more. Edit the jump host or this host.");
+            throw new ConnectException(ConnectFailure.JumpHostUnavailable, $"The jump host “{jump.Name}”'s credential isn't used with its service any more. Edit the jump host or this host.");
         }
 
         if (string.IsNullOrEmpty(credential.Username) || (credential.ProtectedPassword is null && credential.ProtectedPrivateKey is null))
         {
-            throw new SshConnectException(SshConnectFailure.JumpHostUnavailable, $"The jump host “{jump.Name}”'s credential has no username, or no password or private key. Edit the jump host.");
+            throw new ConnectException(ConnectFailure.JumpHostUnavailable, $"The jump host “{jump.Name}”'s credential has no username, or no password or private key. Edit the jump host.");
         }
 
         if ((service.Port ?? serviceTypes.Find(service.Type)?.DefaultPort) is not { } port)
         {
-            throw new SshConnectException(SshConnectFailure.JumpHostUnavailable, $"The jump host “{jump.Name}”'s service has no port. Edit the jump host to set one.");
+            throw new ConnectException(ConnectFailure.JumpHostUnavailable, $"The jump host “{jump.Name}”'s service has no port. Edit the jump host to set one.");
         }
 
         var endpoint = new TrustEndpoint(jump.Id, service.Id, TrustedKeyKind.SshHostKey, service.Address ?? string.Empty, port);

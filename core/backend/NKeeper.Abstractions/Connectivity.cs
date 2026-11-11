@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace NKeeper.Abstractions;
 
 /// <summary>
@@ -71,37 +73,6 @@ public interface IDesktopConnection : IAsyncDisposable
     Task SendFromBrowserAsync(string instructions, CancellationToken cancellationToken);
 }
 
-public enum DesktopConnectFailure
-{
-    /// <summary>The certificate isn't publicly valid, and no one trusted it for the host: <see cref="DesktopConnectException.PresentedCertificate"/> has it.</summary>
-    HostKeyUnknown,
-
-    /// <summary>The certificate differs from the one trusted for the host.</summary>
-    HostKeyChanged,
-
-    /// <summary>The credential has no username or password.</summary>
-    NoSecret,
-
-    /// <summary>The server and the security asked for don't agree: NLA when it only does TLS, say.</summary>
-    SecurityNegotiationFailed,
-
-    Unreachable,
-
-    TimedOut,
-
-    /// <summary>guacd isn't running, or refused the connection.</summary>
-    GatewayUnavailable,
-
-    JumpHostUnavailable,
-}
-
-public sealed class DesktopConnectException(DesktopConnectFailure reason, string message, PresentedCertificate? presentedCertificate = null) : Exception(message)
-{
-    public DesktopConnectFailure Reason { get; } = reason;
-
-    public PresentedCertificate? PresentedCertificate { get; } = presentedCertificate;
-}
-
 /// <summary>An open HTTP connection to a service. It sends no cookies, follows no redirects and doesn't decompress.</summary>
 public interface IHttpConnection : IAsyncDisposable
 {
@@ -110,32 +81,6 @@ public interface IHttpConnection : IAsyncDisposable
 
     /// <summary>The service's address: <c>https://10.0.0.5:8443/</c>.</summary>
     Uri BaseAddress { get; }
-}
-
-public enum HttpConnectFailure
-{
-    /// <summary>The certificate isn't publicly valid, and no one trusted it for the host: <see cref="HttpConnectException.PresentedCertificate"/> has it.</summary>
-    HostKeyUnknown,
-
-    /// <summary>The certificate differs from the one trusted for the host.</summary>
-    HostKeyChanged,
-
-    Unreachable,
-
-    TimedOut,
-
-    /// <summary>The host's jump host can't be used: the user can't use it, its key isn't trusted yet, or it wouldn't forward.</summary>
-    JumpHostUnavailable,
-}
-
-/// <summary>A certificate a server presented, for the user to decide on: its SHA-256 fingerprint (unpadded base64), subject and expiry.</summary>
-public sealed record PresentedCertificate(Guid HostId, Guid ServiceId, string Fingerprint, string Subject, DateTimeOffset NotAfterUtc);
-
-public sealed class HttpConnectException(HttpConnectFailure reason, string message, PresentedCertificate? presentedCertificate = null) : Exception(message)
-{
-    public HttpConnectFailure Reason { get; } = reason;
-
-    public PresentedCertificate? PresentedCertificate { get; } = presentedCertificate;
 }
 
 /// <summary>An open, authenticated SSH connection. Disposing it closes it, and its jump host tunnel.</summary>
@@ -166,43 +111,78 @@ public interface ISshShell : IAsyncDisposable
     void Resize(int columns, int rows);
 }
 
-/// <summary>Why an SSH connection couldn't be opened.</summary>
-public enum SshConnectFailure
+/// <summary>Why core couldn't open a connection (SDK 1.0). Each kind of connection uses the reasons that apply to it.</summary>
+public enum ConnectFailure
 {
-    /// <summary>The server presented a key nobody has trusted yet: see <see cref="SshConnectException.PresentedKey"/>.</summary>
+    /// <summary>The server presented an identity no one trusted yet: <see cref="ConnectException.Presented"/> has it.</summary>
     HostKeyUnknown,
 
-    /// <summary>The server presented a different key from the one trusted for it.</summary>
+    /// <summary>The server presented a different identity from the one trusted for it.</summary>
     HostKeyChanged,
 
+    /// <summary>SSH: the server refused the credential.</summary>
     AuthenticationFailed,
 
-    /// <summary>The credential has neither a password nor a private key.</summary>
+    /// <summary>The credential has no secret the connection can use: no password or private key for SSH, no password for a desktop.</summary>
     NoSecret,
 
-    /// <summary>The private key can't be read, or its passphrase is wrong.</summary>
+    /// <summary>SSH: the private key can't be read, or its passphrase is wrong.</summary>
     InvalidPrivateKey,
+
+    /// <summary>Desktop: the server and the security asked for don't agree, NLA when it only does TLS, say.</summary>
+    SecurityNegotiationFailed,
 
     Unreachable,
 
     TimedOut,
 
-    /// <summary>The user can't use the jump host, its service or credential is gone, or it wouldn't forward.</summary>
+    /// <summary>Desktop: guacd isn't running, or refused the connection.</summary>
+    GatewayUnavailable,
+
+    /// <summary>The host's jump host can't be used: the user can't use it, its key isn't trusted yet, its service or credential is gone, or it wouldn't forward.</summary>
     JumpHostUnavailable,
 }
 
-/// <summary>A key a server presented that isn't trusted yet, and which host and service presented it.</summary>
+/// <summary>What kind of identity a server presented.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<PresentedIdentityKind>))]
+public enum PresentedIdentityKind
+{
+    [JsonStringEnumMemberName("ssh-host-key")]
+    SshHostKey,
+
+    [JsonStringEnumMemberName("tls-certificate")]
+    TlsCertificate,
+}
+
+/// <summary>
+/// An identity a server presented that isn't trusted yet, and which host and service presented it. As JSON it's the
+/// frontend SDK's <c>TrustPrompt</c>, so a plugin endpoint can return it for its view to pass to <c>confirmTrust</c>.
+/// </summary>
 /// <param name="HostId">The host, or its jump host when it's the jump host's key.</param>
 /// <param name="ServiceId">The service it was presented on.</param>
-/// <param name="Algorithm">The key's algorithm, e.g. <c>ssh-ed25519</c>.</param>
+/// <param name="Algorithm">The key's algorithm, e.g. <c>ssh-ed25519</c>; <c>x509</c> for a certificate.</param>
 /// <param name="Fingerprint">SHA-256 as unpadded base64, the way OpenSSH prints it.</param>
-public sealed record PresentedHostKey(Guid HostId, Guid ServiceId, string Algorithm, string Fingerprint);
-
-/// <summary>An SSH connection couldn't be opened. The message names the host and port, never a secret.</summary>
-public sealed class SshConnectException(SshConnectFailure reason, string message, PresentedHostKey? presentedKey = null) : Exception(message)
+public sealed record PresentedIdentity(Guid HostId, Guid ServiceId, PresentedIdentityKind Kind, string Algorithm, string Fingerprint)
 {
-    public SshConnectFailure Reason { get; } = reason;
+    /// <summary>The algorithm of a certificate.</summary>
+    public const string CertificateAlgorithm = "x509";
 
-    /// <summary>With <see cref="SshConnectFailure.HostKeyUnknown"/>: the key, for the user to check and trust through core.</summary>
-    public PresentedHostKey? PresentedKey { get; } = presentedKey;
+    /// <summary>A certificate's subject.</summary>
+    public string? Subject { get; init; }
+
+    /// <summary>When a certificate expires.</summary>
+    public DateTimeOffset? NotAfterUtc { get; init; }
+
+    /// <summary>A certificate a server presented.</summary>
+    public static PresentedIdentity Certificate(Guid hostId, Guid serviceId, string fingerprint, string subject, DateTimeOffset notAfterUtc) =>
+        new(hostId, serviceId, PresentedIdentityKind.TlsCertificate, CertificateAlgorithm, fingerprint) { Subject = subject, NotAfterUtc = notAfterUtc };
+}
+
+/// <summary>Core couldn't open a connection (SDK 1.0). The message names the host and port, never a secret.</summary>
+public sealed class ConnectException(ConnectFailure reason, string message, PresentedIdentity? presented = null) : Exception(message)
+{
+    public ConnectFailure Reason { get; } = reason;
+
+    /// <summary>With <see cref="ConnectFailure.HostKeyUnknown"/>: the identity, for the user to check and trust through core.</summary>
+    public PresentedIdentity? Presented { get; } = presented;
 }
