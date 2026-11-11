@@ -673,7 +673,7 @@ var response = await http.Client.SendAsync(new HttpRequestMessage(HttpMethod.Get
 
 - `IConnectivity.OpenHttpAsync(host, serviceId, tls)` connects to the service's effective address and port, and gives the plugin an `IHttpConnection`: an `HttpMessageInvoker` that sends every request to that endpoint and nowhere else, with its base address.
   - It sends no cookies of its own, follows no redirects, and doesn't decompress, so a proxy can pass responses on as they came.
-  - Through a jump host it's refused for now (`JumpHostUnsupported`). Tunnelling HTTP through SSH follows within Phase 2.
+  - **Through a jump host** (§7.8), core opens an SSH connection to the jump host with its credential, which core reads itself, as for SSH (§7.9), and forwards a loopback port through it to the service. The user must be able to use the jump host. Its key must already be trusted, since a request can't stop to ask: an SSH session to the jump host asks once. Otherwise it fails with `JumpHostUnavailable`, saying so. The service's certificate is still checked against the service, so the jump host can't impersonate it. Opening the tunnel is audited as `credential.use`.
 - **Certificates** (when `tls` is true):
   - one that's publicly valid for the address is accepted, as in 1.x;
   - otherwise only a certificate the user trusted for the host is: the trust store (§7.7) gains a second kind, `TlsCertificate`, recorded per endpoint and port. Its "algorithm" is `x509`, and its fingerprint the SHA-256 of the certificate, in the same unpadded base64;
@@ -716,7 +716,7 @@ contributions.AddSessionOrigin(new SessionOrigin("nkw", typeof(WebOriginHandler)
 
 Web interfaces through NKeeper, in a tab: ported from 1.x's `Web/` (YARP).
 - **Service types** `http` (port 80, TCP probe) and `https` (port 443, TLS probe), as 1.x had them.
-- **Session type** `web`, "Web page", stateful (§7.17), on both. It can't go through a jump host yet (§7.16).
+- **Session type** `web`, "Web page", stateful (§7.17), on both, through a jump host too (§7.16).
 - **Host action** `web.open`, "Web page", with no credential.
 - **Opening** (`POST /api/p/web/hosts/{hostId}/sessions`, Use): core opens the connection (§7.16) and registers the session (§7.17). The plugin answers with a one-time launch URL on the session's origin (§7.18), valid for 2 minutes. An untrusted certificate answers `409` with `host_key_unknown` and the certificate, for the shell's dialog; after the user trusts it, the view opens again.
 - **The session origin** `nkw-<session ID>.<web domain>`, where the ID is 128 random bits:
