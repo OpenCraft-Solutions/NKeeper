@@ -1,0 +1,41 @@
+# guacd for NKeeper's remote desktops (docs/architecture.md §8, §7.20), built from source by deploy/setup.sh.
+# It listens on loopback only: only NKeeper's server talks to it, and it reaches RDP and VNC servers for it.
+
+[Unit]
+Description=guacd for NKeeper (remote desktops)
+After=network-online.target
+Wants=network-online.target
+Before=nkeeper.service
+
+[Service]
+Type=simple
+User=nkeeper-guacd
+Group=nkeeper-guacd
+ExecStart=/usr/lib/nkeeper/guacd/sbin/guacd -f -b 127.0.0.1 -l 4822 -L info
+Restart=on-failure
+RestartSec=5
+
+# Hardening, as for NKeeper's own service: guacd writes nothing outside its private /tmp.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectProc=invisible
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

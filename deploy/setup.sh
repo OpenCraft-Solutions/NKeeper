@@ -20,6 +20,12 @@ readonly STATE=/var/lib/nkeeper
 readonly CACHE=/var/cache/nkeeper-build
 readonly SERVER_PORT=5080
 
+# guacd, for remote desktops (docs/architecture.md §7.20, D11): built from the Apache Guacamole source release, whose
+# SHA-256 is pinned here (checked against the release's signature by Apache's code-signing key when it was pinned).
+readonly GUACD_VERSION=1.6.0
+readonly GUACD_SHA256=8bc45675da96d7b6f39728160181e3d4ff3c08f460f6d26de5805b642bf13f2b
+readonly GUACD_PREFIX=/usr/lib/nkeeper/guacd
+
 usage() {
     cat <<'EOF'
 NKeeper's native installer (docs/architecture.md §8).
@@ -33,6 +39,7 @@ NKeeper's native installer (docs/architecture.md §8).
         --admin-user <name>     the first administrator, on a fresh install (default: admin)
         --admin-email <email>   their email address (default: admin@<host name>)
         --admin-password <pw>   their password (default: generated, and printed once)
+        --no-guacd              don't build or run guacd: remote desktops then say the gateway is unavailable
         --web-domain <domain>   where web pages open: nkw-<id>.<domain> (docs/architecture.md §7.18). Needs a
                                 wildcard DNS record, *.<domain>, pointing at this server. Kept on upgrade.
         --yes                   don't ask anything
@@ -75,7 +82,7 @@ selinux() { command -v selinuxenabled >/dev/null 2>&1 && selinuxenabled; }
 
 command=${1:-}
 [ $# -gt 0 ] && shift
-names=() cert="" key="" admin_user=admin admin_email="" admin_password="" assume_yes=false purge=false web_domain=""
+names=() cert="" key="" admin_user=admin admin_email="" admin_password="" assume_yes=false purge=false web_domain="" no_guacd=false
 while [ $# -gt 0 ]; do
     case $1 in
         --server-name) names+=("${2:?--server-name needs a value}"); shift 2 ;;
@@ -86,6 +93,7 @@ while [ $# -gt 0 ]; do
         --admin-email) admin_email=${2:?--admin-email needs a value}; shift 2 ;;
         --admin-password) admin_password=${2:?--admin-password needs a value}; shift 2 ;;
         --yes) assume_yes=true; shift ;;
+        --no-guacd) no_guacd=true; shift ;;
         --purge) purge=true; shift ;;
         -h|--help) usage; exit 0 ;;
         *) die "Unknown option: $1 (see --help)" ;;
@@ -350,6 +358,89 @@ configure() {
     ok "In $ENV_FILE."
 }
 
+# --- guacd -----------------------------------------------------------------------------------------
+
+# The packages guacd builds against: FreeRDP (3 where there is one, else 2) and libvncserver, with their tools.
+guacd_build_packages() {
+    if [ "$pm" = apt ]; then
+        local freerdp=freerdp3-dev
+        apt-cache show freerdp3-dev >/dev/null 2>&1 || freerdp=freerdp2-dev
+        apt-get install -y -qq build-essential pkg-config libtool-bin libcairo2-dev libjpeg-dev libpng-dev uuid-dev \
+            libssl-dev libwebp-dev libvncserver-dev "$freerdp" >/dev/null
+    else
+        # FreeRDP's and libvncserver's development packages are in CRB and EPEL on the RHEL family.
+        if [ -f /etc/os-release ] && ! grep -qi '^ID="\?fedora' /etc/os-release; then
+            dnf install -y -q dnf-plugins-core >/dev/null
+            dnf config-manager --set-enabled crb >/dev/null 2>&1 || dnf config-manager --set-enabled powertools >/dev/null 2>&1 || true
+            rpm -q epel-release >/dev/null 2>&1 || dnf install -y -q epel-release >/dev/null
+        fi
+        dnf install -y -q gcc make pkgconf libtool cairo-devel libjpeg-turbo-devel libpng-devel libuuid-devel \
+            openssl-devel libwebp-devel libvncserver-devel freerdp-devel >/dev/null
+    fi
+}
+
+build_guacd() {
+    step "Building guacd $GUACD_VERSION (a few minutes)"
+    guacd_build_packages
+    local src=$CACHE/guacd tarball="guacamole-server-$GUACD_VERSION.tar.gz" url
+    rm -rf "$src" && mkdir -p "$src"
+    for url in "https://downloads.apache.org/guacamole/$GUACD_VERSION/source/$tarball" \
+               "https://archive.apache.org/dist/guacamole/$GUACD_VERSION/source/$tarball"; do
+        curl -fsSL "$url" -o "$src/$tarball" && break
+    done
+    [ -s "$src/$tarball" ] || die "Couldn't download guacamole-server $GUACD_VERSION."
+    echo "$GUACD_SHA256  $src/$tarball" | sha256sum -c --quiet - || die "The guacamole-server download failed its checksum."
+    tar -xzf "$src/$tarball" -C "$src" --strip-components=1
+
+    # RDP and VNC only: NKeeper has its own SSH, and guacd needs no terminal, Kubernetes or recording tools.
+    (cd "$src" && ./configure --prefix="$GUACD_PREFIX" --with-freerdp-plugin-dir="$GUACD_PREFIX/lib/freerdp" \
+        --without-ssh --without-telnet --without-websockets --without-pango --without-terminal \
+        --disable-guacenc --disable-guaclog --disable-kubernetes >"$src/configure.log" 2>&1) ||
+        { tail -n 30 "$src/configure.log" >&2; die "guacamole-server's configure failed (above)."; }
+    grep -q 'RDP .*\.\.\. yes' "$src/configure.log" || grep -q 'RDP *\.\.\. yes' "$src/configure.log" ||
+        { grep -A20 'Protocol support' "$src/configure.log" >&2; die "guacamole-server would build without RDP support (FreeRDP not found)."; }
+    (cd "$src" && make -j"$(nproc)" >"$src/build.log" 2>&1 && rm -rf "$GUACD_PREFIX" && make install >>"$src/build.log" 2>&1) ||
+        { tail -n 30 "$src/build.log" >&2; die "Building guacd failed (above)."; }
+    chown -R root:root "$GUACD_PREFIX"
+    chmod -R u=rwX,go=rX "$GUACD_PREFIX"
+    echo "$GUACD_VERSION" >"$GUACD_PREFIX/.version"
+    ok "Built guacd $GUACD_VERSION into $GUACD_PREFIX."
+}
+
+install_guacd() {
+    if $no_guacd; then
+        warn "Skipping guacd (--no-guacd): remote desktops won't work."
+        return
+    fi
+    if [ "$(cat "$GUACD_PREFIX/.version" 2>/dev/null)" != "$GUACD_VERSION" ] || [ ! -x "$GUACD_PREFIX/sbin/guacd" ]; then
+        build_guacd
+    else
+        ok "guacd $GUACD_VERSION is already built."
+    fi
+
+    id nkeeper-guacd >/dev/null 2>&1 || useradd --system --home-dir /nonexistent --no-create-home --shell /usr/sbin/nologin nkeeper-guacd
+    if selinux; then
+        semanage fcontext -a -t bin_t "$GUACD_PREFIX/sbin/guacd" 2>/dev/null ||
+            semanage fcontext -m -t bin_t "$GUACD_PREFIX/sbin/guacd"
+        restorecon -R "$GUACD_PREFIX" >/dev/null
+    fi
+    install -o root -g root -m 0644 "$REPO/deploy/systemd/nkeeper-guacd.service" /etc/systemd/system/nkeeper-guacd.service
+    systemctl daemon-reload
+    systemctl enable nkeeper-guacd >/dev/null 2>&1
+    systemctl restart nkeeper-guacd
+    local i
+    for ((i = 0; i < 30; i++)); do
+        ss -ltn 2>/dev/null | grep -q '127.0.0.1:4822 ' && break
+        sleep 1
+    done
+    if ss -ltn 2>/dev/null | grep -q '127.0.0.1:4822 '; then
+        ok "guacd listens on 127.0.0.1:4822."
+    else
+        journalctl -u nkeeper-guacd -n 20 --no-pager >&2 || true
+        warn "guacd didn't start (log above): remote desktops won't work until it does."
+    fi
+}
+
 # --- nginx ---------------------------------------------------------------------------------------
 
 default_names() {
@@ -489,6 +580,7 @@ do_install() {
     fetch_toolchain
     build
     install_files
+    install_guacd
     configure
     setup_nginx
     open_firewall
@@ -499,8 +591,8 @@ do_install() {
 do_uninstall() {
     [ "$(id -u)" -eq 0 ] || die "Run it with sudo."
     step "Removing NKeeper"
-    systemctl disable --now nkeeper >/dev/null 2>&1 || true
-    rm -f /etc/systemd/system/nkeeper.service
+    systemctl disable --now nkeeper nkeeper-guacd >/dev/null 2>&1 || true
+    rm -f /etc/systemd/system/nkeeper.service /etc/systemd/system/nkeeper-guacd.service
     systemctl daemon-reload
     rm -rf "$PREFIX" "$CACHE" /etc/nginx/conf.d/nkeeper.conf
     systemctl reload nginx >/dev/null 2>&1 || true
@@ -508,6 +600,7 @@ do_uninstall() {
         postgres_psql -qc 'DROP DATABASE IF EXISTS nkeeper' -c 'DROP ROLE IF EXISTS nkeeper' >/dev/null 2>&1 || true
         rm -rf "$CONFIG" "$STATE"
         userdel nkeeper >/dev/null 2>&1 || true
+        userdel nkeeper-guacd >/dev/null 2>&1 || true
         ok "Removed, with the database and $CONFIG."
     else
         ok "Removed. The nkeeper database and $CONFIG are kept; --purge removes them."
