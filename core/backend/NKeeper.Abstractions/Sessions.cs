@@ -81,7 +81,7 @@ public interface IPluginSessions
     /// <summary>Registers a session of one of the plugin's stateful session types, for the signed-in user, on the request's host.</summary>
     /// <exception cref="SessionLimitException">The user has as many sessions open as they may.</exception>
     /// <exception cref="InvalidOperationException">It's called outside the plugin's own host endpoint, or for another host or type.</exception>
-    IPluginSession Open(HostContext host, Guid serviceId, string sessionType);
+    Task<IPluginSession> OpenAsync(HostContext host, Guid serviceId, string sessionType, CancellationToken cancellationToken = default);
 }
 
 /// <summary>A registered session. Dispose it when it ends; core audits the reason.</summary>

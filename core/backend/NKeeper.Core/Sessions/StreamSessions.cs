@@ -476,6 +476,7 @@ public static class StreamSessionServices
             .AddSingleton(new SessionTypeCatalog(types))
             .AddSingleton<SessionRegistry>()
             .AddScoped<SessionAccessCheck>()
+            .AddScoped<IPluginSessions, PluginSessions>()
             .AddHostedService<SessionSweeper>();
     }
 }
