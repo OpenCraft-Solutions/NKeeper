@@ -1,13 +1,14 @@
 {
   "name": "@nkeeper/e2e",
-  "description": "Real-browser tests of an installed NKeeper (docs/architecture.md §8): terminals and web pages.",
+  "description": "Real-browser tests of an installed NKeeper (docs/architecture.md §8): terminals, web pages and remote desktops.",
   "private": true,
   "license": "MIT",
   "version": "0.0.0",
   "type": "module",
   "scripts": {
     "terminal": "node terminal.mjs",
-    "web": "node web.mjs"
+    "web": "node web.mjs",
+    "desktop": "node desktop.mjs"
   },
   "devDependencies": {
     "playwright": "^1.65.0"
