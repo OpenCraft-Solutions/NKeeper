@@ -605,6 +605,11 @@ The single-page app in `core/frontend/app`. It knows no service type, session ty
   - right-clicking a host's row opens its Connect menu there. Double-clicking it opens the menu's first entry: the first action on the first service it applies to, with the first saved credential used with that service, or the typed-credential dialog when there's none;
   - a host's details say why there's nothing to connect with: it has no services, or no loaded plugin opens a session on them.
 - **Tabs**, on the right. The first tab is always the selected host's details. Every session opens in a tab of its own. A tab stays mounted while another is showing, so a terminal keeps running. Closing a tab ends its session.
+- **Health**, for everyone, ported from 1.x's health report: the latest checks (§7.13) of the services on the hosts the user can see, from `GET /api/health` and `GET /api/hosts`:
+  - a summary: how many services are up and down, how many certificates expire within 30 days, how many hosts with services have no results yet, and when the latest check ran;
+  - **Down**: each service that's down, with its host, address and port, why, and when it was checked, oldest first;
+  - **Certificates**: each certificate a TLS probe read, with its host, service, subject and expiry, soonest first. One that has expired or expires within 30 days is marked;
+  - selecting a host's name shows it in the workspace. Refresh reads the results again; it doesn't run the checks.
 - **Plugins**, for administrators: the plugin list and frontend states from Phase 0.
 - **Users**, for administrators (§6.1, §7.2):
   - the list, with each user's role and whether they're disabled, locked out, or must change their password;
@@ -612,7 +617,7 @@ The single-page app in `core/frontend/app`. It knows no service type, session ty
   - editing a user's email, role and whether they're disabled; resetting their password; and deleting them. An administrator can't disable, demote or delete themselves, as the server enforces;
   - a user's grants: rows of a host, or a tag name with an optional value, each at Use or Manage. Saving replaces them all. Grants don't apply to administrators, who see every host, so the page says so for them.
 
-  Like the workspace, the page stays mounted behind it, so sessions carry on.
+  The workspace stays mounted behind these pages (Health, Plugins and Users), so sessions carry on.
 
 **The host editor** creates and edits hosts, for users who can manage them:
 - name, hostname, IP address, description and tags;
