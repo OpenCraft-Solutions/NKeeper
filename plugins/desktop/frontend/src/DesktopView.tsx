@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { SessionError, type SessionViewProps, type StreamConnection } from '@nkeeper/sdk'
+import { describeDesktopStatus } from './desktopStatus'
 import Guacamole from './vendor/guacamole-common-js/guacamole.js'
 
 /** The view's own styles, adopted when the plugin activates. */
@@ -102,7 +103,7 @@ export function DesktopView({ connect, visible }: SessionViewProps) {
         client.onerror = (status) => {
           // Status 0 is a clean end (the user signed out, say).
           if (status.code !== 0 && !disposed) {
-            setState({ kind: 'ended', message: status.message || 'The desktop session failed.' })
+            setState({ kind: 'ended', message: describeDesktopStatus(status, 'rdp') })
           }
         }
 
@@ -137,7 +138,8 @@ export function DesktopView({ connect, visible }: SessionViewProps) {
         viewport.focus()
         void opened.closed.then((reason) => {
           if (!disposed) {
-            setState({ kind: 'ended', message: END_MESSAGES[reason] ?? END_MESSAGES.closed! })
+            // guacd's own error, when it sent one, says more than the close that follows it.
+            setState((current) => (current.kind === 'ended' ? current : { kind: 'ended', message: END_MESSAGES[reason] ?? END_MESSAGES.closed! }))
           }
         })
       },
