@@ -816,7 +816,9 @@ RDP through guacd, as a proof that the SDK carries a third kind of session (v2-p
 **Tested in CI, through a real browser.** The Install workflow runs the installer on a fresh Ubuntu runner. Then a headless Chromium (Playwright, `testing/e2e`):
 - signs in, and creates a host for the runner's own SSH server;
 - opens a terminal with a typed credential and with a saved one, and trusts the server's key;
-- runs commands, checks the terminal resizes with the window, and deletes the host.
+- runs commands, checks the terminal resizes with the window, and deletes the host;
+- opens a web page on the server itself, trusts its certificate, and sees it framed on its session origin (installed with `--web-domain web.localhost`, since Chromium resolves `*.localhost` to loopback);
+- opens a remote desktop to xrdp on the runner, through the guacd the installer built, trusts its certificate, and sees the desktop draw.
 
 It then upgrades in place and checks again.
 
