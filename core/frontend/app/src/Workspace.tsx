@@ -89,6 +89,7 @@ export function Workspace({ catalog, canCreate }: { catalog: Catalog; canCreate:
   const selected = hosts?.find((h) => h.id === selectedId) ?? null
   // A jump host's key prompt names the jump host, which the user may not be able to see.
   const hostName = useCallback((id: string) => hosts?.find((h) => h.id === id)?.name ?? null, [hosts])
+  const canManage = useCallback((id: string) => hosts?.find((h) => h.id === id)?.canManage ?? false, [hosts])
   const replaceHost = (host: Host) => setHosts((current) => (current ?? []).map((h) => (h.id === host.id ? host : h)))
 
   function select(host: Host) {
@@ -274,7 +275,7 @@ export function Workspace({ catalog, canCreate }: { catalog: Catalog; canCreate:
         </div>
         {sessions.map((tab) => (
           <div key={tab.id} className="nk-panel nk-session" role="tabpanel" id={`panel-${tab.id}`} aria-labelledby={tab.id} hidden={activeTab !== tab.id}>
-            <SessionPanel tab={tab} catalog={catalog} visible={activeTab === tab.id} hostName={hostName} />
+            <SessionPanel tab={tab} catalog={catalog} visible={activeTab === tab.id} hostName={hostName} canManage={canManage} />
           </div>
         ))}
       </section>
@@ -288,11 +289,13 @@ function SessionPanel({
   catalog,
   visible,
   hostName,
+  canManage,
 }: {
   tab: SessionTab
   catalog: Catalog
   visible: boolean
   hostName: (id: string) => string | null
+  canManage: (id: string) => boolean
 }) {
   const dialogs = useDialogs()
   const View = catalog.views.get(tab.sessionType)
@@ -332,8 +335,12 @@ function SessionPanel({
   )
 
   // For views that open sessions through their plugin's endpoints: core's dialog, then core's trust endpoint.
+  // Only someone who can manage the host may trust for it (docs/architecture.md §7.7), so no one else is asked.
   const confirmTrust = useCallback(
     async (prompt: TrustPrompt) => {
+      if (!canManage(prompt.hostId)) {
+        return false
+      }
       const name = prompt.hostId === tab.host.id ? tab.host.name : (hostName(prompt.hostId) ?? `the jump host of ${tab.host.name}`)
       if (!(await dialogs.confirmHostKey(prompt, name))) {
         return false
@@ -345,7 +352,7 @@ function SessionPanel({
         return false
       }
     },
-    [dialogs, tab, hostName],
+    [dialogs, tab, hostName, canManage],
   )
 
   if (!View) {

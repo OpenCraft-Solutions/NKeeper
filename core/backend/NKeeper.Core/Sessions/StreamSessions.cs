@@ -35,6 +35,7 @@ public static class SessionErrorCodes
     public const string JumpHostUnsupported = "jump_host_unsupported";
     public const string CredentialDenied = "credential_denied";
     public const string HostKeyRejected = "host_key_rejected";
+    public const string HostKeyUntrusted = "host_key_untrusted";
     public const string HostKeyChanged = "host_key_changed";
     public const string AuthenticationFailed = "authentication_failed";
     public const string NoSecret = "no_secret";
@@ -404,6 +405,15 @@ internal sealed class StreamSessionRunner(HttpContext context, SessionSocket soc
     /// <summary>Asks the user, in-band (§7.7, §7.10), and trusts the key or certificate through the trust store when they say so.</summary>
     private async Task AskToTrustAsync(TrustQuestion question, RequestUser user, CancellationToken cancellationToken)
     {
+        // Only someone who can manage the host may trust for it (§7.7), so no one else is asked.
+        if (await _services.GetRequiredService<HostAccess>().GetPermissionAsync(question.HostId, user, cancellationToken) != Access.HostPermission.Manage)
+        {
+            var what = question.Kind == "tls-certificate" ? "certificate" : "key";
+            throw new SessionStartException(
+                SessionErrorCodes.HostKeyUntrusted,
+                $"The server's {what} isn't trusted yet. Someone who can manage the host must connect once and trust it.");
+        }
+
         var message = new
         {
             type = "hostKey",

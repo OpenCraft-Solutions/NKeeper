@@ -28,6 +28,7 @@ public static class InventoryEndpoints
     public const string HostManageDeniedCode = "host_manage_denied";
     public const string TrustNotPresentedCode = "trust_not_presented";
     public const string TrustConflictCode = "trust_conflict";
+    public const string TrustNeedsManageCode = "trust_needs_manage";
 
     /// <summary>Hosts, tags, services and access (docs/architecture.md §7), with the service types the plugins contributed.</summary>
     public static IServiceCollection AddNKeeperInventory(this IServiceCollection services, IEnumerable<ServiceType> serviceTypes)
@@ -143,9 +144,14 @@ public static class InventoryEndpoints
                 HttpContext context) =>
             {
                 var user = RequestUser.From(context.User);
-                if (await access.GetPermissionAsync(hostId, user, context.RequestAborted) == Access.HostPermission.None)
+                switch (await access.GetPermissionAsync(hostId, user, context.RequestAborted))
                 {
-                    return Results.NotFound();
+                    case Access.HostPermission.None:
+                        return Results.NotFound();
+                    case Access.HostPermission.Use:
+                        // A trusted key vouches for the server to everyone who uses the host.
+                        return Coded(
+                            StatusCodes.Status403Forbidden, TrustNeedsManageCode, "Needs Manage", "Only someone who can manage this host can trust its server's key or certificate.");
                 }
 
                 if (sessions.CurrentSessionKey(context) is not { } sessionKey)

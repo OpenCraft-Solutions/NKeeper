@@ -57,7 +57,7 @@ export function WebView({ host, serviceId, confirmTrust }: SessionViewProps) {
           if (await confirmTrust(prompt)) {
             return open()
           }
-          setState({ kind: 'failed', message: 'The server’s certificate wasn’t trusted, so the page didn’t open.' })
+          setState({ kind: 'failed', message: 'The server’s certificate isn’t trusted, so the page didn’t open. Someone who can manage the host can trust it.' })
           return
         }
         if (!cancelled) {
