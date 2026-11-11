@@ -93,17 +93,18 @@ try {
   step('run a command')
   await waitForTerminal(/[$#] *$/m, 30000)
   await page.locator('[role="tabpanel"]:not([hidden]) .nk-ssh-terminal').click()
-  await page.keyboard.type('echo nk-e2e-$((6*7)); stty size\n')
+  // Each size reading is marked, so a later one can't be mistaken for an earlier one still on screen.
+  await page.keyboard.type('echo nk-e2e-$((6*7)) size-before-$(stty size | tr " " x)\n')
   await waitForTerminal(/nk-e2e-42/)
-  const [, rows, columns] = await waitForTerminal(/^(\d+) (\d+)\s*$/m)
+  const [, rows, columns] = await waitForTerminal(/size-before-(\d+)x(\d+)/)
   console.log(`    the server's terminal is ${rows} x ${columns}`)
   await page.screenshot({ path: `${screenshots}/terminal.png` })
 
   step('resize the window, and the terminal with it')
   await page.setViewportSize({ width: 1600, height: 1000 })
   await page.waitForTimeout(500)
-  await page.keyboard.type('clear; stty size\n')
-  const [, newRows, newColumns] = await waitForTerminal(/^(\d+) (\d+)\s*$/m)
+  await page.keyboard.type('echo size-after-$(stty size | tr " " x)\n')
+  const [, newRows, newColumns] = await waitForTerminal(/size-after-(\d+)x(\d+)/)
   console.log(`    now ${newRows} x ${newColumns}`)
   if (Number(newRows) <= Number(rows) || Number(newColumns) <= Number(columns)) {
     throw new Error('The server’s terminal did not grow with the window.')
@@ -135,8 +136,10 @@ try {
   if (created) {
     step(`delete ${hostName}`)
     try {
-      for (const close of await page.getByRole('button', { name: new RegExp(`^Close ${hostName}`) }).all()) {
-        await close.click()
+      // Closing a tab renumbers the rest, so close the first until none are left.
+      const closeButtons = page.getByRole('button', { name: new RegExp(`^Close ${hostName}`) })
+      while ((await closeButtons.count()) > 0) {
+        await closeButtons.first().click()
       }
       await page.getByRole('tab').first().click()
       await page.getByRole('button', { name: new RegExp(`^${hostName},`) }).click()

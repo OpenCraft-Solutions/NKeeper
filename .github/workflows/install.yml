@@ -1,7 +1,8 @@
 name: Install
 
 # The native installer end to end (docs/architecture.md §8), on a fresh Ubuntu runner: install, sign in
-# through nginx, see the built-in plugins load, then upgrade in place and check again.
+# through nginx, see the built-in plugins load, open terminals in a real browser, then upgrade in place
+# and check again.
 on:
   pull_request:
   push:
@@ -28,7 +29,29 @@ jobs:
           persist-credentials: false
 
       - name: Check the installer
-        run: shellcheck deploy/setup.sh
+        run: shellcheck deploy/setup.sh deploy/check-install.sh
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install the browser test (Playwright and Chromium)
+        run: |
+          npm ci
+          npx --workspace @nkeeper/e2e playwright install --with-deps chromium
+
+      # The browser test opens terminals to the runner itself, as a throwaway user signing in with a password.
+      - name: An SSH account to connect to
+        run: |
+          password=$(openssl rand -base64 24)
+          echo "::add-mask::$password"
+          echo "SSH_PASSWORD=$password" >> "$GITHUB_ENV"
+          sudo apt-get install -y -qq openssh-server >/dev/null
+          sudo useradd --create-home --shell /bin/bash nke2e
+          echo "nke2e:$password" | sudo chpasswd
+          echo 'PasswordAuthentication yes' | sudo tee /etc/ssh/sshd_config.d/10-nkeeper-e2e.conf >/dev/null
+          sudo systemctl restart ssh
 
       - name: Install
         run: sudo deploy/setup.sh install --yes --server-name localhost --admin-password "$ADMIN_PASSWORD"
@@ -36,11 +59,31 @@ jobs:
       - name: Sign in through nginx and see the built-in plugins load
         run: deploy/check-install.sh "$ADMIN_PASSWORD"
 
+      - name: Open terminals in a real browser
+        env:
+          SSH_USER: nke2e
+          SCREENSHOTS: ${{ runner.temp }}
+        run: npm run terminal --workspace @nkeeper/e2e
+
       - name: Upgrade in place
         run: sudo deploy/setup.sh install --yes --server-name localhost
 
       - name: Check again after the upgrade
         run: deploy/check-install.sh "$ADMIN_PASSWORD"
+
+      - name: Open terminals again after the upgrade
+        env:
+          SSH_USER: nke2e
+          SCREENSHOTS: ${{ runner.temp }}
+        run: npm run terminal --workspace @nkeeper/e2e
+
+      - name: Keep the screenshots
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: browser-screenshots
+          path: ${{ runner.temp }}/*.png
+          if-no-files-found: ignore
 
       - name: The service's log
         if: failure()
