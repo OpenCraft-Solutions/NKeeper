@@ -360,7 +360,7 @@ Trust on first use, ported from 1.x: the first time a server presents an identit
 - no trusted key: the connection is refused with `HostKeyUnknown`, carrying the presented algorithm and fingerprint, and the host and service that presented it (a jump host's, when it's the jump host that's unknown). Core remembers that it presented this key to this auth session.
 
 **The user decides, through core.**
-- A plugin can't trust a key. The shell posts the user's decision to core: `POST /api/hosts/{hostId}/services/{serviceId}/trusted-keys`, with the algorithm and fingerprint. It needs Use on the host.
+- A plugin can't trust a key. The shell posts the user's decision to core: `POST /api/hosts/{hostId}/services/{serviceId}/trusted-keys`, with the algorithm and fingerprint. It needs Manage on the host, since a trusted key vouches for the server to everyone who uses it: no access answers `404`, Use alone `403` with `trust_needs_manage`.
 - Core trusts the key only if it presented exactly that key, for that host and service, to the same auth session, in the last 10 minutes. Anything else is refused with `400` and `trust_not_presented`, so a user (or a script with their cookie) can't trust a key no server showed them.
 - Each presentation can be trusted once. An auth session keeps at most 20 presentations; recording another drops the oldest. They're dropped at sign-out.
 - A different key trusted meanwhile for the same endpoint, port and algorithm answers `409` with `trust_conflict`.
@@ -476,7 +476,7 @@ After `connected`, the plugin owns the data: binary frames, and text frames whos
    - a host reached through a jump host, with `jump_host_unsupported`, when the type can't use one.
 4. **Resolves the credential**, if one is named: a saved one by `credentialId`, or a typed one by `promptReference` (§7.6). The handle is bound to the session type's plugin and to this request, which lasts as long as the session. A refusal is `credential_denied`, audited as `credential.denied`.
 5. **Opens the plugin's session**, with the `HostContext`, the service, the handle and the options: `IStreamSessionHandler.OpenAsync`. The plugin connects, through `IConnectivity`, which can't tell this request from a plugin endpoint's. The session is in the registry (below) from this step on, so a change of access while it opens, during a key prompt say, ends it with `access_revoked`.
-6. **Asks about unknown keys in-band.** If opening fails with `HostKeyUnknown`, from an SSH connection or (SDK 0.1.9) a desktop or HTTP connection's certificate, core sends `hostKey` and waits for the user. On `trust`, it trusts the key through the trust store, under the same rules as §7.7, then opens again. A jump host and its target can each ask once. Anything but `trust`, including silence, ends the session with `host_key_rejected`.
+6. **Asks about unknown keys in-band.** If opening fails with `HostKeyUnknown`, from an SSH connection or (SDK 0.1.9) a desktop or HTTP connection's certificate, core sends `hostKey` and waits for the user, if they can manage the host that presented it (§7.7). If they can't, the session ends with `host_key_untrusted`, saying who must trust it first. On `trust`, it trusts the key through the trust store, under the same rules as §7.7, then opens again. A jump host and its target can each ask once. Anything but `trust`, including silence, ends the session with `host_key_rejected`.
 7. **Reports other failures** with a code from the failure: `host_key_changed`, `authentication_failed`, `no_secret`, `invalid_private_key`, `unreachable`, `timeout` or `jump_host_unavailable`. Anything else the plugin throws is `failed`, with a generic message, and is logged.
 8. **Runs the session.** Core checks access once more, audits `session.open`, sends `connected`, and calls `IStreamSession.RunAsync` with a channel for the plugin's frames. It ends when either side closes, or when core ends it.
 
@@ -625,7 +625,7 @@ The single-page app in `core/frontend/app`. It knows no service type, session ty
 The server's own validation is what counts. The editor shows its field errors next to their fields.
 
 **Core's dialogs.** These belong to the shell, not to any plugin:
-- **a server key no one trusted yet** (§7.10): the host, algorithm and fingerprint, with Trust and Cancel;
+- **a server key no one trusted yet** (§7.10): the host, algorithm and fingerprint, with Trust and Cancel. Only someone with Manage on the host sees it (§7.7);
 - **a typed credential** (§7.6): username, domain, and password or private key. The shell posts it to core's credential prompt and passes only the prompt reference on.
 
 **Session views (frontend SDK 0.1.6).** A plugin's frontend draws its session types' tabs:
@@ -642,7 +642,7 @@ export default definePlugin({
   - the host's ID and name, and the service's ID, as the tab describes them;
   - `connect(options, signal)`, which opens the stream. It runs core's control phase, with core's dialogs for a key and a typed credential. It resolves to a connection once core says `connected`, and rejects with a `SessionError` carrying core's error code. Aborting `signal` (when the view goes) cancels it, and any dialog it was waiting on;
   - whether its tab is showing;
-  - `confirmTrust(prompt)` (SDK 0.1.8), for a view that opens its session through the plugin's own endpoints (§7.17): it shows core's dialog for a key or certificate a plugin endpoint reported, and when the user trusts it, posts it to core. It resolves to whether it's now trusted.
+  - `confirmTrust(prompt)` (SDK 0.1.8), for a view that opens its session through the plugin's own endpoints (§7.17): it shows core's dialog for a key or certificate a plugin endpoint reported, and when the user trusts it, posts it to core. It resolves to whether it's now trusted. For a user who can't manage the host, it resolves to false without asking.
 - A connection sends binary frames, JSON text frames, and (SDK 0.1.9) raw text frames, and delivers the plugin's frames. Its `closed` promise gives core's reason. The view may call `connect` again to reconnect.
 - The SDK's `openStreamSession` implements the protocol (§7.10). `connect` is that function, with the shell's dialogs.
 - **Styles under the shell's policy.** The policy allows stylesheets only from the server (`style-src 'self'`), so a `<style>` element that a library adds is blocked. The SDK has two helpers that keep the policy as it is:
