@@ -835,4 +835,3 @@ The rest of the installer is Phase 6: release-signed packages, guacd (D11), and 
 - [plugin-authoring.md](plugin-authoring.md): writing a plugin against SDK v1, with ssh and wake-on-lan as worked examples.
 - [plugin-security.md](plugin-security.md): package format, signing, trust, directory checks, verification order and reason codes, loading and states.
 - [CONTRIBUTING.md](../CONTRIBUTING.md): development setup and running the shell with plugins.
-- `plugin-authoring.md` (Phase 1): writing a plugin, with SSH as the worked example.
