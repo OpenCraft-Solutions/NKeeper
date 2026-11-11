@@ -48,7 +48,7 @@ frontend/<entry>.js, …     pre-built ES modules and assets
 - `backend.entryAssembly` and `backend.entryType` (the `IPlugin` implementation);
 - `backend.exportedAssemblies`: contract assemblies dependants may use, such as `db-core`'s engine interfaces;
 - `frontend.entry` (optional: a plugin may have no frontend);
-- `builtIn` (optional, default `false`): ship-with-NKeeper plugins such as `ssh`. It is honoured **only** when the package is signed by an official key, or by a development key on a server running in `Development`. From any other signer it is ignored, so a third-party plugin can never make itself undisableable. This is how the server knows what is built in without core naming any plugin.
+- `builtIn` (optional, default `false`): ship-with-NKeeper plugins such as `ssh`. It is honoured **only** when the package is signed by an official key, by an install key (§6.1), or by a development key on a server running in `Development`. From any other signer it is ignored, so a third-party plugin can never make itself undisableable. This is how the server knows what is built in without core naming any plugin.
 
 A **version range** is one or more comparators separated by spaces, all of which must hold: `>=0.1.0 <0.2.0`. The operators are `=`, `>`, `>=`, `<` and `<=`, with SemVer 2.0 precedence.
 
