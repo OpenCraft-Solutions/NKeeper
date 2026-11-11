@@ -2,7 +2,7 @@ import type { ComponentType } from 'react'
 import type { StreamConnection, TrustPrompt } from './sessions'
 
 /** The SDK version this build of the shell implements; plugin manifests declare a compatible range. */
-export const SDK_VERSION = '0.1.8'
+export const SDK_VERSION = '0.1.9'
 
 /** What a plugin's frontend knows about itself. Its identity comes from the server's verified manifest. */
 export interface PluginContext {

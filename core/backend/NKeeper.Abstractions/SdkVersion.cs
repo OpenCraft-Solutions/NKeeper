@@ -8,5 +8,5 @@ namespace NKeeper.Abstractions;
 public static class SdkVersion
 {
     /// <summary>SDK v0: unstable until it is frozen as v1 at the end of Phase 3 (docs/v2-plan.md §8).</summary>
-    public const string Current = "0.1.8";
+    public const string Current = "0.1.9";
 }

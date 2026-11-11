@@ -21,6 +21,85 @@ public interface IConnectivity
     /// </summary>
     /// <exception cref="HttpConnectException">The certificate isn't trusted, or the service can't be reached.</exception>
     Task<IHttpConnection> OpenHttpAsync(HostContext host, Guid serviceId, bool tls, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// A remote desktop through guacd (docs/architecture.md §7.20, SDK 0.1.9), RDP so far. Core checks the handle and
+    /// the server's certificate, and does the Guacamole handshake with the credential, which the plugin never sees.
+    /// </summary>
+    /// <exception cref="DesktopConnectException">The certificate isn't trusted, guacd isn't running, or the server can't be reached.</exception>
+    /// <exception cref="CredentialDeniedException">The handle isn't valid here.</exception>
+    Task<IDesktopConnection> OpenDesktopAsync(HostContext host, Guid serviceId, CredentialHandle handle, DesktopOptions options, CancellationToken cancellationToken = default);
+}
+
+/// <summary>How an RDP connection secures itself.</summary>
+public enum DesktopSecurity
+{
+    /// <summary>Network Level Authentication when the server offers it, otherwise TLS.</summary>
+    Any,
+
+    /// <summary>Network Level Authentication (CredSSP) only, the Windows default.</summary>
+    Nla,
+
+    /// <summary>TLS only, for servers without NLA (xrdp, say): the server shows its own sign-in screen.</summary>
+    Tls,
+}
+
+/// <summary>What the browser shows a desktop on, checked by core: a size from 200 × 200 to 8192 × 8192.</summary>
+public sealed record DesktopOptions(int Width, int Height, int Dpi = 96)
+{
+    public DesktopSecurity Security { get; init; } = DesktopSecurity.Any;
+
+    /// <summary>Audio the browser plays, such as <c>audio/L16</c>; none by default.</summary>
+    public IReadOnlyList<string> AudioMimetypes { get; init; } = [];
+
+    public IReadOnlyList<string> ImageMimetypes { get; init; } = ["image/png", "image/jpeg", "image/webp"];
+
+    /// <summary>The browser's time zone, such as <c>Europe/Paris</c>.</summary>
+    public string? Timezone { get; init; }
+}
+
+/// <summary>An open remote desktop: Guacamole instructions, after core's handshake with guacd.</summary>
+public interface IDesktopConnection : IAsyncDisposable
+{
+    /// <summary>guacd's next instructions for the browser, <c>ready</c> first, as Guacamole text; null once guacd closed.</summary>
+    Task<string?> ReceiveAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The browser's instructions: only what core's allow-list allows reaches guacd (input, display and text clipboard).
+    /// </summary>
+    /// <exception cref="FormatException">The text isn't Guacamole instructions.</exception>
+    Task SendFromBrowserAsync(string instructions, CancellationToken cancellationToken);
+}
+
+public enum DesktopConnectFailure
+{
+    /// <summary>The certificate isn't publicly valid, and no one trusted it for the host: <see cref="DesktopConnectException.PresentedCertificate"/> has it.</summary>
+    HostKeyUnknown,
+
+    /// <summary>The certificate differs from the one trusted for the host.</summary>
+    HostKeyChanged,
+
+    /// <summary>The credential has no username or password.</summary>
+    NoSecret,
+
+    /// <summary>The server and the security asked for don't agree: NLA when it only does TLS, say.</summary>
+    SecurityNegotiationFailed,
+
+    Unreachable,
+
+    TimedOut,
+
+    /// <summary>guacd isn't running, or refused the connection.</summary>
+    GatewayUnavailable,
+
+    JumpHostUnavailable,
+}
+
+public sealed class DesktopConnectException(DesktopConnectFailure reason, string message, PresentedCertificate? presentedCertificate = null) : Exception(message)
+{
+    public DesktopConnectFailure Reason { get; } = reason;
+
+    public PresentedCertificate? PresentedCertificate { get; } = presentedCertificate;
 }
 
 /// <summary>An open HTTP connection to a service. It sends no cookies, follows no redirects and doesn't decompress.</summary>
