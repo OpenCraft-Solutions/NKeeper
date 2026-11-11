@@ -11,7 +11,9 @@
     <IsPackable>false</IsPackable>
     <NKeeperRoot>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', '..', '..', '..'))</NKeeperRoot>
     <NKeeperDevelopmentKeys>$(NKeeperRoot).dev/keys/</NKeeperDevelopmentKeys>
-    <NKeeperPluginPackages>$(NKeeperRoot)artifacts/plugins/</NKeeperPluginPackages>
+    <NKeeperPluginPackages Condition="'$(NKeeperPluginPackages)' == ''">$(NKeeperRoot)artifacts/plugins/</NKeeperPluginPackages>
+    <!-- The native installer signs with its one-time install key instead (docs/architecture.md §8). -->
+    <NKeeperSigningKey Condition="'$(NKeeperSigningKey)' == ''">$(NKeeperDevelopmentKeys)dev.private.pem</NKeeperSigningKey>
     <NKeeperPluginFrontend>$(MSBuildProjectDirectory)/../frontend/</NKeeperPluginFrontend>
     <NKeeperPluginTool>$(NKeeperRoot)tools/NKeeper.PluginTool/bin/$(Configuration)/$(TargetFramework)/nkeeper-plugin.dll</NKeeperPluginTool>
   </PropertyGroup>
@@ -48,11 +50,11 @@
     -->
     <MSBuild Projects="$(NKeeperRoot)tools/NKeeper.PluginTool/NKeeper.PluginTool.csproj" Targets="Restore" Properties="MSBuildRestoreSessionId=$([System.Guid]::NewGuid())" />
     <MSBuild Projects="$(NKeeperRoot)tools/NKeeper.PluginTool/NKeeper.PluginTool.csproj" Targets="Build" />
-    <Exec Condition="!Exists('$(NKeeperDevelopmentKeys)dev.private.pem')"
+    <Exec Condition="'$(NKeeperSigningKey)' == '$(NKeeperDevelopmentKeys)dev.private.pem' And !Exists('$(NKeeperSigningKey)')"
           Command="dotnet &quot;$(NKeeperPluginTool)&quot; keygen --out &quot;$(NKeeperDevelopmentKeys).&quot; --name dev --comment &quot;local development key&quot;" />
     <RemoveDir Directories="$(NKeeperPackStaging);$(NKeeperPacked)" />
     <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(NKeeperPackStaging)" />
-    <Exec Command="dotnet &quot;$(NKeeperPluginTool)&quot; pack --manifest &quot;$(MSBuildProjectDirectory)/nkeeper-plugin.json&quot; --backend &quot;$(NKeeperPackStaging).&quot; --frontend &quot;$(NKeeperPluginFrontend)dist/.&quot; --key &quot;$(NKeeperDevelopmentKeys)dev.private.pem&quot; --out &quot;$(NKeeperPacked).&quot;" />
+    <Exec Command="dotnet &quot;$(NKeeperPluginTool)&quot; pack --manifest &quot;$(MSBuildProjectDirectory)/nkeeper-plugin.json&quot; --backend &quot;$(NKeeperPackStaging).&quot; --frontend &quot;$(NKeeperPluginFrontend)dist/.&quot; --key &quot;$(NKeeperSigningKey)&quot; --out &quot;$(NKeeperPacked).&quot;" />
     <ItemGroup>
       <NKeeperPackage Include="$(NKeeperPacked)*.nkp" />
     </ItemGroup>

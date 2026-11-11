@@ -81,6 +81,8 @@ It starts without plugins until one is installed. Building the solution builds t
 
 NuGet versions are managed centrally in [`Directory.Packages.props`](Directory.Packages.props), and every project has a `packages.lock.json`. CI restores in locked mode, so commit the lock files whenever a dependency changes. Schema changes are EF Core migrations, committed with the code: `dotnet tool restore`, then `dotnet ef migrations add <Name> --project core/backend/NKeeper.Core.Persistence --output-dir Migrations`.
 
+**Native install** (docs/architecture.md §8): `sudo deploy/setup.sh install` on a Debian/Ubuntu or RHEL-family test machine builds this checkout and installs it with systemd, nginx and PostgreSQL. CI runs it end to end on Ubuntu, with `deploy/check-install.sh`. Don't point it at a machine you care about: it installs packages and system services.
+
 **Frontend** (from the repository root, which is an npm workspace):
 
 ```bash
