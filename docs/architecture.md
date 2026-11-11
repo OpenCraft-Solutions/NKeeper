@@ -607,7 +607,7 @@ export default definePlugin({
 - `sessionViews` maps a session type that the same plugin contributes to a React component. The shell ignores a view for any other session type.
 - The component gets:
   - the host's ID and name, and the service's ID, as the tab describes them;
-  - `connect(options)`, which opens the stream. It runs core's control phase, with core's dialogs for a key and a typed credential. It resolves to a connection once core says `connected`, and rejects with a `SessionError` carrying core's error code;
+  - `connect(options, signal)`, which opens the stream. It runs core's control phase, with core's dialogs for a key and a typed credential. It resolves to a connection once core says `connected`, and rejects with a `SessionError` carrying core's error code. Aborting `signal` (when the view goes) cancels it, and any dialog it was waiting on;
   - whether its tab is showing.
 - A connection sends binary frames and JSON text frames, and delivers the plugin's frames. Its `closed` promise gives core's reason. The view may call `connect` again to reconnect.
 - The SDK's `openStreamSession` implements the protocol (§7.10). `connect` is that function, with the shell's dialogs.
