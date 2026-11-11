@@ -30,6 +30,12 @@ public sealed class SshPluginTests(PostgresFixture postgres, SshServerFixture ss
             action.GetProperty("label").GetString(),
             action.GetProperty("sessionType").GetString(),
             action.GetProperty("credential").GetString()));
+
+        // Its frontend, the terminal view, is served from the verified package.
+        var entry = plugin.GetProperty("frontendEntry").GetString()!;
+        using var module = await admin.GetAsync(new Uri(entry, UriKind.Relative), Token);
+        Assert.Equal(HttpStatusCode.OK, module.StatusCode);
+        Assert.Contains("@nkeeper/sdk", await module.Content.ReadAsStringAsync(Token), StringComparison.Ordinal);
         var sessionType = Assert.Single(plugin.GetProperty("sessionTypes").EnumerateArray());
         Assert.Equal(("ssh", "Terminal"), (sessionType.GetProperty("id").GetString(), sessionType.GetProperty("label").GetString()));
     }

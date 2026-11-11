@@ -2,7 +2,8 @@
 
   <!--
     The ssh plugin (docs/architecture.md §7.11). It references only the SDK, without copying it (§7.1).
-    Building it packs and signs it with the developer's development key, as every built-in plugin is
+    Building it builds its frontend (plugins/ssh/frontend, with npm), then packs and signs both with the
+    developer's development key, as every built-in plugin is
     (plugin-security.md §10): the key is created under .dev/keys on first use, and the package goes to
     artifacts/plugins, the directory to point Plugins:Directory at in development.
   -->
@@ -11,6 +12,7 @@
     <NKeeperRoot>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', '..', '..', '..'))</NKeeperRoot>
     <NKeeperDevelopmentKeys>$(NKeeperRoot).dev/keys/</NKeeperDevelopmentKeys>
     <NKeeperPluginPackages>$(NKeeperRoot)artifacts/plugins/</NKeeperPluginPackages>
+    <NKeeperPluginFrontend>$(MSBuildProjectDirectory)/../frontend/</NKeeperPluginFrontend>
     <NKeeperPluginTool>$(NKeeperRoot)tools/NKeeper.PluginTool/bin/$(Configuration)/$(TargetFramework)/nkeeper-plugin.dll</NKeeperPluginTool>
   </PropertyGroup>
 
@@ -22,7 +24,20 @@
     <ProjectReference Include="..\..\..\core\backend\NKeeper.Abstractions\NKeeper.Abstractions.csproj" Private="false" ExcludeAssets="runtime" />
   </ItemGroup>
 
-  <Target Name="PackNKeeperPlugin" AfterTargets="Build" Condition="'$(NKeeperPackPlugins)' != 'false'">
+  <!-- The frontend is rebuilt when its sources change. It needs the workspace's packages: npm ci at the root. -->
+  <Target Name="BuildNKeeperPluginFrontend"
+          Condition="'$(NKeeperPackPlugins)' != 'false'"
+          Inputs="@(NKeeperFrontendSource)"
+          Outputs="$(NKeeperPluginFrontend)dist/index.js">
+    <Error Condition="!Exists('$(NKeeperRoot)node_modules')" Text="The ssh plugin's frontend needs the npm packages: run 'npm ci' at the repository root first." />
+    <Exec Command="npm run build -w @nkeeper/plugin-ssh" WorkingDirectory="$(NKeeperRoot)" />
+  </Target>
+
+  <ItemGroup>
+    <NKeeperFrontendSource Include="$(NKeeperPluginFrontend)src/**;$(NKeeperPluginFrontend)package.json;$(NKeeperPluginFrontend)vite.config.ts;$(NKeeperPluginFrontend)tsconfig.json;$(NKeeperRoot)core/frontend/sdk/src/**;$(NKeeperRoot)package-lock.json" />
+  </ItemGroup>
+
+  <Target Name="PackNKeeperPlugin" AfterTargets="Build" DependsOnTargets="BuildNKeeperPluginFrontend" Condition="'$(NKeeperPackPlugins)' != 'false'">
     <PropertyGroup>
       <NKeeperPackStaging>$(MSBuildProjectDirectory)/$(IntermediateOutputPath)package/</NKeeperPackStaging>
       <NKeeperPacked>$(MSBuildProjectDirectory)/$(IntermediateOutputPath)packed/</NKeeperPacked>
@@ -37,7 +52,7 @@
           Command="dotnet &quot;$(NKeeperPluginTool)&quot; keygen --out &quot;$(NKeeperDevelopmentKeys).&quot; --name dev --comment &quot;local development key&quot;" />
     <RemoveDir Directories="$(NKeeperPackStaging);$(NKeeperPacked)" />
     <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(NKeeperPackStaging)" />
-    <Exec Command="dotnet &quot;$(NKeeperPluginTool)&quot; pack --manifest &quot;$(MSBuildProjectDirectory)/nkeeper-plugin.json&quot; --backend &quot;$(NKeeperPackStaging).&quot; --key &quot;$(NKeeperDevelopmentKeys)dev.private.pem&quot; --out &quot;$(NKeeperPacked).&quot;" />
+    <Exec Command="dotnet &quot;$(NKeeperPluginTool)&quot; pack --manifest &quot;$(MSBuildProjectDirectory)/nkeeper-plugin.json&quot; --backend &quot;$(NKeeperPackStaging).&quot; --frontend &quot;$(NKeeperPluginFrontend)dist/.&quot; --key &quot;$(NKeeperDevelopmentKeys)dev.private.pem&quot; --out &quot;$(NKeeperPacked).&quot;" />
     <ItemGroup>
       <NKeeperPackage Include="$(NKeeperPacked)*.nkp" />
     </ItemGroup>

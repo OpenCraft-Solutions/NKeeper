@@ -5,6 +5,9 @@
   "version": "0.1.0",
   "sdkVersion": ">=0.1.6 <0.2.0",
   "builtIn": true,
+  "frontend": {
+    "entry": "frontend/index.js"
+  },
   "backend": {
     "entryAssembly": "backend/NKeeper.Plugins.Ssh.dll",
     "entryType": "NKeeper.Plugins.Ssh.SshPlugin"
