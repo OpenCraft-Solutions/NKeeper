@@ -60,7 +60,7 @@ try {
   step('sign in')
   await page.goto(`${base}/`)
   await page.getByLabel('Username or email').fill(adminUser)
-  await page.getByLabel('Password').fill(adminPassword)
+  await page.getByLabel('Password', { exact: true }).fill(adminPassword)
   await page.getByRole('button', { name: 'Sign in' }).click()
   await page.getByRole('navigation', { name: 'Main' }).waitFor({ timeout: 15000 })
 
