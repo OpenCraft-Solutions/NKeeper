@@ -571,7 +571,7 @@ new ServiceType("ssh", "SSH") { DefaultPort = 22, Health = HealthProbe.Tcp }
 The single-page app in `core/frontend/app`. It knows no service type, session type or plugin: everything it shows of them comes from `GET /api/plugins`.
 
 **Layout.**
-- **Sign-in**, then a header with the user's name and Sign out. A session that ends elsewhere brings the sign-in form back (unchanged from Phase 0).
+- **Sign-in**, then a header with the user's name and Sign out. A session that ends elsewhere brings the sign-in form back (unchanged from Phase 0). A user who must change their password (§6.1) is asked to before anything else.
 - **The host tree**, on the left:
   - every host the user can see, from `GET /api/hosts`, searched, grouped and sorted in the browser;
   - **search** matches a host's name, hostname, IP address, description and tags (`name` or `name=value`), ignoring case;
