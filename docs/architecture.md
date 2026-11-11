@@ -595,8 +595,14 @@ new ServiceType("ssh", "SSH") { DefaultPort = 22, Health = HealthProbe.Tcp }
 
 The single-page app in `core/frontend/app`. It knows no service type, session type or plugin: everything it shows of them comes from `GET /api/plugins`.
 
+**The look is 1.x's.** The shell looks the same as NKeeper 1.x, so moving to 2.0 changes nothing a user sees except what's new:
+- 1.x's design tokens, as CSS custom properties on `:root`: the dark navy colours, spacing, radii, shadows and font stack. Its UI components (buttons, fields, dialogs, menus, badges, alerts) and their styles are ported from 1.x as they were.
+- 1.x's layout: a top bar with the logo and the pages as tabs, **Hosts**, **Reports**, and for administrators **Users** and **Settings**, with the user's menu on the right. Each page has 1.x's sidebar on the left and its content on the right.
+- A control for a feature that isn't ported yet (Import, Scan network, sorting, colour schemes) appears when its feature does, rather than as a control that does nothing.
+- **Plugin views use the same tokens.** `var(--color-surface)` and the rest are the shell's to keep, so a plugin's view matches the shell. Each use gives a fallback value, so a view still draws on a shell without them. The terminal and desktop views keep 1.x's session styles.
+
 **Layout.**
-- **Sign-in**, then a header with the user's name and Sign out. A session that ends elsewhere brings the sign-in form back (unchanged from Phase 0). A user who must change their password (§6.1) is asked to before anything else.
+- **Sign-in**, on 1.x's sign-in card, then the top bar with the user's menu, which holds Sign out. A session that ends elsewhere brings the sign-in form back (unchanged from Phase 0). A user who must change their password (§6.1) is asked to before anything else.
 - **The host tree**, on the left:
   - every host the user can see, from `GET /api/hosts`, searched, grouped and sorted in the browser;
   - **search** matches a host's name, hostname, IP address, description and tags (`name` or `name=value`), ignoring case;
@@ -606,19 +612,20 @@ The single-page app in `core/frontend/app`. It knows no service type, session ty
   - right-clicking a host's row opens its Connect menu there. Double-clicking it opens the menu's first entry: the first action on the first service it applies to, with the first saved credential used with that service, or the typed-credential dialog when there's none;
   - a host's details say why there's nothing to connect with: it has no services, or no loaded plugin opens a session on them.
 - **Tabs**, on the right. The first tab is always the selected host's details. Every session opens in a tab of its own. A tab stays mounted while another is showing, so a terminal keeps running. Closing a tab ends its session.
-- **Health**, for everyone, ported from 1.x's health report: the latest checks (§7.13) of the services on the hosts the user can see, from `GET /api/health` and `GET /api/hosts`:
+- **Reports**, for everyone: 1.x's list of reports on the left, with the report on the right. So far it lists one:
+- **Health**, ported from 1.x's health report: the latest checks (§7.13) of the services on the hosts the user can see, from `GET /api/health` and `GET /api/hosts`:
   - a summary: how many services are up and down, how many certificates expire within 30 days, how many hosts with services have no results yet, and when the latest check ran;
   - **Down**: each service that's down, with its host, address and port, why, and when it was checked, oldest first;
   - **Certificates**: each certificate a TLS probe read, with its host, service, subject and expiry, soonest first. One that has expired or expires within 30 days is marked;
   - selecting a host's name shows it in the workspace. Refresh reads the results again; it doesn't run the checks.
-- **Plugins**, for administrators: the plugin list and frontend states from Phase 0.
+- **Settings**, for administrators: 1.x's settings page. So far it has one section, **Plugins**: the plugin list and frontend states from Phase 0.
 - **Users**, for administrators (§6.1, §7.2):
   - the list, with each user's role and whether they're disabled, locked out, or must change their password;
   - creating a user, with a user name, email, role, and an initial password, which they must change at first sign-in unless the administrator says otherwise;
   - editing a user's email, role and whether they're disabled; resetting their password; and deleting them. An administrator can't disable, demote or delete themselves, as the server enforces;
   - a user's grants: rows of a host, or a tag name with an optional value, each at Use or Manage. Saving replaces them all. Grants don't apply to administrators, who see every host, so the page says so for them.
 
-  The workspace stays mounted behind these pages (Health, Plugins and Users), so sessions carry on.
+  The workspace stays mounted behind these pages (Reports, Users and Settings), so sessions carry on.
 
 **The host editor** creates and edits hosts, for users who can manage them:
 - name, hostname, IP address, description and tags;
