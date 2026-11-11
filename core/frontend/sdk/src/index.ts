@@ -1,5 +1,5 @@
 /**
- * @nkeeper/sdk v0: what plugin frontends build against. At run time it is one shared module, served
+ * @nkeeper/sdk v1: what plugin frontends build against. At run time it is one shared module, served
  * by the shell through the import map, so every plugin and the shell see the same instance.
  */
 export { SDK_VERSION, definePlugin, isPluginDefinition } from './plugin'

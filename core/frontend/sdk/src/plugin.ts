@@ -33,7 +33,7 @@ export interface SessionViewProps {
 }
 
 /**
- * A plugin frontend (SDK v0, docs/v2-plan.md §4.1). The module named by the manifest's
+ * A plugin frontend (SDK v1, docs/plugin-authoring.md). The module named by the manifest's
  * `frontend.entry` default-exports one, made with {@link definePlugin}. More members arrive with
  * their first users; until SDK v1 this contract may change.
  */
