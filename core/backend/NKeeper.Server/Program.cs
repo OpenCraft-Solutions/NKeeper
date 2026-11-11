@@ -88,6 +88,8 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 var app = builder.Build();
 await app.InitializeIdentityAsync(CancellationToken.None);
 
+// Behind nginx, the browser's own address and scheme, before anything reads them (architecture.md §8).
+app.UseNKeeperForwardedHeaders();
 app.UseSecurityHeaders();
 if (shell is not null)
 {
