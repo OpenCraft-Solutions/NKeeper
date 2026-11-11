@@ -63,6 +63,12 @@ jobs:
           sudo useradd --create-home --shell /bin/bash nkrdp
           echo "nkrdp:$password" | sudo chpasswd
           echo 'exec xterm' | sudo -u nkrdp tee /home/nkrdp/.xsession >/dev/null
+          # TLS with a certificate of its own: NKeeper refuses legacy RDP security, which can't be verified.
+          sudo rm -f /etc/xrdp/cert.pem /etc/xrdp/key.pem
+          sudo openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj /CN=localhost             -keyout /etc/xrdp/key.pem -out /etc/xrdp/cert.pem 2>/dev/null
+          sudo chown root:xrdp /etc/xrdp/key.pem /etc/xrdp/cert.pem
+          sudo chmod 0640 /etc/xrdp/key.pem
+          sudo sed -i 's/^security_layer=.*/security_layer=tls/' /etc/xrdp/xrdp.ini
           sudo systemctl restart xrdp
 
       - name: Install

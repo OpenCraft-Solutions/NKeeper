@@ -72,6 +72,7 @@ try {
   const form = page.getByRole('form', { name: 'New host' })
   await form.getByLabel('Name', { exact: true }).fill(hostName)
   await form.getByLabel('IP address').fill(sshAddress)
+  await form.getByLabel('Service type').selectOption({ label: 'SSH' })
   await form.getByRole('button', { name: 'Add service' }).click()
   await form.getByRole('button', { name: 'Add credential' }).click()
   await form.getByLabel('User name').fill(sshUser)
