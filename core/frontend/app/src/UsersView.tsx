@@ -1,8 +1,23 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useId, useState, type FormEvent } from 'react'
 import { api, ApiError } from '@nkeeper/sdk'
+import { hostAddress, tagNames } from './hosts'
 import type { Host } from './types'
+import { Alert } from './ui/Alert'
+import { Badge } from './ui/Badge'
+import { Button } from './ui/Button'
+import { Checkbox } from './ui/Checkbox'
+import { DeleteButton } from './ui/DeleteButton'
+import { Dialog } from './ui/Dialog'
+import dialogs from './ui/UserDialogs.module.css'
+import grantStyles from './ui/GrantsEditor.module.css'
+import panel from './ui/HostPanel.module.css'
+import { PasswordField } from './ui/PasswordField'
+import roleStyles from './ui/RoleSelect.module.css'
+import { Spinner } from './ui/Spinner'
+import { TextField } from './ui/TextField'
+import styles from './ui/UsersPage.module.css'
 
-/** Users and their grants, for administrators (docs/architecture.md §6.1, §7.2, §7.14). */
+/** Users and their grants, for administrators (docs/architecture.md §6.1, §7.2, §7.14), as 1.x's Users page drew them. */
 
 type Role = 'administrator' | 'user'
 type Level = 'use' | 'manage'
@@ -37,6 +52,17 @@ interface GrantDraft {
   level: Level
 }
 
+const ROLES: { value: Role; label: string; description: string }[] = [
+  { value: 'user', label: 'User', description: 'Sees only the hosts and groups granted to them.' },
+  { value: 'administrator', label: 'Administrator', description: 'Sees and manages every host, and manages users.' },
+]
+
+const LEVELS: Record<Level, { label: string; description: string }> = {
+  use: { label: 'Use', description: 'See and connect' },
+  manage: { label: 'Manage', description: 'Also edit and delete' },
+}
+
+const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' })
 let keys = 0
 
 /** The server's message, with any field errors after it. */
@@ -48,11 +74,44 @@ function describe(error: unknown, fallback: string): string {
   return fields.length > 0 ? fields.join(' ') : error.message
 }
 
+/** Whether a grant covers a host now: the host itself, or a tag it has (any value, or the one named). */
+function grantMatches(grant: GrantDraft, host: Host): boolean {
+  if (grant.kind === 'host') {
+    return grant.hostId === host.id
+  }
+  const name = grant.tagName.trim().toLowerCase()
+  const value = grant.tagValue.trim().toLowerCase()
+  return name !== '' && host.tags.some((t) => t.name.toLowerCase() === name && (!value || (t.value ?? '').toLowerCase() === value))
+}
+
+/** A random password that meets the default policy (12+ characters, upper, lower, digit), as 1.x made them. */
+function generatePassword(length = 16): string {
+  const required = ['ABCDEFGHJKLMNPQRSTUVWXYZ', 'abcdefghijkmnopqrstuvwxyz', '23456789']
+  const all = required.join('') + '-_.!@#'
+  const random = (max: number) => {
+    // Rejection sampling avoids modulo bias.
+    const limit = Math.floor(0x100000000 / max) * max
+    const buffer = new Uint32Array(1)
+    do {
+      crypto.getRandomValues(buffer)
+    } while ((buffer[0] ?? limit) >= limit)
+    return (buffer[0] ?? 0) % max
+  }
+  const chars = [...required.map((set) => set[random(set.length)] ?? ''), ...Array.from({ length: length - required.length }, () => all[random(all.length)] ?? '')]
+  for (let i = chars.length - 1; i > 0; i--) {
+    const j = random(i + 1)
+    ;[chars[i], chars[j]] = [chars[j] ?? '', chars[i] ?? '']
+  }
+  return chars.join('')
+}
+
 export function UsersView({ currentUserId }: { currentUserId: string }) {
   const [users, setUsers] = useState<User[] | null>(null)
   const [hosts, setHosts] = useState<Host[]>([])
   const [error, setError] = useState<string | null>(null)
-  const [selected, setSelected] = useState<string | 'new' | null>(null)
+  const [selected, setSelected] = useState<string | null>(null)
+  const [creating, setCreating] = useState(false)
+  const [search, setSearch] = useState('')
   const [reloads, setReloads] = useState(0)
   const reload = useCallback(() => setReloads((n) => n + 1), [])
 
@@ -78,112 +137,249 @@ export function UsersView({ currentUserId }: { currentUserId: string }) {
   }, [reloads])
 
   const user = users?.find((u) => u.id === selected) ?? null
+  const words = search.trim().toLowerCase()
+  const visible = (users ?? []).filter((u) => !words || u.userName.toLowerCase().includes(words) || (u.email ?? '').toLowerCase().includes(words))
+
   return (
-    <div className="nk-workspace" aria-label="Users">
-      <aside className="nk-sidebar">
-        <div className="nk-pad">
-          <button type="button" className="nk-primary" onClick={() => setSelected('new')}>
+    <div className={`${styles.page} ${selected ? styles.detailOpen : ''}`}>
+      <aside className={styles.sidebar} aria-label="Users">
+        <div className={styles.sidebarHeader}>
+          <h1 className={styles.title}>
+            Users {users && <span className={styles.count}>{users.length}</span>}
+          </h1>
+          <Button size="sm" onClick={() => setCreating(true)}>
             New user
-          </button>
+          </Button>
         </div>
-        {error && (
-          <p className="nk-alert nk-pad" role="alert">
-            {error}
-          </p>
-        )}
-        <nav className="nk-tree" aria-label="Users">
-          <ul>
-            {(users ?? []).map((u) => (
-              <li key={u.id} className={u.id === selected ? 'nk-selected' : undefined}>
-                <button type="button" className="nk-tree-host" aria-current={u.id === selected ? 'true' : undefined} onClick={() => setSelected(u.id)}>
-                  <span className="nk-tree-name">{u.userName}</span>
-                  <span className="nk-tree-address">
-                    {[u.role === 'administrator' ? 'Administrator' : 'User', u.isDisabled && 'disabled', u.isLockedOut && 'locked out'].filter(Boolean).join(', ')}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </nav>
+        <div className={styles.searchBox}>
+          <input className={styles.search} type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search username or email" aria-label="Search users" />
+        </div>
+        <div className={styles.listScroll}>
+          {error && !users ? (
+            <div className={styles.state}>
+              <Alert>{error}</Alert>
+            </div>
+          ) : !users ? (
+            <div className={styles.state}>
+              <Spinner label="Loading users" />
+            </div>
+          ) : (
+            <ul className={styles.list}>
+              {visible.map((u) => (
+                <li key={u.id}>
+                  <button type="button" className={styles.row} aria-current={u.id === selected ? 'true' : undefined} onClick={() => setSelected(u.id)}>
+                    <span className={styles.avatar} aria-hidden="true">
+                      {u.userName.slice(0, 1).toUpperCase()}
+                    </span>
+                    <span className={styles.rowText}>
+                      <span className={styles.rowName}>{u.userName}</span>
+                      <span className={styles.rowEmail}>{u.email}</span>
+                    </span>
+                    <span className={styles.badges}>
+                      {u.role === 'administrator' && <Badge variant="accent">Admin</Badge>}
+                      {u.isDisabled && <Badge>Disabled</Badge>}
+                      {u.isLockedOut && <Badge>Locked</Badge>}
+                    </span>
+                  </button>
+                </li>
+              ))}
+              {visible.length === 0 && <li className={styles.state}>No users match “{search}”.</li>}
+            </ul>
+          )}
+        </div>
       </aside>
-      <section className="nk-main nk-scroll">
-        {selected === 'new' ? (
-          <CreateUser
-            onCreated={(created) => {
-              reload()
-              setSelected(created.id)
-            }}
-            onCancel={() => setSelected(null)}
-          />
-        ) : user ? (
-          <UserPanel key={user.id} user={user} hosts={hosts} isSelf={user.id === currentUserId} onChanged={reload} onDeleted={() => { setSelected(null); reload() }} />
-        ) : (
-          <p className="nk-muted nk-pad">{users ? 'Select a user, or create one.' : 'Loading users…'}</p>
+
+      <main className={styles.main}>
+        {selected && (
+          <button type="button" className={styles.back} onClick={() => setSelected(null)}>
+            ‹ All users
+          </button>
         )}
-      </section>
+        {user ? (
+          <UserPanel
+            key={user.id}
+            user={user}
+            hosts={hosts}
+            isSelf={user.id === currentUserId}
+            onChanged={reload}
+            onDeleted={() => {
+              setSelected(null)
+              reload()
+            }}
+          />
+        ) : (
+          <div className={styles.empty}>
+            <p className={styles.emptyTitle}>Select a user</p>
+            <p>Choose a user to change their role, reset their password or decide which hosts and groups they can access.</p>
+          </div>
+        )}
+      </main>
+
+      {creating && (
+        <NewUserDialog
+          onClose={() => setCreating(false)}
+          onCreated={(created) => {
+            setCreating(false)
+            reload()
+            setSelected(created.id)
+          }}
+        />
+      )}
     </div>
   )
 }
 
-function CreateUser({ onCreated, onCancel }: { onCreated: (user: User) => void; onCancel: () => void }) {
+/** Role as two clear choices rather than a bare dropdown, as 1.x asked. */
+function RoleSelect({ value, onChange, disabled }: { value: Role; onChange: (role: Role) => void; disabled?: boolean }) {
+  return (
+    <fieldset className={roleStyles.fieldset} disabled={disabled}>
+      <legend className={roleStyles.legend}>Role</legend>
+      <div className={roleStyles.options}>
+        {ROLES.map((role) => (
+          <label key={role.value} className={`${roleStyles.option} ${value === role.value ? roleStyles.selected : ''}`}>
+            <input type="radio" name="role" value={role.value} checked={value === role.value} onChange={() => onChange(role.value)} />
+            <span>
+              <span className={roleStyles.label}>{role.label}</span>
+              <span className={roleStyles.description}>{role.description}</span>
+            </span>
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  )
+}
+
+/** A password field with Generate and Copy, for passwords an administrator hands out. */
+function TemporaryPasswordField({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <div className={dialogs.passwordRow}>
+      <PasswordField
+        className={dialogs.grow}
+        label="Password"
+        value={value}
+        onChange={(e) => {
+          setCopied(false)
+          onChange(e.target.value)
+        }}
+        hint="At least 12 characters, with upper- and lower-case letters and a digit."
+        autoComplete="new-password"
+      />
+      <div className={dialogs.passwordActions}>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => {
+            setCopied(false)
+            onChange(generatePassword())
+          }}
+        >
+          Generate
+        </Button>
+        <Button variant="ghost" size="sm" disabled={!value || !navigator.clipboard} onClick={() => void navigator.clipboard?.writeText(value).then(() => setCopied(true), () => {})}>
+          {copied ? 'Copied' : 'Copy'}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+function NewUserDialog({ onClose, onCreated }: { onClose: () => void; onCreated: (user: User) => void }) {
   const [userName, setUserName] = useState('')
   const [email, setEmail] = useState('')
   const [role, setRole] = useState<Role>('user')
   const [password, setPassword] = useState('')
   const [mustChange, setMustChange] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
 
   async function submit(event: FormEvent) {
     event.preventDefault()
     setError(null)
+    setSaving(true)
     try {
       onCreated(await api.post<User>('/api/users', { userName, email, role, password, mustChangePassword: mustChange }))
     } catch (caught) {
       setError(describe(caught, 'The user could not be created.'))
+      setSaving(false)
     }
   }
 
   return (
-    <form className="nk-form nk-editor" onSubmit={(e) => void submit(e)} aria-label="New user">
-      <h2>New user</h2>
-      {error && (
-        <p className="nk-alert" role="alert">
-          {error}
-        </p>
-      )}
-      <div className="nk-row">
-        <label>
-          User name
-          <input autoComplete="off" value={userName} onChange={(e) => setUserName(e.target.value)} required />
-        </label>
-        <label>
-          Email
-          <input type="email" autoComplete="off" value={email} onChange={(e) => setEmail(e.target.value)} required />
-        </label>
-        <label>
-          Role
-          <select value={role} onChange={(e) => setRole(e.target.value as Role)}>
-            <option value="user">User: sees the hosts granted to them</option>
-            <option value="administrator">Administrator: sees every host, manages users</option>
-          </select>
-        </label>
-      </div>
-      <label>
-        Initial password
-        <input type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-      </label>
-      <label className="nk-check">
-        <input type="checkbox" checked={mustChange} onChange={(e) => setMustChange(e.target.checked)} /> They must change it when they first sign in
-      </label>
-      <div className="nk-actions">
-        <button type="button" onClick={onCancel}>
-          Cancel
-        </button>
-        <button type="submit" className="nk-primary">
-          Create user
-        </button>
-      </div>
-    </form>
+    <Dialog
+      title="New user"
+      description="Users sign in with their username or email. Give them the password below."
+      onClose={onClose}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button type="submit" form="new-user" loading={saving}>
+            Create user
+          </Button>
+        </>
+      }
+    >
+      <form id="new-user" className={dialogs.form} onSubmit={(e) => void submit(e)} noValidate aria-label="New user">
+        {error && <Alert>{error}</Alert>}
+        <div className={dialogs.grid}>
+          <TextField label="Username" value={userName} onChange={(e) => setUserName(e.target.value)} autoComplete="off" maxLength={64} data-autofocus />
+          <TextField label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="off" maxLength={256} />
+        </div>
+        <RoleSelect value={role} onChange={setRole} />
+        <TemporaryPasswordField value={password} onChange={setPassword} />
+        <Checkbox label="Require a new password at first sign-in" checked={mustChange} onChange={(e) => setMustChange(e.target.checked)} />
+      </form>
+    </Dialog>
+  )
+}
+
+function ResetPasswordDialog({ user, onClose, onDone }: { user: User; onClose: () => void; onDone: () => void }) {
+  const [password, setPassword] = useState('')
+  const [mustChange, setMustChange] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+
+  async function submit(event: FormEvent) {
+    event.preventDefault()
+    setError(null)
+    if (!password) {
+      setError('Enter or generate a password.')
+      return
+    }
+    setSaving(true)
+    try {
+      await api.post(`/api/users/${user.id}/password`, { password, mustChangePassword: mustChange })
+      onDone()
+    } catch (caught) {
+      setError(describe(caught, 'The password could not be reset.'))
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Dialog
+      title={`Reset ${user.userName}’s password`}
+      description="They’re signed out everywhere. Give them the new password."
+      onClose={onClose}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button type="submit" form="reset-password" loading={saving}>
+            Reset password
+          </Button>
+        </>
+      }
+    >
+      <form id="reset-password" className={dialogs.form} onSubmit={(e) => void submit(e)} noValidate aria-label="Reset password">
+        {error && <Alert>{error}</Alert>}
+        <TemporaryPasswordField value={password} onChange={setPassword} />
+        <Checkbox label="Require a new password at next sign-in" checked={mustChange} onChange={(e) => setMustChange(e.target.checked)} />
+      </form>
+    </Dialog>
   )
 }
 
@@ -191,126 +387,124 @@ function UserPanel({ user, hosts, isSelf, onChanged, onDeleted }: { user: User; 
   const [email, setEmail] = useState(user.email ?? '')
   const [role, setRole] = useState<Role>(user.role)
   const [disabled, setDisabled] = useState(user.isDisabled)
-  const [password, setPassword] = useState('')
-  const [mustChange, setMustChange] = useState(true)
-  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [resetting, setResetting] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null)
-
-  async function run(action: () => Promise<unknown>, done: string, failed: string) {
-    setMessage(null)
-    try {
-      await action()
-      setMessage({ ok: true, text: done })
-      return true
-    } catch (caught) {
-      setMessage({ ok: false, text: describe(caught, failed) })
-      return false
-    }
-  }
 
   async function save(event: FormEvent) {
     event.preventDefault()
-    if (await run(() => api.put(`/api/users/${user.id}`, { email, role, isDisabled: disabled }), 'Saved.', 'The user could not be saved.')) {
+    setMessage(null)
+    setSaving(true)
+    try {
+      await api.put(`/api/users/${user.id}`, { email, role, isDisabled: disabled })
+      setMessage({ ok: true, text: 'Account saved.' })
       onChanged()
+    } catch (caught) {
+      setMessage({ ok: false, text: describe(caught, 'The user could not be saved.') })
+    } finally {
+      setSaving(false)
     }
   }
 
-  async function resetPassword(event: FormEvent) {
-    event.preventDefault()
-    if (await run(() => api.post(`/api/users/${user.id}/password`, { password, mustChangePassword: mustChange }), 'The password was reset, and their sessions ended.', 'The password could not be reset.')) {
-      setPassword('')
-      onChanged()
+  async function remove() {
+    setMessage(null)
+    setDeleting(true)
+    try {
+      await api.delete(`/api/users/${user.id}`)
+      onDeleted()
+    } catch (caught) {
+      setMessage({ ok: false, text: describe(caught, 'The user could not be deleted.') })
+      setDeleting(false)
     }
   }
 
   return (
-    <article className="nk-details" aria-label={user.userName}>
-      <header className="nk-details-header">
-        <div>
-          <h2>{user.userName}</h2>
-          <p className="nk-muted">
-            {[user.mustChangePassword && 'must change their password', user.isLockedOut && 'locked out after failed sign-ins', isSelf && 'you'].filter(Boolean).join(' · ') || ' '}
+    <article className={panel.panel} aria-labelledby="user-title" aria-label={user.userName}>
+      <header className={panel.header}>
+        <div className={panel.heading}>
+          <h1 id="user-title" className={panel.title}>
+            {user.userName}
+          </h1>
+          <p className={panel.subtitle}>
+            {user.role === 'administrator' ? 'Administrator' : 'User'} · created {dateFormat.format(new Date(user.createdAtUtc))}
+            {user.isDisabled ? ' · disabled' : ''}
+            {user.isLockedOut ? ' · locked out after failed sign-ins' : ''}
+            {user.mustChangePassword ? ' · must change password' : ''}
           </p>
         </div>
-        {!isSelf && (
-          <div className="nk-actions">
-            {confirmDelete ? (
-              <>
-                <button type="button" className="nk-danger" onClick={() => void run(() => api.delete(`/api/users/${user.id}`), 'Deleted.', 'The user could not be deleted.').then((ok) => ok && onDeleted())}>
-                  Delete {user.userName}
-                </button>
-                <button type="button" onClick={() => setConfirmDelete(false)}>
-                  Keep them
-                </button>
-              </>
-            ) : (
-              <button type="button" onClick={() => setConfirmDelete(true)}>
-                Delete
-              </button>
-            )}
-          </div>
-        )}
+        <div className={panel.actions}>
+          {isSelf ? <Badge variant="accent">You</Badge> : <DeleteButton question={`Delete ${user.userName}?`} onConfirm={() => void remove()} loading={deleting} />}
+        </div>
       </header>
-      {message && (
-        <p className={message.ok ? 'nk-muted' : 'nk-alert'} role={message.ok ? 'status' : 'alert'}>
-          {message.text}
-        </p>
-      )}
 
-      <form className="nk-form" onSubmit={(e) => void save(e)} aria-label="Account">
-        <h3>Account</h3>
-        <div className="nk-row">
-          <label>
-            Email
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-          </label>
-          <label>
-            Role
-            <select value={role} disabled={isSelf} onChange={(e) => setRole(e.target.value as Role)}>
-              <option value="user">User</option>
-              <option value="administrator">Administrator</option>
-            </select>
-          </label>
-        </div>
-        {!isSelf && (
-          <label className="nk-check">
-            <input type="checkbox" checked={disabled} onChange={(e) => setDisabled(e.target.checked)} /> Disabled: they can’t sign in, and their sessions end
-          </label>
-        )}
-        <div className="nk-actions">
-          <button type="submit">Save</button>
-        </div>
-      </form>
+      <div className={panel.body}>
+        {message && <Alert variant={message.ok ? 'info' : 'error'}>{message.text}</Alert>}
 
-      {!isSelf && (
-        <form className="nk-form" onSubmit={(e) => void resetPassword(e)} aria-label="Reset password">
-          <h3>Reset password</h3>
-          <label>
-            New password
-            <input type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-          </label>
-          <label className="nk-check">
-            <input type="checkbox" checked={mustChange} onChange={(e) => setMustChange(e.target.checked)} /> They must change it when they next sign in
-          </label>
-          <div className="nk-actions">
-            <button type="submit">Reset password</button>
+        <form className={panel.section} onSubmit={(e) => void save(e)} noValidate aria-labelledby="account-title">
+          <h2 id="account-title" className={panel.sectionTitle}>
+            Account
+          </h2>
+          <TextField label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} maxLength={256} />
+          <RoleSelect value={role} onChange={setRole} disabled={isSelf} />
+          <Checkbox label="Disable this account (blocks sign-in and ends all sessions)" checked={disabled} onChange={(e) => setDisabled(e.target.checked)} disabled={isSelf} />
+          {isSelf && <p className={panel.muted}>You can’t change your own role or disable yourself.</p>}
+          <div>
+            <Button type="submit" loading={saving}>
+              Save account
+            </Button>
           </div>
         </form>
-      )}
 
-      <h3>Grants</h3>
-      {user.role === 'administrator' ? (
-        <p className="nk-muted">Administrators see and manage every host, so grants don’t apply to them.</p>
-      ) : (
-        <GrantsEditor userId={user.id} hosts={hosts} />
+        <section className={panel.section} aria-labelledby="password-title">
+          <h2 id="password-title" className={panel.sectionTitle}>
+            Password
+          </h2>
+          <p className={panel.muted}>
+            {user.isLockedOut ? 'The account is locked after too many failed sign-ins. Resetting the password unlocks it. ' : null}
+            Set a new password and give it to the user; they can be asked to change it at their next sign-in.
+          </p>
+          <div>
+            <Button variant="secondary" onClick={() => setResetting(true)}>
+              Reset password…
+            </Button>
+          </div>
+        </section>
+
+        <section className={panel.section} aria-labelledby="access-title">
+          <h2 id="access-title" className={panel.sectionTitle}>
+            Host access
+          </h2>
+          {user.role === 'administrator' ? (
+            <p className={panel.muted}>Administrators can use and manage every host.</p>
+          ) : (
+            <GrantsEditor userId={user.id} hosts={hosts} />
+          )}
+        </section>
+      </div>
+
+      {resetting && (
+        <ResetPasswordDialog
+          user={user}
+          onClose={() => setResetting(false)}
+          onDone={() => {
+            setResetting(false)
+            setMessage({ ok: true, text: `Password reset. ${user.userName} was signed out everywhere.` })
+            onChanged()
+          }}
+        />
       )}
     </article>
   )
 }
 
+/** Which hosts a user may use or manage, as 1.x edited them: hosts, or groups by tag, each with how many hosts it covers now. */
 function GrantsEditor({ userId, hosts }: { userId: string; hosts: Host[] }) {
+  const id = useId()
+  const namesList = `${id}-names`
   const [grants, setGrants] = useState<GrantDraft[] | null>(null)
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null)
+  const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -318,14 +512,7 @@ function GrantsEditor({ userId, hosts }: { userId: string; hosts: Host[] }) {
       (loaded) => {
         if (!cancelled) {
           setGrants(
-            loaded.map((g) => ({
-              key: ++keys,
-              kind: g.hostId ? 'host' : 'tag',
-              hostId: g.hostId ?? '',
-              tagName: g.tagName ?? '',
-              tagValue: g.tagValue ?? '',
-              level: g.level,
-            })),
+            loaded.map((g) => ({ key: ++keys, kind: g.hostId ? 'host' : 'tag', hostId: g.hostId ?? '', tagName: g.tagName ?? '', tagValue: g.tagValue ?? '', level: g.level })),
           )
         }
       },
@@ -341,90 +528,117 @@ function GrantsEditor({ userId, hosts }: { userId: string; hosts: Host[] }) {
   }, [userId])
 
   if (!grants) {
-    return message ? <p className="nk-alert">{message.text}</p> : <p className="nk-muted">Loading grants…</p>
+    return message ? <Alert>{message.text}</Alert> : <Spinner label="Loading access" />
   }
 
+  const sortedHosts = [...hosts].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true }))
+  const covered = hosts.filter((h) => grants.some((g) => grantMatches(g, h)))
+  const manageable = hosts.filter((h) => grants.some((g) => g.level === 'manage' && grantMatches(g, h)))
   const update = (key: number, change: Partial<GrantDraft>) => setGrants(grants.map((g) => (g.key === key ? { ...g, ...change } : g)))
+  const add = (kind: 'host' | 'tag') => setGrants([...grants, { key: ++keys, kind, hostId: '', tagName: '', tagValue: '', level: 'use' }])
 
-  async function save(event: FormEvent) {
-    event.preventDefault()
+  async function save() {
     setMessage(null)
+    setSaving(true)
     try {
       await api.put(
         `/api/users/${userId}/grants`,
-        grants!.map((g) =>
-          g.kind === 'host' ? { hostId: g.hostId, level: g.level } : { tagName: g.tagName.trim(), tagValue: g.tagValue.trim() || null, level: g.level },
-        ),
+        grants!.map((g) => (g.kind === 'host' ? { hostId: g.hostId, level: g.level } : { tagName: g.tagName.trim(), tagValue: g.tagValue.trim() || null, level: g.level })),
       )
-      setMessage({ ok: true, text: 'Grants saved. Sessions they’re no longer allowed have ended.' })
+      setMessage({ ok: true, text: 'Access saved. Sessions they’re no longer allowed have ended.' })
     } catch (caught) {
-      setMessage({ ok: false, text: describe(caught, 'The grants could not be saved.') })
+      setMessage({ ok: false, text: describe(caught, 'The access could not be saved.') })
+    } finally {
+      setSaving(false)
     }
   }
 
   return (
-    <form className="nk-form" onSubmit={(e) => void save(e)} aria-label="Grants">
-      {message && (
-        <p className={message.ok ? 'nk-muted' : 'nk-alert'} role={message.ok ? 'status' : 'alert'}>
-          {message.text}
-        </p>
-      )}
-      {grants.length === 0 && <p className="nk-muted">No grants: they see no hosts.</p>}
-      {grants.map((grant, i) => (
-        <fieldset key={grant.key} className="nk-item" aria-label={`Grant ${i + 1}`}>
-          <div className="nk-row">
-            <label>
-              On
-              <select value={grant.kind} onChange={(e) => update(grant.key, { kind: e.target.value as 'host' | 'tag' })}>
-                <option value="host">One host</option>
-                <option value="tag">Hosts with a tag</option>
-              </select>
-            </label>
-            {grant.kind === 'host' ? (
-              <label>
-                Host
-                <select value={grant.hostId} onChange={(e) => update(grant.key, { hostId: e.target.value })} required>
-                  <option value="">Choose a host</option>
-                  {hosts.map((h) => (
-                    <option key={h.id} value={h.id}>
-                      {h.name}
+    <>
+      <p className={panel.muted}>
+        Grant groups of hosts by tag (e.g. <code>site: Datacenter A</code>, or just <code>site</code> for any value) or individual hosts. Group grants include hosts tagged
+        later.
+      </p>
+      <div className={grantStyles.editor}>
+        <datalist id={namesList}>
+          {tagNames(hosts).map((name) => (
+            <option key={name} value={name} />
+          ))}
+        </datalist>
+        {grants.length === 0 && <p className={grantStyles.empty}>No access yet. This user will see an empty host tree.</p>}
+        <ul className={grantStyles.list} aria-label="Access grants">
+          {grants.map((grant, index) => {
+            const position = `grant ${index + 1}`
+            const matches = hosts.filter((h) => grantMatches(grant, h)).length
+            return (
+              <li key={grant.key} className={grantStyles.row}>
+                <span className={grantStyles.kind}>{grant.kind === 'tag' ? 'Group' : 'Host'}</span>
+                {grant.kind === 'tag' ? (
+                  <div className={grantStyles.target}>
+                    <input
+                      className={grantStyles.input}
+                      value={grant.tagName}
+                      onChange={(e) => update(grant.key, { tagName: e.target.value.replace(/[:=]/g, '') })}
+                      placeholder="Tag name, e.g. site"
+                      list={namesList}
+                      aria-label={`Tag name for ${position}`}
+                      autoComplete="off"
+                    />
+                    <span className={grantStyles.separator}>:</span>
+                    <input
+                      className={grantStyles.input}
+                      value={grant.tagValue}
+                      onChange={(e) => update(grant.key, { tagValue: e.target.value })}
+                      placeholder="any value"
+                      aria-label={`Tag value for ${position}`}
+                      autoComplete="off"
+                    />
+                  </div>
+                ) : (
+                  <select className={`${grantStyles.input} ${grantStyles.target}`} value={grant.hostId} onChange={(e) => update(grant.key, { hostId: e.target.value })} aria-label={`Host for ${position}`}>
+                    <option value="">Choose a host…</option>
+                    {sortedHosts.map((host) => (
+                      <option key={host.id} value={host.id}>
+                        {host.name} — {hostAddress(host)}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <select className={grantStyles.input} value={grant.level} onChange={(e) => update(grant.key, { level: e.target.value as Level })} aria-label={`Access level for ${position}`}>
+                  {(Object.entries(LEVELS) as [Level, (typeof LEVELS)[Level]][]).map(([level, info]) => (
+                    <option key={level} value={level}>
+                      {info.label} — {info.description}
                     </option>
                   ))}
                 </select>
-              </label>
-            ) : (
-              <>
-                <label>
-                  Tag name
-                  <input value={grant.tagName} onChange={(e) => update(grant.key, { tagName: e.target.value })} required />
-                </label>
-                <label>
-                  Value (optional)
-                  <input value={grant.tagValue} onChange={(e) => update(grant.key, { tagValue: e.target.value })} />
-                </label>
-              </>
-            )}
-            <label>
-              Level
-              <select value={grant.level} onChange={(e) => update(grant.key, { level: e.target.value as Level })}>
-                <option value="use">Use: see and connect</option>
-                <option value="manage">Manage: also change and delete</option>
-              </select>
-            </label>
+                <span className={grantStyles.matches}>{matches === 1 ? '1 host' : `${matches} hosts`}</span>
+                <button type="button" className={grantStyles.remove} onClick={() => setGrants(grants.filter((g) => g.key !== grant.key))} aria-label={`Remove ${position}`}>
+                  ×
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+        <div className={grantStyles.footer}>
+          <div className={grantStyles.actions}>
+            <Button variant="secondary" size="sm" onClick={() => add('tag')}>
+              Add group
+            </Button>
+            <Button variant="secondary" size="sm" onClick={() => add('host')}>
+              Add host
+            </Button>
           </div>
-          <button type="button" className="nk-remove" onClick={() => setGrants(grants.filter((g) => g.key !== grant.key))}>
-            Remove grant
-          </button>
-        </fieldset>
-      ))}
-      <div className="nk-actions">
-        <button type="button" onClick={() => setGrants([...grants, { key: ++keys, kind: 'host', hostId: '', tagName: '', tagValue: '', level: 'use' }])}>
-          Add grant
-        </button>
-        <button type="submit" className="nk-primary">
-          Save grants
-        </button>
+          <p className={grantStyles.summary} aria-live="polite">
+            Can use {covered.length} of {hosts.length} hosts{manageable.length > 0 ? `, manage ${manageable.length}` : ''}.
+          </p>
+        </div>
       </div>
-    </form>
+      {message && <Alert variant={message.ok ? 'info' : 'error'}>{message.text}</Alert>}
+      <div>
+        <Button onClick={() => void save()} loading={saving}>
+          Save access
+        </Button>
+      </div>
+    </>
   )
 }

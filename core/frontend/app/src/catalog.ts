@@ -103,7 +103,7 @@ export function connectMenu(host: Host, catalog: Catalog): ConnectGroup[] {
               ...host.credentials
                 .filter((c) => usedWith(c, index))
                 .map((c): ConnectEntry => ({ ...base, key: `${action.id}/${service.id}/${c.id}`, label: credentialName(c), credential: { kind: 'saved', id: c.id, name: credentialName(c) } })),
-              { ...base, key: `${action.id}/${service.id}/typed`, label: 'Type a credential…', credential: { kind: 'typed' } },
+              { ...base, key: `${action.id}/${service.id}/typed`, label: 'Enter credentials…', credential: { kind: 'typed' } },
             ]
       groups.push({ key: `${action.id}/${service.id}`, label: `${action.label} · ${serviceName(service, catalog.serviceTypes)}`, actionLabel: action.label, entries })
     })

@@ -73,7 +73,7 @@ describe('the Connect menu', () => {
       { key: 'term.reboot/s1', label: 'Reboot', target: { kind: 'run', pluginId: 'term', endpoint: 'reboot' }, serviceId: 's1', credential: { kind: 'none' } },
     ])
     expect(group!.label).toBe('Terminal · Term :2222')
-    expect(group!.entries.map((e) => e.label)).toEqual(['root', 'CORP\\ops', 'Type a credential…'])
+    expect(group!.entries.map((e) => e.label)).toEqual(['root', 'CORP\\ops', 'Enter credentials…'])
     expect(group!.entries[0]!.credential).toEqual({ kind: 'saved', id: 'c1', name: 'root' })
   })
 

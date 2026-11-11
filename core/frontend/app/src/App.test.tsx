@@ -220,26 +220,23 @@ describe('the users page', () => {
     render(<App />)
     await user.click(await screen.findByRole('button', { name: 'Users' }))
     await user.click(screen.getByRole('button', { name: 'New user' }))
-    const form = screen.getByRole('form', { name: 'New user' })
-    await user.type(within(form).getByLabelText('User name'), 'bob')
-    await user.type(within(form).getByLabelText('Email'), 'bob@example.com')
-    await user.type(within(form).getByLabelText('Initial password'), 'Bob-Passw0rd-123')
-    await user.click(within(form).getByRole('button', { name: 'Create user' }))
+    const dialog = screen.getByRole('dialog', { name: 'New user' })
+    await user.type(within(dialog).getByLabelText('Username'), 'bob')
+    await user.type(within(dialog).getByLabelText('Email'), 'bob@example.com')
+    await user.type(within(dialog).getByLabelText('Password'), 'Bob-Passw0rd-123')
+    await user.click(within(dialog).getByRole('button', { name: 'Create user' }))
 
     const panel = await screen.findByRole('article', { name: 'bob' })
     expect(bodyOf(fetch, 'POST /api/users')).toEqual({ userName: 'bob', email: 'bob@example.com', role: 'user', password: 'Bob-Passw0rd-123', mustChangePassword: true })
-    const grants = await within(panel).findByRole('form', { name: 'Grants' })
-    await user.click(within(grants).getByRole('button', { name: 'Add grant' }))
-    await user.selectOptions(within(grants).getByLabelText('Host'), 'h1')
-    await user.click(within(grants).getByRole('button', { name: 'Add grant' }))
-    const second = within(grants).getByRole('group', { name: 'Grant 2' })
-    await user.selectOptions(within(second).getByLabelText('On'), 'tag')
-    await user.type(within(second).getByLabelText('Tag name'), 'env')
-    await user.type(within(second).getByLabelText('Value (optional)'), 'prod')
-    await user.selectOptions(within(second).getByLabelText('Level'), 'manage')
-    await user.click(within(grants).getByRole('button', { name: 'Save grants' }))
+    await user.click(await within(panel).findByRole('button', { name: 'Add host' }))
+    await user.selectOptions(within(panel).getByLabelText('Host for grant 1'), 'h1')
+    await user.click(within(panel).getByRole('button', { name: 'Add group' }))
+    await user.type(within(panel).getByLabelText('Tag name for grant 2'), 'env')
+    await user.type(within(panel).getByLabelText('Tag value for grant 2'), 'prod')
+    await user.selectOptions(within(panel).getByLabelText('Access level for grant 2'), 'manage')
+    await user.click(within(panel).getByRole('button', { name: 'Save access' }))
 
-    expect(await within(grants).findByRole('status')).toHaveTextContent('Grants saved.')
+    expect(await within(panel).findByRole('status')).toHaveTextContent('Access saved.')
     expect(bodyOf(fetch, 'PUT /api/users/u2/grants')).toEqual([
       { hostId: 'h1', level: 'use' },
       { tagName: 'env', tagValue: 'prod', level: 'manage' },
@@ -351,10 +348,10 @@ describe('the workspace', () => {
     await openConnect(user, 'web01')
     await user.click(screen.getByRole('menuitem', { name: 'Terminal · Term :22' }))
     expect(await screen.findByRole('menuitem', { name: 'root' })).toBeInTheDocument()
-    await user.click(screen.getByRole('menuitem', { name: 'Type a credential…' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Enter credentials…' }))
 
-    const typed = await screen.findByRole('dialog', { name: 'Type a credential' })
-    await user.type(within(typed).getByLabelText('User name'), 'ops')
+    const typed = await screen.findByRole('dialog', { name: 'Enter credentials' })
+    await user.type(within(typed).getByLabelText('Username'), 'ops')
     await user.type(within(typed).getByLabelText('Password'), 'secret-1')
     await user.click(within(typed).getByRole('button', { name: 'Connect' }))
 
@@ -366,9 +363,9 @@ describe('the workspace', () => {
     expect(socket.sent[0]).toEqual({ type: 'start', hostId: 'h1', serviceId: 's1', promptReference: 'ref-1', options: { columns: 80 } })
 
     act(() => socket.receiveJson({ type: 'hostKey', hostId: 'h1', serviceId: 's1', algorithm: 'ssh-ed25519', fingerprint: 'abc123' }))
-    const key = await screen.findByRole('dialog', { name: 'Trust this server key?' })
+    const key = await screen.findByRole('dialog', { name: 'Trust this host key?' })
     expect(within(key).getByText('SHA256:abc123')).toBeInTheDocument()
-    await user.click(within(key).getByRole('button', { name: 'Trust' }))
+    await user.click(within(key).getByRole('button', { name: 'Trust and connect' }))
     await waitFor(() => expect(socket.sent.at(-1)).toEqual({ type: 'hostKeyDecision', trust: true }))
 
     act(() => socket.receiveJson({ type: 'connected' }))
@@ -439,10 +436,10 @@ describe('the workspace', () => {
     // A second tab, waiting on a typed credential, is closed before it's answered.
     await user.click(screen.getByRole('tab', { name: /Details/ }))
     await user.click(within(screen.getByRole('article', { name: 'web01' })).getByRole('button', { name: 'Connect' }))
-    await choose(user, 'Terminal · Term :22', 'Type a credential…')
-    expect(await screen.findByRole('dialog', { name: 'Type a credential' })).toBeInTheDocument()
+    await choose(user, 'Terminal · Term :22', 'Enter credentials…')
+    expect(await screen.findByRole('dialog', { name: 'Enter credentials' })).toBeInTheDocument()
     await user.click(screen.getAllByRole('button', { name: 'Close web01 · Terminal' }).at(-1)!)
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Type a credential' })).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Enter credentials' })).not.toBeInTheDocument())
   })
 
   it('catches a port that isn’t a number before sending', async () => {
