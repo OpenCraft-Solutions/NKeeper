@@ -451,11 +451,11 @@ describe('the workspace', () => {
     const form = screen.getByRole('form', { name: 'New host' })
     await user.type(within(form).getByLabelText('Name'), 'new01')
     await user.click(within(form).getByRole('button', { name: 'Add service' }))
-    await user.type(within(form).getByLabelText('Port'), 'abc')
-    await user.selectOptions(within(form).getByLabelText('Mode'), 'fast')
+    await user.type(within(form).getByLabelText('Port for service 1'), 'abc')
+    await user.selectOptions(within(form).getByLabelText('Mode for service 1'), 'fast')
     await user.click(within(form).getByRole('button', { name: 'Create host' }))
 
-    expect(await within(form).findByText('Enter a port from 1 to 65535.', { selector: '.nk-field-error' })).toBeInTheDocument()
+    expect(await within(form).findByText('Enter a port from 1 to 65535.')).toBeInTheDocument()
     expect(fetch.mock.calls.some(([url, init]) => url === '/api/hosts' && init?.method === 'POST')).toBe(false)
   })
 
@@ -476,16 +476,16 @@ describe('the workspace', () => {
     await user.type(within(form).getByLabelText('Name'), 'new01')
     await user.type(within(form).getByLabelText('IP address'), '192.0.2.99')
     await user.click(within(form).getByRole('button', { name: 'Add service' }))
-    await user.type(within(form).getByLabelText('Port'), '99999')
-    await user.type(within(form).getByLabelText('Shell'), '/bin/zsh')
-    await user.selectOptions(within(form).getByLabelText('Mode'), 'safe')
-    await user.type(within(form).getByLabelText('Retries'), '3')
-    await user.click(within(form).getByLabelText('Compress'))
+    await user.type(within(form).getByLabelText('Port for service 1'), '99999')
+    await user.type(within(form).getByLabelText('Shell for service 1'), '/bin/zsh')
+    await user.selectOptions(within(form).getByLabelText('Mode for service 1'), 'safe')
+    await user.type(within(form).getByLabelText('Retries for service 1'), '3')
+    await user.click(within(form).getByLabelText('Compress for service 1'))
     await user.click(within(form).getByRole('button', { name: 'Add credential' }))
-    await user.type(within(form).getByLabelText('User name'), 'root')
+    await user.type(within(form).getByLabelText('Username'), 'root')
     await user.click(within(form).getByRole('button', { name: 'Create host' }))
 
-    expect(await within(form).findByText('Use a port from 1 to 65535.', { selector: '.nk-field-error' })).toBeInTheDocument()
+    expect(await within(form).findByText('Use a port from 1 to 65535.')).toBeInTheDocument()
     expect(bodyOf(fetch, 'POST /api/hosts')).toEqual({
       name: 'new01',
       hostname: null,
@@ -499,7 +499,7 @@ describe('the workspace', () => {
       jump: null,
     })
 
-    await user.clear(within(form).getByLabelText(/^Port/))
+    await user.clear(within(form).getByLabelText('Port for service 1'))
     await user.click(within(form).getByRole('button', { name: 'Create host' }))
     expect(await screen.findByRole('article', { name: 'new01' })).toBeInTheDocument()
     // It's checked at once, rather than at the next background round.
@@ -520,7 +520,7 @@ describe('the workspace', () => {
     render(<App importer={termImporter} />)
     await user.click(await screen.findByRole('button', { name: /^db01,/ }))
     await user.click(screen.getByRole('button', { name: 'Edit' }))
-    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
 
     expect(await screen.findByText('Someone else changed this host since you started editing it.')).toBeInTheDocument()
     expect(bodyOf(fetch, 'PUT /api/hosts/h2')).toMatchObject({ name: 'db01', version: 1 })
