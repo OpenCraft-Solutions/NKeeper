@@ -12,6 +12,9 @@ public sealed record ContributedSessionType(string PluginId, SessionType Type);
 /// <summary>A host action, with the plugin that contributed it.</summary>
 public sealed record ContributedHostAction(string PluginId, HostAction Action);
 
+/// <summary>A session origin, with the plugin that claimed it.</summary>
+public sealed record ContributedSessionOrigin(string PluginId, SessionOrigin Origin);
+
 /// <summary>Collects one plugin's contributions while its <see cref="IPlugin.Contribute"/> runs.</summary>
 internal sealed class ContributionCollector : IPluginContributions
 {
@@ -37,6 +40,14 @@ internal sealed class ContributionCollector : IPluginContributions
     {
         ArgumentNullException.ThrowIfNull(hostAction);
         HostActions.Add(hostAction);
+    }
+
+    public List<SessionOrigin> SessionOrigins { get; } = [];
+
+    public void AddSessionOrigin(SessionOrigin origin)
+    {
+        ArgumentNullException.ThrowIfNull(origin);
+        SessionOrigins.Add(origin);
     }
 }
 
@@ -133,7 +144,8 @@ public static partial class ContributionRules
             return $"Session type '{type.Id}' needs a label of at most {MaxLabelLength} characters.";
         }
 
-        if (type.Handler is null || !type.Handler.IsClass || type.Handler.IsAbstract || !typeof(IStreamSessionHandler).IsAssignableFrom(type.Handler))
+        // A stateful type has no handler (SDK 0.1.8); a stream type's must be a concrete handler.
+        if (type.Handler is not null && (!type.Handler.IsClass || type.Handler.IsAbstract || !typeof(IStreamSessionHandler).IsAssignableFrom(type.Handler)))
         {
             return $"Session type '{type.Id}' has a handler that isn't a concrete {nameof(IStreamSessionHandler)}.";
         }
@@ -208,6 +220,18 @@ public static partial class ContributionRules
         return Enum.IsDefined(action.Credential) ? null : $"Host action '{action.Id}' has an unknown credential mode.";
     }
 
+    public static string? Check(SessionOrigin origin)
+    {
+        if (origin.Prefix is null || !OriginPrefix().IsMatch(origin.Prefix))
+        {
+            return $"The session origin prefix '{origin.Prefix}' isn't 2 to 16 lower-case letters and digits, starting with a letter.";
+        }
+
+        return origin.Handler is null || !origin.Handler.IsClass || origin.Handler.IsAbstract || !typeof(ISessionOriginHandler).IsAssignableFrom(origin.Handler)
+            ? $"Session origin '{origin.Prefix}' has a handler that isn't a concrete {nameof(ISessionOriginHandler)}."
+            : null;
+    }
+
     // \z, not $: in .NET, $ also matches before a final newline.
     [GeneratedRegex(@"^[a-z][a-z0-9-]{0,31}\z")]
     private static partial Regex TypeId();
@@ -217,6 +241,9 @@ public static partial class ContributionRules
 
     [GeneratedRegex(@"^[a-z][a-z0-9-]*(?:/[a-z][a-z0-9-]*)*\z")]
     private static partial Regex EndpointPath();
+
+    [GeneratedRegex(@"^[a-z][a-z0-9]{1,15}\z")]
+    private static partial Regex OriginPrefix();
 
     [GeneratedRegex(@"^[a-z][A-Za-z0-9]{0,63}\z")]
     private static partial Regex SettingKey();

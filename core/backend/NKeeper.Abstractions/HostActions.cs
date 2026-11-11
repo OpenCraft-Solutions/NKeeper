@@ -44,6 +44,9 @@ public sealed class HealthProbe
     /// <summary>A TCP connection to the service's address and port, closed at once. Nothing is sent.</summary>
     public static HealthProbe Tcp { get; } = new("tcp");
 
+    /// <summary>A TCP connection and a TLS handshake that accepts any certificate, reporting its subject and expiry (SDK 0.1.8).</summary>
+    public static HealthProbe Tls { get; } = new("tls");
+
     /// <summary>The probe's name, as <c>GET /api/plugins</c> reports it.</summary>
     public string Kind { get; }
 

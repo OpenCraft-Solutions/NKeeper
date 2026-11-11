@@ -90,7 +90,8 @@ public static class StreamSessionEndpoints
         }
 
         var services = context.RequestServices;
-        if (services.GetRequiredService<SessionTypeCatalog>().Find(type) is not var (pluginId, sessionType)
+        // A stateful session type (§7.17) has no stream: its plugin's own endpoints open it.
+        if (services.GetRequiredService<SessionTypeCatalog>().Find(type) is not var (pluginId, sessionType) || sessionType.IsStateful
             || services.GetRequiredService<IAuthSessionAccessor>().CurrentSessionKey(context) is not { } authSessionKey)
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
@@ -335,7 +336,7 @@ internal sealed class StreamSessionRunner(HttpContext context, SessionSocket soc
             try
             {
                 // Resolved here, so a plugin's broken registration or constructor is reported like any failure.
-                handler ??= (IStreamSessionHandler)_services.GetRequiredService(sessionType.Handler);
+                handler ??= (IStreamSessionHandler)_services.GetRequiredService(sessionType.Handler!);
                 return await handler.OpenAsync(request, cancellationToken);
             }
             catch (SshConnectException ex) when (ex.Reason == SshConnectFailure.HostKeyUnknown && ex.PresentedKey is { } key && prompts < MaxKeyPrompts)

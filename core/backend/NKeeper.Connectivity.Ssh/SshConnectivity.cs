@@ -16,8 +16,12 @@ namespace NKeeper.Connectivity.Ssh;
 /// (<see cref="SshConnectionPlanner"/>); this opens it, through the jump host's tunnel when there is one, checks
 /// each server's key against the trust store, and signs in. Ported from 1.x's SshCommandConnection and JumpTunnel.
 /// </summary>
-public sealed class SshConnectivity(SshConnectionPlanner planner, TrustStore trust, IAuditLog audit) : IConnectivity
+public sealed class SshConnectivity(SshConnectionPlanner planner, TrustStore trust, IAuditLog audit, HttpConnector http) : IConnectivity
 {
+    /// <summary>HTTP connections are core's own (docs/architecture.md §7.16); this assembly only adds SSH.</summary>
+    public Task<IHttpConnection> OpenHttpAsync(HostContext host, Guid serviceId, bool tls, CancellationToken cancellationToken = default) =>
+        http.OpenAsync(host, serviceId, tls, cancellationToken);
+
     public static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(20);
     public static readonly TimeSpan KeepAliveInterval = TimeSpan.FromSeconds(30);
 

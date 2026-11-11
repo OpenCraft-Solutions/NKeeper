@@ -13,6 +13,50 @@ public interface IConnectivity
     /// <exception cref="CredentialDeniedException">The handle isn't valid for this user, host, service, plugin or request.</exception>
     /// <exception cref="SshConnectException">The connection couldn't be opened; <see cref="SshConnectException.Reason"/> says why.</exception>
     Task<ISshConnection> OpenSshAsync(HostContext host, Guid serviceId, CredentialHandle handle, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// An HTTP connection to one of the host's services (docs/architecture.md §7.16, SDK 0.1.8): requests go to that
+    /// endpoint only. With <paramref name="tls"/>, the certificate must be publicly valid or trusted for the host,
+    /// which core checks before it returns and on every later request.
+    /// </summary>
+    /// <exception cref="HttpConnectException">The certificate isn't trusted, or the service can't be reached.</exception>
+    Task<IHttpConnection> OpenHttpAsync(HostContext host, Guid serviceId, bool tls, CancellationToken cancellationToken = default);
+}
+
+/// <summary>An open HTTP connection to a service. It sends no cookies, follows no redirects and doesn't decompress.</summary>
+public interface IHttpConnection : IAsyncDisposable
+{
+    /// <summary>Sends requests to the service, and nowhere else.</summary>
+    HttpMessageInvoker Client { get; }
+
+    /// <summary>The service's address: <c>https://10.0.0.5:8443/</c>.</summary>
+    Uri BaseAddress { get; }
+}
+
+public enum HttpConnectFailure
+{
+    /// <summary>The certificate isn't publicly valid, and no one trusted it for the host: <see cref="HttpConnectException.PresentedCertificate"/> has it.</summary>
+    HostKeyUnknown,
+
+    /// <summary>The certificate differs from the one trusted for the host.</summary>
+    HostKeyChanged,
+
+    Unreachable,
+
+    TimedOut,
+
+    /// <summary>The host is reached through a jump host, which HTTP connections can't use yet.</summary>
+    JumpHostUnsupported,
+}
+
+/// <summary>A certificate a server presented, for the user to decide on: its SHA-256 fingerprint (unpadded base64), subject and expiry.</summary>
+public sealed record PresentedCertificate(Guid HostId, Guid ServiceId, string Fingerprint, string Subject, DateTimeOffset NotAfterUtc);
+
+public sealed class HttpConnectException(HttpConnectFailure reason, string message, PresentedCertificate? presentedCertificate = null) : Exception(message)
+{
+    public HttpConnectFailure Reason { get; } = reason;
+
+    public PresentedCertificate? PresentedCertificate { get; } = presentedCertificate;
 }
 
 /// <summary>An open, authenticated SSH connection. Disposing it closes it, and its jump host tunnel.</summary>
