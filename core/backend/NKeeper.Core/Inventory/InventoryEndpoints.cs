@@ -42,6 +42,7 @@ public static class InventoryEndpoints
             .AddScoped<ICredentialBroker>(provider => provider.GetRequiredService<CredentialBroker>())
             .AddScoped<NKeeper.Core.Connectivity.SshConnectionPlanner>()
             .AddScoped<NKeeper.Core.Connectivity.HttpConnector>()
+            .AddScoped<NKeeper.Core.Connectivity.IJumpTunnels, NKeeper.Core.Connectivity.NoJumpTunnels>()
             .AddSingleton<TrustPresentationStore>()
             .AddScoped<TrustStore>()
             .AddScoped<HostAccess>()

@@ -1,6 +1,7 @@
 using System.Net.Sockets;
 using System.Text;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using NKeeper.Abstractions;
 using NKeeper.Core.Audit;
 using NKeeper.Core.Connectivity;
@@ -16,11 +17,65 @@ namespace NKeeper.Connectivity.Ssh;
 /// (<see cref="SshConnectionPlanner"/>); this opens it, through the jump host's tunnel when there is one, checks
 /// each server's key against the trust store, and signs in. Ported from 1.x's SshCommandConnection and JumpTunnel.
 /// </summary>
-public sealed class SshConnectivity(SshConnectionPlanner planner, TrustStore trust, IAuditLog audit, HttpConnector http) : IConnectivity
+public sealed class SshConnectivity(SshConnectionPlanner planner, TrustStore trust, IAuditLog audit, IServiceProvider services) : IConnectivity, IJumpTunnels
 {
-    /// <summary>HTTP connections are core's own (docs/architecture.md §7.16); this assembly only adds SSH.</summary>
+    /// <summary>
+    /// HTTP connections are core's own (docs/architecture.md §7.16); this assembly adds the SSH tunnels they take
+    /// through a jump host (<see cref="IJumpTunnels"/>). Resolved when used: the connector needs those tunnels.
+    /// </summary>
     public Task<IHttpConnection> OpenHttpAsync(HostContext host, Guid serviceId, bool tls, CancellationToken cancellationToken = default) =>
-        http.OpenAsync(host, serviceId, tls, cancellationToken);
+        services.GetRequiredService<HttpConnector>().OpenAsync(host, serviceId, tls, cancellationToken);
+
+    /// <summary>
+    /// A loopback port forwarded through the host's jump host (§7.16). The jump host's key must already be trusted,
+    /// since a request can't stop to ask; an SSH session to it asks once. Opening it is audited as credential.use.
+    /// </summary>
+    public async Task<IJumpTunnel?> OpenAsync(HostContext host, string address, int port, CancellationToken cancellationToken)
+    {
+        SshPlan? plan;
+        try
+        {
+            plan = await planner.PlanTunnelAsync(host, cancellationToken);
+        }
+        catch (SshConnectException ex)
+        {
+            throw new HttpConnectException(HttpConnectFailure.JumpHostUnavailable, ex.Message);
+        }
+
+        if (plan is null)
+        {
+            return null;
+        }
+
+        using (plan)
+        {
+            var jumpEnd = plan.Target;
+            SshClient? jump = null;
+            try
+            {
+                jump = await ConnectAsync(jumpEnd, jumpEnd.Address, jumpEnd.Port, plan, isJump: true, cancellationToken);
+                var forward = Forward(jump, jumpEnd, address, port);
+                await audit.RecordAsync(
+                    new AuditEntry(AuditActions.CredentialUse, host.Id.ToString(), $"tunnel to {address}:{port}, plugin {plan.PluginId}, {plan.Credential}"),
+                    cancellationToken);
+                return new Tunnel(forward, jump);
+            }
+            catch (SshConnectException ex)
+            {
+                jump?.Dispose();
+                var message = ex.Reason == SshConnectFailure.HostKeyUnknown
+                    ? $"The jump host “{jumpEnd.Name}”'s SSH key isn't trusted yet. Open a terminal to it once to check and trust it."
+                    : ex.Message;
+                throw new HttpConnectException(HttpConnectFailure.JumpHostUnavailable, message);
+            }
+            finally
+            {
+                // The jump host's secrets were read for this tunnel only.
+                jumpEnd.Password?.Dispose();
+                jumpEnd.PrivateKey?.Dispose();
+            }
+        }
+    }
 
     public static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(20);
     public static readonly TimeSpan KeepAliveInterval = TimeSpan.FromSeconds(30);
@@ -202,6 +257,14 @@ public sealed class SshConnectivity(SshConnectionPlanner planner, TrustStore tru
     }
 }
 
+/// <summary>A tunnel through a jump host. Disposing it closes the forward and the jump host's connection.</summary>
+internal sealed class Tunnel(ForwardedPortLocal forward, SshClient jump) : IJumpTunnel
+{
+    public int LocalPort { get; } = (int)forward.BoundPort;
+
+    public void Dispose() => SshConnectivity.Close(forward, jump);
+}
+
 /// <summary>An open connection. Disposing it closes it, then its tunnel and the jump host's connection.</summary>
 internal sealed class SshConnection(SshClient client, ForwardedPortLocal? forward, SshClient? jump) : ISshConnection
 {
@@ -244,6 +307,10 @@ internal sealed class SshShell(ShellStream stream) : ISshShell
 public static class SshConnectivityServices
 {
     /// <summary><see cref="IConnectivity"/>, for plugins' endpoints. Needs the inventory (AddNKeeperInventory).</summary>
+    /// <summary>SSH connections, and the jump host tunnels core's other connections take (replacing core's refusal).</summary>
     public static IServiceCollection AddNKeeperSshConnectivity(this IServiceCollection services) =>
-        services.AddScoped<IConnectivity, SshConnectivity>();
+        services
+            .AddScoped<SshConnectivity>()
+            .AddScoped<IConnectivity>(provider => provider.GetRequiredService<SshConnectivity>())
+            .Replace(ServiceDescriptor.Scoped<IJumpTunnels>(provider => provider.GetRequiredService<SshConnectivity>()));
 }

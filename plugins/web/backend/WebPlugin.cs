@@ -19,7 +19,7 @@ public sealed class WebPlugin : IPlugin
     {
         contributions.AddServiceType(new ServiceType("http", "HTTP") { DefaultPort = 80, Health = HealthProbe.Tcp });
         contributions.AddServiceType(new ServiceType("https", "HTTPS") { DefaultPort = 443, Health = HealthProbe.Tls });
-        contributions.AddSessionType(new SessionType(SessionTypeId, "Web page", null) { ServiceTypes = ["http", "https"], SupportsJumpHost = false });
+        contributions.AddSessionType(new SessionType(SessionTypeId, "Web page", null) { ServiceTypes = ["http", "https"] });
         contributions.AddHostAction(new HostAction("web.open", "Web page", SessionTypeId) { Credential = HostActionCredential.None });
         contributions.AddSessionOrigin(new SessionOrigin(WebOriginHandler.Prefix, typeof(WebOriginHandler)));
     }
@@ -110,7 +110,7 @@ public sealed class WebPlugin : IPlugin
     {
         HttpConnectFailure.HostKeyChanged => "host_key_changed",
         HttpConnectFailure.TimedOut => "timeout",
-        HttpConnectFailure.JumpHostUnsupported => "jump_host_unsupported",
+        HttpConnectFailure.JumpHostUnavailable => "jump_host_unavailable",
         _ => "unreachable",
     };
 

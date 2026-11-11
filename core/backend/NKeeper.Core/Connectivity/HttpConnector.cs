@@ -18,7 +18,7 @@ namespace NKeeper.Core.Connectivity;
 /// accepted when it's publicly valid, or when it's the one trusted for the host; core checks that with a handshake
 /// before handing the connection over, and again on every request it sends.
 /// </summary>
-public sealed class HttpConnector(CoreDbContext db, TrustStore trust, IAuthSessionAccessor sessions, IHttpContextAccessor http)
+public sealed class HttpConnector(CoreDbContext db, TrustStore trust, IAuthSessionAccessor sessions, IHttpContextAccessor http, IJumpTunnels tunnels)
 {
     public const string CertificateAlgorithm = "x509";
     public static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(15);
@@ -46,20 +46,33 @@ public sealed class HttpConnector(CoreDbContext db, TrustStore trust, IAuthSessi
             throw new HttpConnectException(HttpConnectFailure.Unreachable, $"This service of “{host.Name}” has no port. Edit the host to set one.");
         }
 
-        if (await db.Hosts.AnyAsync(h => h.Id == host.Id && h.JumpHostId != null, cancellationToken))
+        // Through the jump host, when there is one: requests still name the service, and its certificate is still
+        // checked against the service, but they're dialled to the tunnel's loopback end (§7.16).
+        var tunnel = await tunnels.OpenAsync(host, service.Address, port, cancellationToken);
+        try
         {
-            throw new HttpConnectException(HttpConnectFailure.JumpHostUnsupported, $"“{host.Name}” is reached through a jump host, which web connections can't use yet.");
+            return await OpenAsync(host, serviceId, service.Address, port, stored.Address ?? string.Empty, tls, tunnel, context, cancellationToken);
         }
+        catch
+        {
+            tunnel?.Dispose();
+            throw;
+        }
+    }
 
-        var baseAddress = new UriBuilder(tls ? Uri.UriSchemeHttps : Uri.UriSchemeHttp, service.Address, port).Uri;
+    private async Task<IHttpConnection> OpenAsync(
+        HostContext host, Guid serviceId, string address, int port, string storedAddress, bool tls, IJumpTunnel? tunnel, HttpContext context, CancellationToken cancellationToken)
+    {
+        var dial = tunnel is null ? null : new DialTo("127.0.0.1", tunnel.LocalPort);
+        var baseAddress = new UriBuilder(tls ? Uri.UriSchemeHttps : Uri.UriSchemeHttp, address, port).Uri;
         if (!tls)
         {
-            return new HttpConnection(baseAddress, Handler(baseAddress, validate: null));
+            return new HttpConnection(baseAddress, Handler(baseAddress, validate: null, dial), tunnel);
         }
 
-        var endpoint = new TrustEndpoint(host.Id, serviceId, TrustedKeyKind.TlsCertificate, stored.Address ?? string.Empty, port);
+        var endpoint = new TrustEndpoint(host.Id, serviceId, TrustedKeyKind.TlsCertificate, storedAddress, port);
         var known = await trust.KnownAsync(endpoint, cancellationToken);
-        using var presented = await HandshakeAsync(service.Address, port, cancellationToken);
+        using var presented = await HandshakeAsync(address, port, cancellationToken, dial);
         if (!presented.PubliclyValid)
         {
             var fingerprint = Fingerprint(presented.Certificate);
@@ -87,15 +100,21 @@ public sealed class HttpConnector(CoreDbContext db, TrustStore trust, IAuthSessi
             trustedFingerprints.Add(Fingerprint(presented.Certificate));
         }
 
-        return new HttpConnection(baseAddress, Handler(baseAddress, (certificate, errors) =>
-            errors == SslPolicyErrors.None || (certificate is not null && trustedFingerprints.Contains(Fingerprint(certificate)))));
+        return new HttpConnection(
+            baseAddress,
+            Handler(baseAddress, (certificate, errors) => errors == SslPolicyErrors.None || (certificate is not null && trustedFingerprints.Contains(Fingerprint(certificate))), dial),
+            tunnel);
     }
+
+    /// <summary>Where to dial instead of the service's own address: a tunnel's loopback end.</summary>
+    public sealed record DialTo(string Address, int Port);
 
     /// <summary>A certificate's SHA-256, in unpadded base64 like an SSH key's.</summary>
     public static string Fingerprint(X509Certificate certificate) => Convert.ToBase64String(SHA256.HashData(certificate.GetRawCertData())).TrimEnd('=');
 
     /// <summary>The certificate a server presents, and whether it's publicly valid for <paramref name="address"/>.</summary>
-    public static async Task<PresentedTls> HandshakeAsync(string address, int port, CancellationToken cancellationToken)
+    /// <param name="dial">Where to dial instead, a tunnel's end; the certificate is still checked for <paramref name="address"/>.</param>
+    public static async Task<PresentedTls> HandshakeAsync(string address, int port, CancellationToken cancellationToken, DialTo? dial = null)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(ConnectTimeout);
@@ -104,7 +123,7 @@ public sealed class HttpConnector(CoreDbContext db, TrustStore trust, IAuthSessi
         try
         {
             using var client = new TcpClient();
-            await client.ConnectAsync(address, port, timeout.Token);
+            await client.ConnectAsync(dial?.Address ?? address, dial?.Port ?? port, timeout.Token);
             // This handshake only reads the certificate, and sends nothing over the connection: the caller decides
             // on the certificate afterwards, against the trust store, before any request is made.
 #pragma warning disable CA5359 // Accepting any certificate: see above.
@@ -133,7 +152,7 @@ public sealed class HttpConnector(CoreDbContext db, TrustStore trust, IAuthSessi
             : new PresentedTls(certificate, errors == SslPolicyErrors.None);
     }
 
-    private static HttpMessageInvoker Handler(Uri baseAddress, Func<X509Certificate?, SslPolicyErrors, bool>? validate)
+    private static HttpMessageInvoker Handler(Uri baseAddress, Func<X509Certificate?, SslPolicyErrors, bool>? validate, DialTo? dial)
     {
         var sockets = new SocketsHttpHandler
         {
@@ -147,6 +166,24 @@ public sealed class HttpConnector(CoreDbContext db, TrustStore trust, IAuthSessi
                 RemoteCertificateValidationCallback = validate is null ? null : (_, certificate, _, errors) => validate(certificate, errors),
             },
         };
+        if (dial is not null)
+        {
+            sockets.ConnectCallback = async (_, cancellationToken) =>
+            {
+                var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
+                try
+                {
+                    await socket.ConnectAsync(dial.Address, dial.Port, cancellationToken);
+                    return new NetworkStream(socket, ownsSocket: true);
+                }
+                catch
+                {
+                    socket.Dispose();
+                    throw;
+                }
+            };
+        }
+
         return new HttpMessageInvoker(new OneEndpointHandler(baseAddress, sockets), disposeHandler: true);
     }
 
@@ -159,7 +196,7 @@ public sealed class HttpConnector(CoreDbContext db, TrustStore trust, IAuthSessi
                 : throw new InvalidOperationException($"This connection only sends requests to {baseAddress.GetLeftPart(UriPartial.Authority)}.");
     }
 
-    private sealed class HttpConnection(Uri baseAddress, HttpMessageInvoker client) : IHttpConnection
+    private sealed class HttpConnection(Uri baseAddress, HttpMessageInvoker client, IJumpTunnel? tunnel) : IHttpConnection
     {
         public HttpMessageInvoker Client { get; } = client;
 
@@ -168,6 +205,7 @@ public sealed class HttpConnector(CoreDbContext db, TrustStore trust, IAuthSessi
         public ValueTask DisposeAsync()
         {
             Client.Dispose();
+            tunnel?.Dispose();
             return ValueTask.CompletedTask;
         }
     }

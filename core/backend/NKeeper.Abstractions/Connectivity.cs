@@ -45,8 +45,8 @@ public enum HttpConnectFailure
 
     TimedOut,
 
-    /// <summary>The host is reached through a jump host, which HTTP connections can't use yet.</summary>
-    JumpHostUnsupported,
+    /// <summary>The host's jump host can't be used: the user can't use it, its key isn't trusted yet, or it wouldn't forward.</summary>
+    JumpHostUnavailable,
 }
 
 /// <summary>A certificate a server presented, for the user to decide on: its SHA-256 fingerprint (unpadded base64), subject and expiry.</summary>

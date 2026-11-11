@@ -105,6 +105,25 @@ public sealed class SshConnectionPlanner(
         return new SshPlan(target, jump, pluginId, sessions.CurrentSessionKey(context), credential);
     }
 
+    /// <summary>
+    /// The jump host's end alone, for a tunnel to one of the host's services that isn't SSH (docs/architecture.md
+    /// §7.16): null when the host has no jump host. The plan's <see cref="SshPlan.Target"/> is the jump host, and
+    /// disposing the plan clears its secrets.
+    /// </summary>
+    /// <exception cref="SshConnectException">The jump host can't be used.</exception>
+    public async Task<SshPlan?> PlanTunnelAsync(HostContext host, CancellationToken cancellationToken)
+    {
+        var context = http.HttpContext!;
+        var row = await db.Hosts.AsNoTracking().Where(h => h.Id == host.Id).Select(h => new { h.JumpHostId, h.JumpServiceId, h.JumpCredentialId }).FirstOrDefaultAsync(cancellationToken);
+        if (row?.JumpHostId is not { } jumpHostId)
+        {
+            return null;
+        }
+
+        var jump = await JumpAsync(jumpHostId, row.JumpServiceId, row.JumpCredentialId, RequestUser.From(context.User), cancellationToken);
+        return new SshPlan(jump, null, PluginCaller.Of(context) ?? string.Empty, sessions.CurrentSessionKey(context), $"jump host {jumpHostId} with credential {row.JumpCredentialId}");
+    }
+
     /// <summary>Windows OpenSSH takes a domain account as <c>DOMAIN\user</c>.</summary>
     private static string UserName(string username, string? domain) => domain is null ? username : $"{domain}\\{username}";
 

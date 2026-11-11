@@ -20,7 +20,7 @@ namespace NKeeper.Server.Tests;
 /// docs/architecture.md §7.16–7.19: the web plugin, packaged with YARP and loaded like any plugin, proxying a real
 /// HTTPS server with a self-signed certificate, on a session origin of its own.
 /// </summary>
-public sealed class WebTests(PostgresFixture postgres) : IClassFixture<PostgresFixture>
+public sealed class WebTests(PostgresFixture postgres, SshServerFixture ssh) : IClassFixture<PostgresFixture>, IClassFixture<SshServerFixture>
 {
     private const string WebDomain = "web.test";
     private const string BobPassword = "Bob-Passw0rd-123";
@@ -127,6 +127,51 @@ public sealed class WebTests(PostgresFixture postgres) : IClassFixture<PostgresF
         using var scope = server.Services.CreateScope();
         var closes = await scope.ServiceProvider.GetRequiredService<CoreDbContext>().AuditEvents.AsNoTracking().Where(e => e.Action == AuditActions.SessionClose).Select(e => e.Detail).ToListAsync(Token);
         Assert.Contains(closes, d => d.Contains(": access_revoked,", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Through_a_jump_host_a_page_needs_its_key_trusted_first_and_then_tunnels()
+    {
+        await using var server = await ServerAsync();
+        server.Install(TestPlugins.Package(server.DevelopmentKey));
+        using var admin = await server.SignedInClientAsync();
+        using var createdJump = await admin.SendWithTokenAsync(HttpMethod.Post, "/api/hosts", new
+        {
+            name = "jump",
+            ipAddress = SshServerFixture.Address,
+            services = new[] { new { type = "hello", port = ssh.Port, settings = new { greeting = "a" } } },
+            credentials = new[] { new { username = SshServerFixture.UserName, password = SshServerFixture.Password } },
+        });
+        var jump = await createdJump.Content.ReadFromJsonAsync<JsonElement>(Token);
+        using var createdHost = await admin.SendWithTokenAsync(HttpMethod.Post, "/api/hosts", new
+        {
+            name = "behind",
+            ipAddress = "127.0.0.1",
+            services = new[] { new { type = "https", port = 9, settings = new { } } },
+            jump = new { hostId = Id(jump), serviceId = ServiceId(jump), credentialId = jump.GetProperty("credentials")[0].GetProperty("id").GetGuid() },
+        });
+        var host = await createdHost.Content.ReadFromJsonAsync<JsonElement>(Token);
+
+        // A request can't stop to ask about the jump host's key.
+        using var untrusted = await OpenAsync(admin, host);
+        var refusal = await untrusted.Content.ReadFromJsonAsync<JsonElement>(Token);
+        Assert.Equal((HttpStatusCode.BadGateway, "jump_host_unavailable"), (untrusted.StatusCode, refusal.GetProperty("code").GetString()));
+        Assert.Contains("isn't trusted yet", refusal.GetProperty("detail").GetString(), StringComparison.Ordinal);
+
+        // An SSH connection to the jump host presents its key; once it's trusted, the tunnel opens.
+        using var probe = await admin.SendWithTokenAsync(HttpMethod.Post, $"/api/p/hello/hosts/{Id(jump)}/ssh", new { serviceId = ServiceId(jump), credentialId = jump.GetProperty("credentials")[0].GetProperty("id").GetGuid() });
+        var key = (await probe.Content.ReadFromJsonAsync<JsonElement>(Token)).GetProperty("presentedKey");
+        (await admin.SendWithTokenAsync(HttpMethod.Post, $"/api/hosts/{Id(jump)}/services/{ServiceId(jump)}/trusted-keys", new { algorithm = key.GetProperty("algorithm").GetString(), fingerprint = key.GetProperty("fingerprint").GetString() })).EnsureSuccessStatusCode();
+
+        // Nothing listens behind it, so the page itself fails: but only after the tunnel was opened, and audited.
+        using var tunnelled = await OpenAsync(admin, host);
+        var failure = await tunnelled.Content.ReadFromJsonAsync<JsonElement>(Token);
+        Assert.Equal(HttpStatusCode.BadGateway, tunnelled.StatusCode);
+        Assert.Contains(failure.GetProperty("code").GetString(), new[] { "unreachable", "timeout" });
+        using var scope = server.Services.CreateScope();
+        Assert.Contains(
+            await scope.ServiceProvider.GetRequiredService<CoreDbContext>().AuditEvents.AsNoTracking().Where(e => e.Action == AuditActions.CredentialUse).Select(e => e.Detail).ToListAsync(Token),
+            d => d.StartsWith("tunnel to 127.0.0.1:9, plugin web, jump host ", StringComparison.Ordinal));
     }
 
     [Fact]
