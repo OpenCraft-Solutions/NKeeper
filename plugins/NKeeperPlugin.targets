@@ -1,0 +1,72 @@
+<Project>
+
+  <!--
+    What every built-in plugin's backend project shares (docs/architecture.md §7.11, plugin-security.md §10).
+    A plugin references only the SDK, without copying it (§7.1). Building it builds its frontend, if it has one
+    (plugins/<id>/frontend, with npm: run npm ci at the root first), then packs and signs the plugin with the
+    developer's development key, created under .dev/keys on first use. The package goes to artifacts/plugins, the
+    directory to point Plugins:Directory at in development. The native installer signs with its one-time install
+    key instead (§8), through NKeeperSigningKey and NKeeperPluginPackages.
+
+    A plugin's project imports this file, and sets NKeeperPluginFrontendPackage to its frontend's npm package name
+    when it has a frontend.
+  -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <!-- A plugin's NuGet dependencies (YARP, for web) travel in its package, so they must be in its output. -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <NKeeperRoot>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', '..'))</NKeeperRoot>
+    <NKeeperDevelopmentKeys>$(NKeeperRoot).dev/keys/</NKeeperDevelopmentKeys>
+    <NKeeperPluginPackages Condition="'$(NKeeperPluginPackages)' == ''">$(NKeeperRoot)artifacts/plugins/</NKeeperPluginPackages>
+    <NKeeperSigningKey Condition="'$(NKeeperSigningKey)' == ''">$(NKeeperDevelopmentKeys)dev.private.pem</NKeeperSigningKey>
+    <NKeeperPluginFrontend>$(MSBuildProjectDirectory)/../frontend/</NKeeperPluginFrontend>
+    <NKeeperPluginTool>$(NKeeperRoot)tools/NKeeper.PluginTool/bin/$(Configuration)/$(TargetFramework)/nkeeper-plugin.dll</NKeeperPluginTool>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="$(NKeeperRoot)core/backend/NKeeper.Abstractions/NKeeper.Abstractions.csproj" Private="false" ExcludeAssets="runtime" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(NKeeperPluginFrontendPackage)' != ''">
+    <NKeeperFrontendSource Include="$(NKeeperPluginFrontend)src/**;$(NKeeperPluginFrontend)package.json;$(NKeeperPluginFrontend)vite.config.ts;$(NKeeperPluginFrontend)tsconfig.json;$(NKeeperRoot)core/frontend/sdk/src/**;$(NKeeperRoot)package-lock.json" />
+  </ItemGroup>
+
+  <!-- The frontend is rebuilt when its sources change. -->
+  <Target Name="BuildNKeeperPluginFrontend"
+          Condition="'$(NKeeperPackPlugins)' != 'false' And '$(NKeeperPluginFrontendPackage)' != ''"
+          Inputs="@(NKeeperFrontendSource)"
+          Outputs="$(NKeeperPluginFrontend)dist/index.js">
+    <Error Condition="!Exists('$(NKeeperRoot)node_modules')" Text="This plugin's frontend needs the npm packages: run 'npm ci' at the repository root first." />
+    <Exec Command="npm run build -w $(NKeeperPluginFrontendPackage)" WorkingDirectory="$(NKeeperRoot)" />
+  </Target>
+
+  <Target Name="PackNKeeperPlugin" AfterTargets="Build" DependsOnTargets="BuildNKeeperPluginFrontend" Condition="'$(NKeeperPackPlugins)' != 'false'">
+    <PropertyGroup>
+      <NKeeperPackStaging>$(MSBuildProjectDirectory)/$(IntermediateOutputPath)package/</NKeeperPackStaging>
+      <NKeeperPacked>$(MSBuildProjectDirectory)/$(IntermediateOutputPath)packed/</NKeeperPacked>
+      <NKeeperFrontendArgument Condition="'$(NKeeperPluginFrontendPackage)' != ''">--frontend &quot;$(NKeeperPluginFrontend)dist/.&quot;</NKeeperFrontendArgument>
+    </PropertyGroup>
+    <!--
+      Builds the packaging tool here rather than referencing it: a plugin references only the SDK. Restoring it
+      first, in its own evaluation, lets the plugin build on a clean checkout.
+    -->
+    <MSBuild Projects="$(NKeeperRoot)tools/NKeeper.PluginTool/NKeeper.PluginTool.csproj" Targets="Restore" Properties="MSBuildRestoreSessionId=$([System.Guid]::NewGuid())" />
+    <MSBuild Projects="$(NKeeperRoot)tools/NKeeper.PluginTool/NKeeper.PluginTool.csproj" Targets="Build" />
+    <Exec Condition="'$(NKeeperSigningKey)' == '$(NKeeperDevelopmentKeys)dev.private.pem' And !Exists('$(NKeeperSigningKey)')"
+          Command="dotnet &quot;$(NKeeperPluginTool)&quot; keygen --out &quot;$(NKeeperDevelopmentKeys).&quot; --name dev --comment &quot;local development key&quot;" />
+    <RemoveDir Directories="$(NKeeperPackStaging);$(NKeeperPacked)" />
+    <ItemGroup>
+      <!-- The plugin and the assemblies it brings: never the SDK, which is shared from the server (§7.1). -->
+      <NKeeperBackendFile Include="$(TargetPath)" />
+      <NKeeperBackendFile Include="@(ReferenceCopyLocalPaths)" Condition="'%(Extension)' == '.dll' And '%(Filename)' != 'NKeeper.Abstractions'" />
+    </ItemGroup>
+    <Copy SourceFiles="@(NKeeperBackendFile)" DestinationFolder="$(NKeeperPackStaging)" />
+    <Exec Command="dotnet &quot;$(NKeeperPluginTool)&quot; pack --manifest &quot;$(MSBuildProjectDirectory)/nkeeper-plugin.json&quot; --backend &quot;$(NKeeperPackStaging).&quot; $(NKeeperFrontendArgument) --key &quot;$(NKeeperSigningKey)&quot; --out &quot;$(NKeeperPacked).&quot;" />
+    <ItemGroup>
+      <NKeeperPackage Include="$(NKeeperPacked)*.nkp" />
+    </ItemGroup>
+    <Copy SourceFiles="@(NKeeperPackage)" DestinationFolder="$(NKeeperPluginPackages)" />
+  </Target>
+
+</Project>

@@ -21,7 +21,8 @@ public sealed class LoginRequest
 }
 
 /// <summary>What the shell learns about the signed-in user: only these fields.</summary>
-public sealed record CurrentUserResponse(Guid Id, string UserName, string? Email, IReadOnlyList<string> Roles, bool MustChangePassword);
+/// <param name="ColorSchemes">The user's colour scheme and the schemes they built (§6.1).</param>
+public sealed record CurrentUserResponse(Guid Id, string UserName, string? Email, IReadOnlyList<string> Roles, bool MustChangePassword, ColorSchemesResponse ColorSchemes);
 
 /// <summary>A token for the antiforgery header: send <paramref name="Token"/> as <paramref name="HeaderName"/>.</summary>
 public sealed record AntiforgeryTokenResponse(string Token, string HeaderName);
@@ -134,5 +135,5 @@ public static class AuthEndpoints
     }
 
     private static async Task<CurrentUserResponse> ResponseFor(ApplicationUser user, UserManager<ApplicationUser> users) =>
-        new(user.Id, user.UserName!, user.Email, [.. (await users.GetRolesAsync(user)).Order(StringComparer.Ordinal)], user.MustChangePassword);
+        new(user.Id, user.UserName!, user.Email, [.. (await users.GetRolesAsync(user)).Order(StringComparer.Ordinal)], user.MustChangePassword, ColorSchemes.Of(user));
 }

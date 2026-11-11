@@ -52,8 +52,10 @@ async function waitForTerminal(pattern, timeout = 20000) {
   throw new Error(`The terminal never showed ${pattern}. It shows:\n${await terminalText().catch(() => '(nothing)')}`)
 }
 
+/** The details' Connect menu, as in 1.x: the action on the service, then the credential in its submenu. */
 async function connect(entry) {
   await page.getByRole('article', { name: hostName }).getByRole('button', { name: 'Connect' }).click()
+  await page.getByRole('menuitem', { name: /^Terminal/ }).click()
   await page.getByRole('menuitem', { name: entry }).click()
 }
 
@@ -62,33 +64,34 @@ let created = false
 try {
   step('sign in')
   await page.goto(`${base}/`)
-  await page.getByLabel('User name or email').fill(adminUser)
-  await page.getByLabel('Password').fill(adminPassword)
+  await page.getByLabel('Username or email').fill(adminUser)
+  await page.getByLabel('Password', { exact: true }).fill(adminPassword)
   await page.getByRole('button', { name: 'Sign in' }).click()
-  await page.getByRole('button', { name: 'Sign out' }).waitFor({ timeout: 15000 })
+  await page.getByRole('navigation', { name: 'Main' }).waitFor({ timeout: 15000 })
 
   step(`create ${hostName}, with an SSH service and a saved credential`)
-  await page.getByRole('button', { name: 'New host' }).click()
+  await page.getByRole('complementary', { name: 'Host inventory' }).getByRole('button', { name: 'New host' }).click()
   const form = page.getByRole('form', { name: 'New host' })
   await form.getByLabel('Name', { exact: true }).fill(hostName)
   await form.getByLabel('IP address').fill(sshAddress)
   await form.getByRole('button', { name: 'Add service' }).click()
+  await form.getByLabel('Type for service 1').selectOption({ label: 'SSH' })
   await form.getByRole('button', { name: 'Add credential' }).click()
-  await form.getByLabel('User name').fill(sshUser)
+  await form.getByLabel('Username').fill(sshUser)
   await form.getByLabel('Password', { exact: true }).fill(sshPassword)
   await form.getByRole('button', { name: 'Create host' }).click()
   await page.getByRole('article', { name: hostName }).waitFor({ timeout: 15000 })
   created = true
 
   step('its health is checked on save')
-  await page.getByRole('article', { name: hostName }).getByText(/^Up, \d+ ms$/).waitFor({ timeout: 15000 })
+  await page.getByRole('article', { name: hostName }).getByText(/^Up · \d+ ms$/).waitFor({ timeout: 15000 })
 
   step('double-click the host to open a terminal with its saved credential, and trust the server key')
   await page.getByRole('button', { name: new RegExp(`^${hostName},`) }).dblclick()
-  const key = page.getByRole('dialog', { name: 'Trust this server key?' })
+  const key = page.getByRole('dialog', { name: 'Trust this host key?' })
   await key.waitFor({ timeout: 30000 })
-  console.log(`    ${await key.locator('.nk-mono').innerText()}`)
-  await key.getByRole('button', { name: 'Trust' }).click()
+  console.log(`    ${await key.locator('dd').first().innerText()}`)
+  await key.getByRole('button', { name: 'Trust and connect' }).click()
 
   step('run a command')
   await waitForTerminal(/[$#] *$/m, 30000)
@@ -116,9 +119,9 @@ try {
 
   step('open another with a typed credential: the key is trusted now, so no prompt')
   await page.getByRole('tab').first().click()
-  await connect('Type a credential…')
-  const typed = page.getByRole('dialog', { name: 'Type a credential' })
-  await typed.getByLabel('User name').fill(sshUser)
+  await connect('Enter credentials…')
+  const typed = page.getByRole('dialog', { name: 'Enter credentials' })
+  await typed.getByLabel('Username').fill(sshUser)
   await typed.getByLabel('Password', { exact: true }).fill(sshPassword)
   await typed.getByRole('button', { name: 'Connect' }).click()
   await waitForTerminal(/[$#] *$/m, 30000)
@@ -137,7 +140,7 @@ try {
     step(`delete ${hostName}`)
     try {
       // A dialog left open by a failure makes the page behind it inert: cancel it first (Escape).
-      for (let i = 0; i < 5 && (await page.locator('dialog[open]').count()) > 0; i++) {
+      for (let i = 0; i < 5 && (await page.locator('[role="dialog"]').count()) > 0; i++) {
         await page.keyboard.press('Escape')
         await page.waitForTimeout(200)
       }
@@ -146,10 +149,13 @@ try {
       while ((await closeButtons.count()) > 0) {
         await closeButtons.first().click()
       }
-      await page.getByRole('tab').first().click()
+      // With no sessions left, the tab bar goes, as in 1.x, and the details show.
+      if ((await page.getByRole('tab').count()) > 0) {
+        await page.getByRole('tab').first().click()
+      }
       await page.getByRole('button', { name: new RegExp(`^${hostName},`) }).click()
       await page.getByRole('button', { name: 'Delete', exact: true }).click()
-      await page.getByRole('button', { name: `Delete ${hostName}` }).click()
+      await page.getByRole('button', { name: 'Yes, delete' }).click()
       await page.getByRole('button', { name: new RegExp(`^${hostName},`) }).waitFor({ state: 'detached', timeout: 10000 })
     } catch (error) {
       console.log(`    couldn't delete it: ${error.message.split('\n')[0]}`)

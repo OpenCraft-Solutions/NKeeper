@@ -68,8 +68,9 @@ public sealed class WakeOnLanPlugin : IPlugin
 - `endpoints` is a route group core created at `/api/p/<id>/`, inside core's `/api` group. Every policy in §6.4 applies to it, so a plugin can't forget one ([v2-plan.md §4.4](v2-plan.md#44-guardrails-built-into-the-sdk)).
 - `endpoints.MapHostGroup(HostPermission.Use)` (or `Manage`) gives a group at `hosts/{hostId}/` whose endpoints act on one host the user may use (or manage). See §7.3.
 - `Contribute(IPluginContributions, PluginContext)` declares what the plugin adds to core's catalogues: so far, service types (§7.4) with their health probes (§7.13), session types (§7.10) and host actions (§7.12). It has an empty default, so a plugin with nothing to declare leaves it out.
-- More contracts (settings, audit actions) arrive with their first real users ([v2-plan.md §4.2](v2-plan.md#42-contribution-catalogue)). The SDK may change until it is frozen as v1 at the end of Phase 3.
-- **SDK versions.** A manifest declares the SDK range it supports, and a package outside the server's `SdkVersion` is refused. Within v0, an addition raises the patch number (`0.1.1` added the host scope, `0.1.2` service types, `0.1.3` the credential broker, `0.1.4` SSH connections, `0.1.5` stream sessions, `0.1.6` host actions, health probes and, in the frontend SDK, session views) and a breaking change raises the minor one. So a plugin built for `>=0.1.0 <0.2.0` keeps loading, and one that uses an addition declares the version that brought it.
+- More contracts (plugin settings, scanners, reports) arrive with their first real users ([v2-plan.md §4.2](v2-plan.md#42-contribution-catalogue)), as additions to SDK v1.
+- **SDK versions.** A manifest declares the SDK range it supports, and a package outside the server's `SdkVersion` is refused. Within v0, an addition raises the patch number (`0.1.1` added the host scope, `0.1.2` service types, `0.1.3` the credential broker, `0.1.4` SSH connections, `0.1.5` stream sessions, `0.1.6` host actions, health probes and, in the frontend SDK, session views, `0.1.7` run actions and plugin audit events, `0.1.8` HTTPS connections, stateful sessions, session origins and, in the frontend SDK, `confirmTrust`, `0.1.9` desktop connections) and a breaking change raises the minor one.
+- **SDK v1 (1.0.0)** froze the SDK at the end of Phase 3, after a review of what Phases 1 and 2 used ([v2-plan.md, Phase 3](v2-plan.md#phase-3-freeze-sdk-v1)). From v1, an addition raises the minor number and a breaking change the major one, which the plan avoids. So a plugin built for `>=1.0.0 <2.0.0` keeps loading, and one that uses an addition declares the version that brought it. The frontend SDK, `@nkeeper/sdk`, is versioned with it. [plugin-authoring.md](plugin-authoring.md) shows how to write a plugin against it.
 
 ## 5. Frontend extension point
 
@@ -114,6 +115,7 @@ Ported from 1.x, with ASP.NET Core Identity. Users, roles and sessions are table
   - one active administrator always remains.
 - **A user's sessions end** when their access is cut (disabled, or no longer an administrator), when their role changes (roles are carried in the session), when an administrator resets their password, and when the account is deleted.
 - **Changing one's own password** (`POST /api/account/password`) needs the current password, and is rate limited like sign-in. It's allowed while a password change is required, and signs out the account's other sessions; this one continues.
+- **A colour scheme of one's own**, ported from 1.x. Each account keeps the scheme it uses, by ID, and up to 20 schemes its user built, each a name and four colours (background, surface, text, accent, as `#rrggbb`). They're stored on the account, so they follow the user to any browser. `GET /api/auth/me` returns them as `colorSchemes: { active, custom }`, and `PUT /api/account/color-schemes` replaces them. An ID is lower-case letters, digits and `-`, at most 64 characters, and a scheme's name at most 40; custom IDs are unique. The server checks only their form: the list of presets is the shell's. It's allowed while a password change is required, and isn't audited, since it changes nothing but how the page looks.
 
 ### 6.2 Sessions
 
@@ -343,11 +345,11 @@ Passing on the user's own sign-in arrives with directory sign-in; local accounts
 
 ### 7.7 The trust store
 
-Trust on first use, ported from 1.x: the first time a server presents an identity, the user checks it and decides; after that, core checks it on every connection. Phase 1 step 6 brings SSH host keys. TLS certificates join with their first user.
+Trust on first use, ported from 1.x: the first time a server presents an identity, the user checks it and decides; after that, core checks it on every connection. Phase 1 step 6 brought SSH host keys; TLS certificates joined with the web plugin (§7.16).
 
 **What's trusted.**
 - A trusted key belongs to one host. It's recorded per:
-  - kind: an SSH host key, so far;
+  - kind: an SSH host key, or a TLS certificate (§7.16);
   - endpoint: the service's own address, when it has one, or the host itself. So a management controller's key is never confused with its server's;
   - port;
   - algorithm (`ssh-ed25519`, say). A server presents one key per algorithm.
@@ -360,7 +362,7 @@ Trust on first use, ported from 1.x: the first time a server presents an identit
 - no trusted key: the connection is refused with `HostKeyUnknown`, carrying the presented algorithm and fingerprint, and the host and service that presented it (a jump host's, when it's the jump host that's unknown). Core remembers that it presented this key to this auth session.
 
 **The user decides, through core.**
-- A plugin can't trust a key. The shell posts the user's decision to core: `POST /api/hosts/{hostId}/services/{serviceId}/trusted-keys`, with the algorithm and fingerprint. It needs Use on the host.
+- A plugin can't trust a key. The shell posts the user's decision to core: `POST /api/hosts/{hostId}/services/{serviceId}/trusted-keys`, with the algorithm and fingerprint. It needs Manage on the host, since a trusted key vouches for the server to everyone who uses it: no access answers `404`, Use alone `403` with `trust_needs_manage`.
 - Core trusts the key only if it presented exactly that key, for that host and service, to the same auth session, in the last 10 minutes. Anything else is refused with `400` and `trust_not_presented`, so a user (or a script with their cookie) can't trust a key no server showed them.
 - Each presentation can be trusted once. An auth session keeps at most 20 presentations; recording another drops the oldest. They're dropped at sign-out.
 - A different key trusted meanwhile for the same endpoint, port and algorithm answers `409` with `trust_conflict`.
@@ -421,8 +423,8 @@ Every connection opened is audited as `credential.use`: the host, service, plugi
 
 SFTP and port forwards join with their first users. The connection doesn't need its handle once it's open; the plugin disposes it, which also closes its tunnel. Closing connections when the user's access changes arrives with sessions, in step 7.
 
-**Failures.** Opening throws `SshConnectException` with a reason the plugin can show or act on:
-- `HostKeyUnknown` (with the presented key) and `HostKeyChanged` (§7.7);
+**Failures.** Opening throws `ConnectException` with a `ConnectFailure` the plugin can show or act on. Every kind of connection core opens (SSH here, HTTP in §7.16, desktops in §7.20) throws the same exception, with the reasons that apply to it. For SSH:
+- `HostKeyUnknown`, with the presented identity, and `HostKeyChanged` (§7.7). A `PresentedIdentity` names the host and service that presented it, its kind (`SshHostKey` or `TlsCertificate`), algorithm and fingerprint, and for a certificate its subject and expiry. As JSON it's the frontend SDK's `TrustPrompt`, so a plugin endpoint can return it for its view to pass to `confirmTrust` (§7.14);
 - `AuthenticationFailed`;
 - `NoSecret`: the credential has neither a password nor a private key;
 - `InvalidPrivateKey`: the key can't be read, or its passphrase is wrong;
@@ -458,7 +460,7 @@ public void Contribute(IPluginContributions contributions, PluginContext context
 | --- | --- | --- |
 | browser → core | `start` `{ hostId, serviceId, credentialId?, promptReference?, options? }` | first, within 15 seconds |
 | core → browser | `status` `{ status: "connecting" }` | after `start` is accepted |
-| core → browser | `hostKey` `{ hostId, serviceId, algorithm, fingerprint }` | a server presented an unknown key |
+| core → browser | `hostKey` `{ hostId, serviceId, kind, algorithm, fingerprint, subject?, notAfterUtc? }` | a server presented an unknown key, or (`kind: "tls-certificate"`) certificate (SDK 0.1.9) |
 | browser → core | `hostKeyDecision` `{ trust }` | the user's answer, within 2 minutes |
 | core → browser | `connected` | the plugin's session is open |
 | core → browser | `error` `{ code, message }` | it failed; the socket then closes |
@@ -476,7 +478,7 @@ After `connected`, the plugin owns the data: binary frames, and text frames whos
    - a host reached through a jump host, with `jump_host_unsupported`, when the type can't use one.
 4. **Resolves the credential**, if one is named: a saved one by `credentialId`, or a typed one by `promptReference` (§7.6). The handle is bound to the session type's plugin and to this request, which lasts as long as the session. A refusal is `credential_denied`, audited as `credential.denied`.
 5. **Opens the plugin's session**, with the `HostContext`, the service, the handle and the options: `IStreamSessionHandler.OpenAsync`. The plugin connects, through `IConnectivity`, which can't tell this request from a plugin endpoint's. The session is in the registry (below) from this step on, so a change of access while it opens, during a key prompt say, ends it with `access_revoked`.
-6. **Asks about unknown keys in-band.** If opening fails with `HostKeyUnknown`, core sends `hostKey` and waits for the user. On `trust`, it trusts the key through the trust store, under the same rules as §7.7, then opens again. A jump host and its target can each ask once. Anything but `trust`, including silence, ends the session with `host_key_rejected`.
+6. **Asks about unknown keys in-band.** If opening fails with `HostKeyUnknown`, from an SSH connection or (SDK 0.1.9) a desktop or HTTP connection's certificate, core sends `hostKey` and waits for the user, if they can manage the host that presented it (§7.7). If they can't, the session ends with `host_key_untrusted`, saying who must trust it first. On `trust`, it trusts the key through the trust store, under the same rules as §7.7, then opens again. A jump host and its target can each ask once. Anything but `trust`, including silence, ends the session with `host_key_rejected`.
 7. **Reports other failures** with a code from the failure: `host_key_changed`, `authentication_failed`, `no_secret`, `invalid_private_key`, `unreachable`, `timeout` or `jump_host_unavailable`. Anything else the plugin throws is `failed`, with a generic message, and is logged.
 8. **Runs the session.** Core checks access once more, audits `session.open`, sends `connected`, and calls `IStreamSession.RunAsync` with a channel for the plugin's frames. It ends when either side closes, or when core ends it.
 
@@ -544,10 +546,34 @@ contributions.AddHostAction(new HostAction("ssh.terminal", "Terminal", SessionTy
 - `GET /api/plugins` lists each plugin's host actions.
 - **The shell builds the Connect menu** for a host from every loaded plugin's actions. An action offers one entry per service whose type its session type opens on and is available. A host behind a jump host gets none when the session type can't use one. With `Required`, each entry offers:
   - each saved credential used with that service;
-  - "Type a credential…", which asks for one in core's dialog when the session opens (§7.6).
+  - "Enter credentials…", which asks for one in core's dialog when the session opens (§7.6).
 
   The plugin only names the session type; it never sees the menu or the credential.
-- Other locations (Tools, Tasks), and actions that run a dialog instead of a session, arrive with their first users.
+- Other locations (Tools, Tasks), and actions that open a dialog of the plugin's own, arrive with their first users.
+
+**Run actions (SDK 0.1.7).** An action can run one of the plugin's endpoints instead of opening a session:
+
+```csharp
+contributions.AddHostAction(new HostAction("wake-on-lan.wake", "Wake") { Endpoint = "wake", ServiceTypes = ["wake-on-lan"], Credential = HostActionCredential.None });
+```
+
+- A host action names exactly one of a session type or an `Endpoint`. A run action names the service types it applies to (at least one). An `Endpoint` is a path of lower-case segments, relative to the plugin's host group.
+- The shell calls it as `POST /api/p/<plugin>/hosts/<hostId>/<endpoint>`, with `{ serviceId }`, plus `credentialId` or `promptReference` when the action needs a credential. The plugin maps that endpoint in a host group (`MapHostGroup(HostPermission.Use)`), so core authorizes it like any plugin endpoint (§7.3).
+- The endpoint answers `{ message }`, which the shell shows. A refusal is a problem response, and the shell shows its detail.
+- Run actions are listed in the same menu as Connect, each under its own heading. Double-clicking a host opens only a session, never a run action, so nothing runs by accident.
+
+### 7.12.1 Plugin audit events
+
+Plugins record their own operations in core's audit trail (v2-plan.md §4.2, SDK 0.1.7):
+
+```csharp
+await audit.RecordAsync("wake-on-lan.send", host.Id, $"{mac} to {targets}");
+```
+
+- `IPluginAudit` is available to a plugin's endpoints. Core knows which plugin is calling from the endpoint's route group, as the credential broker does (§7.6), not from anything the plugin says.
+- An action's name must be the plugin's ID, a dot, then lower-case letters, digits, `-` and `_` (`wake-on-lan.send`). So a plugin can't record an event that looks like core's (`host.update`) or another plugin's. Anything else is refused with an `ArgumentException`.
+- The event records the signed-in user and the client's address, like core's own. Outside a plugin's endpoint (a background job, say), recording is refused until a first user needs it.
+- Core still records every lifecycle and security event itself (sessions, credentials, trust), so a plugin can't leave those out.
 
 ### 7.13 Health probes
 
@@ -570,25 +596,38 @@ new ServiceType("ssh", "SSH") { DefaultPort = 22, Health = HealthProbe.Tcp }
 
 The single-page app in `core/frontend/app`. It knows no service type, session type or plugin: everything it shows of them comes from `GET /api/plugins`.
 
+**The look is 1.x's.** The shell looks the same as NKeeper 1.x, so moving to 2.0 changes nothing a user sees except what's new:
+- 1.x's design tokens, as CSS custom properties on `:root`: the dark navy colours, spacing, radii, shadows and font stack. Its UI components (buttons, fields, dialogs, menus, badges, alerts) and their styles are ported from 1.x as they were.
+- 1.x's layout: a top bar with the logo and the pages as tabs, **Hosts**, **Reports**, and for administrators **Users** and **Settings**, with the user's menu on the right. Each page has 1.x's sidebar on the left and its content on the right.
+- A control for a feature that isn't ported yet (Import, Scan network, sorting) appears when its feature does, rather than as a control that does nothing.
+- **Colour schemes**, from the user's menu, as in 1.x: 1.x's presets (Navy is the default), and schemes the user builds from four colours, with a live preview. The shell derives every token from the four colours and keeps text readable: a scheme whose text is below 3:1 against its background can't be saved, and one below 4.5:1 is warned about. The chosen scheme's tokens are set on the page's root element, and remembered in the browser, so a reload paints them before the shell has loaded (`color-scheme.js`, a file of the build, since the page's policy allows no inline script). Terminals stay dark in every scheme, as 1.x's did. Plugin views follow the scheme through the tokens.
+- **Plugin views use the same tokens.** `var(--color-surface)` and the rest are the shell's to keep, so a plugin's view matches the shell. Each use gives a fallback value, so a view still draws on a shell without them. The terminal and desktop views keep 1.x's session styles.
+
 **Layout.**
-- **Sign-in**, then a header with the user's name and Sign out. A session that ends elsewhere brings the sign-in form back (unchanged from Phase 0). A user who must change their password (§6.1) is asked to before anything else.
+- **Sign-in**, on 1.x's sign-in card, then the top bar with the user's menu, which holds Sign out. A session that ends elsewhere brings the sign-in form back (unchanged from Phase 0). A user who must change their password (§6.1) is asked to before anything else.
 - **The host tree**, on the left:
   - every host the user can see, from `GET /api/hosts`, searched, grouped and sorted in the browser;
   - **search** matches a host's name, hostname, IP address, description and tags (`name` or `name=value`), ignoring case;
   - **group by** a tag name gives one group per value, plus "No <name>" for hosts without it. The other choice is no grouping. The choice is kept in the browser;
   - each host shows its services' health (§7.13). The shell checks a host when it's created or saved, rather than waiting for the next background round;
   - selecting a host shows its details. Its Connect menu (§7.12) is on the host's row and in its details;
-  - right-clicking a host's row opens its Connect menu there. Double-clicking it opens the menu's first entry: the first action on the first service it applies to, with the first saved credential used with that service, or the typed-credential dialog when there's none;
+  - right-clicking a host's row opens 1.x's host menu there: Connect, Edit and Copy. Double-clicking it opens the menu's first entry: the first action on the first service it applies to, with the first saved credential used with that service, or the typed-credential dialog when there's none;
   - a host's details say why there's nothing to connect with: it has no services, or no loaded plugin opens a session on them.
 - **Tabs**, on the right. The first tab is always the selected host's details. Every session opens in a tab of its own. A tab stays mounted while another is showing, so a terminal keeps running. Closing a tab ends its session.
-- **Plugins**, for administrators: the plugin list and frontend states from Phase 0.
+- **Reports**, for everyone: 1.x's list of reports on the left, with the report on the right. So far it lists one:
+- **Health**, ported from 1.x's health report: the latest checks (§7.13) of the services on the hosts the user can see, from `GET /api/health` and `GET /api/hosts`:
+  - a summary: how many services are up and down, how many certificates expire within 30 days, how many hosts with services have no results yet, and when the latest check ran;
+  - **Down**: each service that's down, with its host, address and port, why, and when it was checked, oldest first;
+  - **Certificates**: each certificate a TLS probe read, with its host, service, subject and expiry, soonest first. One that has expired or expires within 30 days is marked;
+  - selecting a host's name shows it in the workspace. Refresh reads the results again; it doesn't run the checks.
+- **Settings**, for administrators: 1.x's settings page. So far it has one section, **Plugins**: the plugin list and frontend states from Phase 0.
 - **Users**, for administrators (§6.1, §7.2):
   - the list, with each user's role and whether they're disabled, locked out, or must change their password;
   - creating a user, with a user name, email, role, and an initial password, which they must change at first sign-in unless the administrator says otherwise;
   - editing a user's email, role and whether they're disabled; resetting their password; and deleting them. An administrator can't disable, demote or delete themselves, as the server enforces;
   - a user's grants: rows of a host, or a tag name with an optional value, each at Use or Manage. Saving replaces them all. Grants don't apply to administrators, who see every host, so the page says so for them.
 
-  Like the workspace, the page stays mounted behind it, so sessions carry on.
+  The workspace stays mounted behind these pages (Reports, Users and Settings), so sessions carry on.
 
 **The host editor** creates and edits hosts, for users who can manage them:
 - name, hostname, IP address, description and tags;
@@ -601,7 +640,7 @@ The single-page app in `core/frontend/app`. It knows no service type, session ty
 The server's own validation is what counts. The editor shows its field errors next to their fields.
 
 **Core's dialogs.** These belong to the shell, not to any plugin:
-- **a server key no one trusted yet** (§7.10): the host, algorithm and fingerprint, with Trust and Cancel;
+- **a server key no one trusted yet** (§7.10): the host, algorithm and fingerprint, with "Trust and connect" and Cancel, worded as 1.x's trust card was. Only someone with Manage on the host sees it (§7.7);
 - **a typed credential** (§7.6): username, domain, and password or private key. The shell posts it to core's credential prompt and passes only the prompt reference on.
 
 **Session views (frontend SDK 0.1.6).** A plugin's frontend draws its session types' tabs:
@@ -617,12 +656,127 @@ export default definePlugin({
 - The component gets:
   - the host's ID and name, and the service's ID, as the tab describes them;
   - `connect(options, signal)`, which opens the stream. It runs core's control phase, with core's dialogs for a key and a typed credential. It resolves to a connection once core says `connected`, and rejects with a `SessionError` carrying core's error code. Aborting `signal` (when the view goes) cancels it, and any dialog it was waiting on;
-  - whether its tab is showing.
-- A connection sends binary frames and JSON text frames, and delivers the plugin's frames. Its `closed` promise gives core's reason. The view may call `connect` again to reconnect.
+  - whether its tab is showing;
+  - `confirmTrust(prompt)` (SDK 0.1.8), for a view that opens its session through the plugin's own endpoints (§7.17): it shows core's dialog for a key or certificate a plugin endpoint reported, and when the user trusts it, posts it to core. It resolves to whether it's now trusted. For a user who can't manage the host, it resolves to false without asking.
+- A connection sends binary frames, JSON text frames, and (SDK 0.1.9) raw text frames, and delivers the plugin's frames. Its `closed` promise gives core's reason. The view may call `connect` again to reconnect.
 - The SDK's `openStreamSession` implements the protocol (§7.10). `connect` is that function, with the shell's dialogs.
 - **Styles under the shell's policy.** The policy allows stylesheets only from the server (`style-src 'self'`), so a `<style>` element that a library adds is blocked. The SDK has two helpers that keep the policy as it is:
   - `adoptStyles(css)` adds a stylesheet from text, as a constructable stylesheet, which the policy allows;
   - `mirrorInjectedStyles(element)` copies the `<style>` elements that a library adds under `element` (xterm.js does) into constructable stylesheets. It keeps them in step until it's called off.
+
+### 7.15 The `wake-on-lan` plugin
+
+The smallest real plugin, in `plugins/wake-on-lan/`: it shows how little a plugin needs, and it changes no core file (v2-plan.md, Phase 2). Ported from 1.x's `Health/WakeOnLan`.
+- **Service type** `wake-on-lan`, "Wake-on-LAN", UDP port 9 by default, with one required setting: the MAC address. Hosts in 1.x had a MAC address field; in 2.0, a host gets Wake-on-LAN by having this service, so core keeps no field for it.
+- **Run action** `wake-on-lan.wake`, "Wake", on `wake-on-lan` services, with no credential (§7.12).
+- **Its endpoint** `POST /api/p/wake-on-lan/hosts/{hostId}/wake` needs Use. It sends the magic packet from the NKeeper server (six `0xFF` bytes, then the MAC address 16 times) over UDP to the service's port, to:
+  - the local broadcast address;
+  - for a service with an IPv4 address, its `/24` subnet's broadcast address and the address itself, for routers that forward directed broadcasts or keep a static ARP entry.
+
+  A MAC address that isn't six hexadecimal bytes (with `:` or `-` between them) is refused with `400`.
+- It records `wake-on-lan.send` (§7.12.1), with the MAC address and where the packet went.
+- No frontend: the shell's run actions are enough.
+
+### 7.16 HTTPS connections and certificate trust
+
+Core opens HTTP connections for plugins, as it does SSH (D13), so certificate trust is core's, and no plugin can skip it (SDK 0.1.8).
+
+```csharp
+await using var http = await connectivity.OpenHttpAsync(host, serviceId, tls: true);
+var response = await http.Client.SendAsync(new HttpRequestMessage(HttpMethod.Get, new Uri(http.BaseAddress, "/")), ct);
+```
+
+- `IConnectivity.OpenHttpAsync(host, serviceId, tls)` connects to the service's effective address and port, and gives the plugin an `IHttpConnection`: an `HttpMessageInvoker` that sends every request to that endpoint and nowhere else, with its base address.
+  - It sends no cookies of its own, follows no redirects, and doesn't decompress, so a proxy can pass responses on as they came.
+  - **Through a jump host** (§7.8), core opens an SSH connection to the jump host with its credential, which core reads itself, as for SSH (§7.9), and forwards a loopback port through it to the service. The user must be able to use the jump host. Its key must already be trusted, since a request can't stop to ask: an SSH session to the jump host asks once. Otherwise it fails with `JumpHostUnavailable`, saying so. The service's certificate is still checked against the service, so the jump host can't impersonate it. Opening the tunnel is audited as `credential.use`.
+- **Certificates** (when `tls` is true):
+  - one that's publicly valid for the address is accepted, as in 1.x;
+  - otherwise only a certificate the user trusted for the host is: the trust store (§7.7) gains a second kind, `TlsCertificate`, recorded per endpoint and port. Its "algorithm" is `x509`, and its fingerprint the SHA-256 of the certificate, in the same unpadded base64;
+  - core checks before it hands the connection over. A handshake that shows an untrusted certificate fails with `ConnectException` and `HostKeyUnknown`, carrying the certificate's fingerprint, subject and expiry, and core remembers it presented it, as for SSH keys. A different certificate than the trusted one fails with `HostKeyChanged`, audited as `trust.mismatch`.
+  - every later request on the connection is checked against the same rule, so a certificate that changes mid-session is refused too.
+- The user trusts a certificate the way they trust a key: the shell posts it to core's trusted-keys endpoint, which takes the kind from what core presented. The shell's dialog says "certificate" and shows its subject and expiry.
+
+**TLS health probe.** `HealthProbe.Tls`: a TCP connection and a TLS handshake that accepts any certificate, so an expired or self-signed one still counts as up. The result adds the certificate's subject and expiry, and the host's details show how long it has left.
+
+### 7.17 Stateful sessions
+
+Some sessions live in the plugin rather than on a WebSocket: a web session is a run of HTTP requests through the plugin's proxy. Core still owns their limits, revocation and audit (v2-plan.md §7.1), through `IPluginSessions` (SDK 0.1.8):
+
+```csharp
+using var session = await sessions.OpenAsync(host, serviceId, sessionType: "web");   // from the plugin's host endpoint
+// … later, on every request: if (session.Ended.IsCancellationRequested) refuse
+```
+
+- `OpenAsync` registers the session in core's session registry (§7.10) for the signed-in user, the request's auth session, the host, the service and the jump host, and audits `session.open`. It can only be called from the plugin's own host-scoped endpoint, for the host core authorized, and only for a session type the plugin contributes.
+- It counts toward the user's 20 sessions, stream sessions included. Over the limit, it throws `SessionLimitException`, and the plugin answers `409` with `too_many_sessions`.
+- Core re-checks it with every other session, and ends it when access changes: its `Ended` token is cancelled, with the reason (`access_revoked`). The plugin then refuses its requests.
+- Disposing it unregisters it and audits `session.close` with the reason: `closed`, `access_revoked`, or what the plugin gives (`idle`).
+- A session type that's stateful says so: `SessionType.Stateful(id, label)`, with no stream handler. Core opens no WebSocket for it; its view (§7.14) talks to the plugin's own endpoints.
+
+### 7.18 Session origins
+
+A web session's pages are served on an origin of their own, so the site can never read NKeeper's cookies or call its API (ported from 1.x, SDK 0.1.8):
+
+```csharp
+contributions.AddSessionOrigin(new SessionOrigin("nkw", typeof(WebOriginHandler)));
+```
+
+- **The web domain** is an install setting, `Origins:BaseDomain` (`setup.sh --web-domain`), because it needs wildcard DNS, a certificate and nginx to match. Without it, session origins are off, and a plugin that needs one says so.
+- A plugin claims a **prefix**: lower-case letters and digits, 2 to 16 of them, unique across plugins. Core sends every request for `<prefix>-<label>.<web domain>`, where the label is 1 to 63 lower-case letters and digits, to the plugin's `ISessionOriginHandler.HandleAsync(context, label)`.
+- Core does this first, before its own pipeline: those requests never reach NKeeper's sign-in, antiforgery, API, shell or security headers, and NKeeper's cookies are never sent to them, since they're scoped to NKeeper's own host. The plugin's handler is the whole of what answers there.
+- `ISessionOrigins.UrlFor(prefix, label)` gives a plugin the origin's URL (`https://nkw-<label>.<web domain>`), or null when there's no web domain.
+- The shell's policy allows frames from `https://*.<web domain>` when one is set, and from nowhere else (`frame-src`).
+
+### 7.19 The `web` plugin
+
+Web interfaces through NKeeper, in a tab: ported from 1.x's `Web/` (YARP).
+- **Service types** `http` (port 80, TCP probe) and `https` (port 443, TLS probe), as 1.x had them.
+- **Session type** `web`, "Web page", stateful (§7.17), on both, through a jump host too (§7.16).
+- **Host action** `web.open`, "Web page", with no credential.
+- **Opening** (`POST /api/p/web/hosts/{hostId}/sessions`, Use): core opens the connection (§7.16) and registers the session (§7.17). The plugin answers with a one-time launch URL on the session's origin (§7.18), valid for 2 minutes. An untrusted certificate answers `409` with `host_key_unknown` and the certificate as `presented`, for the shell's dialog; after the user trusts it, the view opens again.
+- **The session origin** `nkw-<session ID>.<web domain>`, where the ID is 128 random bits:
+  - the launch link sets the session's cookie (HttpOnly, Secure, `SameSite=None`, Partitioned, since NKeeper frames it) and redirects to `/`;
+  - every other request must carry that cookie. Without it, or for an unknown or ended session, the handler shows a short page instead;
+  - requests go to the target through core's connection, with `Host`, `Origin` and `Referer` rewritten to the target's, NKeeper's cookie removed, and redirects and cookies rewritten to stay on the session origin. Responses may be framed only by NKeeper's own origin;
+  - a session idle for 30 minutes ends, as does one whose access ends (§7.17).
+- **Closing** (`DELETE /api/p/web/hosts/{hostId}/sessions/{id}`): the view calls it when its tab closes.
+- **Its frontend** is the `web` session view: it opens the session, asks the shell to trust a certificate when it must, and shows the site in a frame.
+- A capability for other plugins to open web sessions (1.x's iDRAC console) arrives with its first user, in Phase 4.
+
+### 7.20 Desktop connections
+
+Remote desktops go through guacd, Apache Guacamole's proxy daemon, which speaks RDP and VNC to the server and the Guacamole protocol to NKeeper (D11). Core makes the connection, as it does SSH and HTTP (D13): guacd needs the credential's secrets, and a plugin never sees them (SDK 0.1.9).
+
+```csharp
+await using var desktop = await connectivity.OpenDesktopAsync(host, serviceId, handle, new DesktopOptions(Width: 1280, Height: 800, Dpi: 96));
+// desktop.ReceiveAsync: guacd's instructions for the browser; desktop.SendFromBrowserAsync: the browser's, filtered
+```
+
+- `IConnectivity.OpenDesktopAsync(host, serviceId, handle, options)`, for an RDP service, so far:
+  - checks the handle, as for SSH (§7.9), and audits `credential.use`;
+  - **checks the server's certificate first.** It reads the certificate RDP offers (an X.224 negotiation, then a TLS handshake), and checks it like an HTTPS one (§7.16): publicly valid, or the one trusted for the host. An unknown one fails with `ConnectException` and `HostKeyUnknown`, carrying the certificate, which core remembers it presented. A changed one fails with `HostKeyChanged`, audited as `trust.mismatch`;
+  - through a jump host, opens a tunnel (§7.16), and guacd connects to its loopback end;
+  - connects to guacd (`Guacd:Address`, `127.0.0.1:4822` by default) and does the Guacamole handshake itself: it selects `rdp`, sends the browser's size, and the connection's parameters. These are the address, port, user name, domain and password, NLA security, and `cert-fingerprints` set to the certificate it just checked, so guacd accepts exactly that one. The browser can never choose the protocol, the target or a parameter;
+  - returns once guacd says `ready`, with an `IDesktopConnection`:
+    - `ReceiveAsync` gives guacd's instructions for the browser, `ready` first, as Guacamole text;
+    - `SendFromBrowserAsync` takes the browser's instructions and passes on only what **1.x's allow-list** (`GuacamoleInstructionFilter`) allows. The filter is core's, in the connection, so no plugin can skip it:
+      - input, display and plain-text clipboard only: `key`, `mouse`, `touch`, `size`, `sync`, `ack`, `nop`, `clipboard`, `blob`, `end`, `disconnect`;
+      - stream data only for clipboard streams the browser opened, at most 16 of them, of at most 1 MB of text each;
+      - everything else is dropped: file uploads, audio input, argument changes, and anything unknown. It's a security control on a relay that's reachable from the browser, so it has its own negative tests;
+      - text that doesn't parse as instructions throws, and the session ends.
+- **Options** come from the plugin, and are checked: the size (between 200 × 200 and 8192 × 8192), DPI, the audio and image types the browser takes, and its time zone.
+- guacd that isn't running fails with `GatewayUnavailable`.
+- **The Guacamole protocol code** (parser, encoder, handshake) is core's, ported from 1.x's `GuacamoleProtocol` and `GuacdConnection`.
+
+### 7.21 The `desktop` plugin
+
+RDP through guacd, as a proof that the SDK carries a third kind of session (v2-plan.md, Phase 2): ported from 1.x's `Desktop/`. VNC, sign-in pass-through and clipboard settings follow in Phase 4.
+- **Service type** `rdp`, port 3389, TLS probe (§7.13).
+- **Session type** `rdp`, "Desktop", a stream session (§7.10) on `rdp` services, through jump hosts too.
+- **Host action** `rdp.desktop`, "Desktop", with a credential.
+- **The session** relays Guacamole instructions between the browser and core's desktop connection (§7.20), as text frames: the browser's through `SendFromBrowserAsync`, so through core's allow-list.
+- `options`: the browser's size, DPI and time zone.
+- **Its frontend** is the `rdp` session view: Guacamole's own JavaScript client (`guacamole-common-js`, Apache 2.0), bundled with the plugin, drawing into the tab and scaling to it.
 
 ## 8. The native install
 
@@ -640,7 +794,7 @@ export default definePlugin({
    - the server is published self-contained for the machine's architecture;
    - the shell and the built-in plugins are built as in development.
 4. **Signs the built-in plugins** with a one-time install key (plugin-security.md §6.1), and deletes its private key.
-5. Lays out the files below, and writes the settings file, the key ring certificate (on a fresh install only), the systemd unit and nginx's site. nginx gets a self-signed certificate unless one is given (`--cert`, `--key`).
+5. Lays out the files below, and writes the settings file (with `Origins:BaseDomain` when given `--web-domain`, §7.18), the key ring certificate (on a fresh install only), the systemd unit and nginx's site. nginx gets a self-signed certificate unless one is given (`--cert`, `--key`).
 6. **Starts NKeeper.** On a fresh install it creates the first administrator: the installer asks for a password, or generates one and prints it once. Once the server is up, it turns the bootstrap off and removes the password from the settings file.
 
 | Path | Owner / mode | Contents |
@@ -657,18 +811,29 @@ export default definePlugin({
 **The service** (`deploy/systemd/nkeeper.service`) runs the server as the unprivileged `nkeeper` user, listening on `127.0.0.1:5080` only. It has the hardening of plugin-security.md §4: `ProtectSystem=strict` with only `/var/lib/nkeeper` writable, `NoNewPrivileges`, `PrivateTmp`, `ProtectHome` and an empty `CapabilityBoundingSet`. It also has `PrivateDevices`, the kernel protections, `RestrictSUIDSGID`, `LockPersonality`, and network families limited to IPv4, IPv6 and Unix sockets.
 
 **nginx** (`deploy/nginx/nkeeper.conf`), with HTTP/2 turned on in the form the installed version expects:
-- terminates TLS 1.2 and 1.3 on port 443, and redirects port 80 to it;
+- terminates TLS 1.2 and 1.3 on port 443, and redirects port 80 to it. With a web domain, it also answers `*.<web domain>`, and its self-signed certificate covers that wildcard. The wildcard DNS record is the administrator's to make;
 - proxies everything to the server, WebSocket upgrades included, with read timeouts long enough for idle sessions. It serves no files itself (plugin-security.md §7.3);
 - sends `X-Forwarded-For` and `X-Forwarded-Proto`, and HSTS.
 
 **Forwarded headers.** With `ForwardedHeaders:Enabled`, which the installer sets, the server takes the client's address and scheme from `X-Forwarded-For` and `X-Forwarded-Proto`. It accepts them from a proxy on the loopback address only, for one hop. Without this, the server would see nginx's plain-HTTP request from `127.0.0.1`. Then the WebSocket origin check (§7.10) would refuse every session, the sign-in rate limit (§6.4) would count every user as one client, and the audit would record no real addresses.
+
+**guacd, as a native service** (D11). Remote desktops need guacd (§7.20). Distributions don't ship guacd 1.6, so the installer builds it, with the FreeRDP it runs on:
+- **FreeRDP 2.11.7**, built first, the version Apache's own guacd images use. It's built with its own MD4, which NLA's NTLM sign-in needs and OpenSSL 3 leaves out by default. guacd 1.6.0 crashes on FreeRDP 3.31 and newer, a known upstream bug ([FreeRDP#13342](https://github.com/FreeRDP/FreeRDP/issues/13342)), and the RHEL 10 family ships 3.32. Building it everywhere gives guacd the same, known-good FreeRDP on every distribution, and the distribution's own FreeRDP is left alone;
+- **guacamole-server 1.6.0**, against that FreeRDP, with RDP only: no SSH, telnet, VNC or Kubernetes (VNC comes with Phase 4);
+- both from their source releases, checked against SHA-256 hashes pinned in the installer. guacamole-server's was checked against its release signature by Apache's code-signing key when it was pinned. FreeRDP's was checked against two separately hosted copies, pub.freerdp.com and its GitHub release, which were identical;
+- into `/usr/lib/nkeeper/guacd/`, root-owned, rebuilt only when either version changes;
+- on the RHEL family, a few build packages come from CRB, which the installer enables;
+- it runs as `nkeeper-guacd.service`: its own unprivileged user, listening on `127.0.0.1:4822` only, with the same hardening as NKeeper's service plus `ProtectProc`. It can write only its private `/tmp` and its state directory, `/var/lib/nkeeper-guacd`, which is its home, since FreeRDP keeps its settings there;
+- `--no-guacd` skips it, and a build that fails never stops NKeeper from installing. Either way, remote desktops then say the gateway is unavailable.
 
 **SELinux** (RHEL family): the installer labels the server's executable as a program systemd may start, and lets nginx connect to the server.
 
 **Tested in CI, through a real browser.** The Install workflow runs the installer on a fresh Ubuntu runner. Then a headless Chromium (Playwright, `testing/e2e`):
 - signs in, and creates a host for the runner's own SSH server;
 - opens a terminal with a typed credential and with a saved one, and trusts the server's key;
-- runs commands, checks the terminal resizes with the window, and deletes the host.
+- runs commands, checks the terminal resizes with the window, and deletes the host;
+- opens a web page on the server itself, trusts its certificate, and sees it framed on its session origin (installed with `--web-domain web.localhost`, since Chromium resolves `*.localhost` to loopback);
+- opens a remote desktop to xrdp on the runner, through the guacd the installer built, trusts its certificate, and sees the desktop draw.
 
 It then upgrades in place and checks again.
 
@@ -677,6 +842,6 @@ The rest of the installer is Phase 6: release-signed packages, guacd (D11), and 
 ## 9. Where to read more
 
 - [v2-plan.md](v2-plan.md): the audit of 1.x, the core/plugin boundary, the contribution catalogue, phases and decisions.
+- [plugin-authoring.md](plugin-authoring.md): writing a plugin against SDK v1, with ssh and wake-on-lan as worked examples.
 - [plugin-security.md](plugin-security.md): package format, signing, trust, directory checks, verification order and reason codes, loading and states.
 - [CONTRIBUTING.md](../CONTRIBUTING.md): development setup and running the shell with plugins.
-- `plugin-authoring.md` (Phase 1): writing a plugin, with SSH as the worked example.

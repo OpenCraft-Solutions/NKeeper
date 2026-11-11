@@ -1,7 +1,7 @@
 name: Install
 
 # The native installer end to end (docs/architecture.md §8), on a fresh Ubuntu runner: install, sign in
-# through nginx, see the built-in plugins load, open terminals in a real browser, then upgrade in place
+# through nginx, see the built-in plugins load, open terminals, web pages and a desktop in a real browser, then upgrade in place
 # and check again.
 on:
   pull_request:
@@ -53,8 +53,27 @@ jobs:
           echo 'PasswordAuthentication yes' | sudo tee /etc/ssh/sshd_config.d/10-nkeeper-e2e.conf >/dev/null
           sudo systemctl restart ssh
 
+      # The desktop test opens xrdp on the runner, as a throwaway user whose session is just an xterm.
+      - name: An RDP account to connect to
+        run: |
+          password=$(openssl rand -base64 24)
+          echo "::add-mask::$password"
+          echo "RDP_PASSWORD=$password" >> "$GITHUB_ENV"
+          sudo apt-get install -y -qq xrdp xorgxrdp xterm >/dev/null
+          sudo useradd --create-home --shell /bin/bash nkrdp
+          echo "nkrdp:$password" | sudo chpasswd
+          echo 'exec xterm' | sudo -u nkrdp tee /home/nkrdp/.xsession >/dev/null
+          # TLS with a certificate of its own: NKeeper refuses legacy RDP security, which can't be verified.
+          sudo rm -f /etc/xrdp/cert.pem /etc/xrdp/key.pem
+          sudo openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj /CN=localhost             -keyout /etc/xrdp/key.pem -out /etc/xrdp/cert.pem 2>/dev/null
+          sudo chown root:xrdp /etc/xrdp/key.pem /etc/xrdp/cert.pem
+          sudo chmod 0640 /etc/xrdp/key.pem
+          sudo sed -i 's/^security_layer=.*/security_layer=tls/' /etc/xrdp/xrdp.ini
+          sudo systemctl restart xrdp
+
       - name: Install
-        run: sudo deploy/setup.sh install --yes --server-name localhost --admin-password "$ADMIN_PASSWORD"
+        # web.localhost: Chromium resolves *.localhost to loopback, so web pages' session origins need no DNS.
+        run: sudo deploy/setup.sh install --yes --server-name localhost --web-domain web.localhost --admin-password "$ADMIN_PASSWORD"
 
       - name: Sign in through nginx and see the built-in plugins load
         run: deploy/check-install.sh "$ADMIN_PASSWORD"
@@ -64,6 +83,17 @@ jobs:
           SSH_USER: nke2e
           SCREENSHOTS: ${{ runner.temp }}
         run: npm run terminal --workspace @nkeeper/e2e
+
+      - name: Open a web page in a real browser
+        env:
+          SCREENSHOTS: ${{ runner.temp }}
+        run: npm run web --workspace @nkeeper/e2e
+
+      - name: Open a remote desktop in a real browser
+        env:
+          RDP_USER: nkrdp
+          SCREENSHOTS: ${{ runner.temp }}
+        run: npm run desktop --workspace @nkeeper/e2e
 
       - name: Upgrade in place
         run: sudo deploy/setup.sh install --yes --server-name localhost
@@ -77,6 +107,17 @@ jobs:
           SCREENSHOTS: ${{ runner.temp }}
         run: npm run terminal --workspace @nkeeper/e2e
 
+      - name: Open a web page again after the upgrade
+        env:
+          SCREENSHOTS: ${{ runner.temp }}
+        run: npm run web --workspace @nkeeper/e2e
+
+      - name: Open a remote desktop again after the upgrade
+        env:
+          RDP_USER: nkrdp
+          SCREENSHOTS: ${{ runner.temp }}
+        run: npm run desktop --workspace @nkeeper/e2e
+
       - name: Keep the screenshots
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -87,4 +128,6 @@ jobs:
 
       - name: The service's log
         if: failure()
-        run: sudo journalctl -u nkeeper -n 200 --no-pager
+        run: |
+          sudo journalctl -u nkeeper -n 200 --no-pager
+          sudo journalctl -u nkeeper-guacd -n 100 --no-pager

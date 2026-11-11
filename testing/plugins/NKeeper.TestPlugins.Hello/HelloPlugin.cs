@@ -29,6 +29,12 @@ public sealed class HelloPlugin : IPlugin
         // Opens on its own service type, so packages of this plugin under different IDs don't collide here either.
         contributions.AddSessionType(new SessionType(context.Id, "Hello session", typeof(HelloSessionHandler)) { ServiceTypes = [context.Id] });
         contributions.AddHostAction(new HostAction($"{context.Id}.open", "Open", SessionType: context.Id) { Credential = HostActionCredential.None });
+
+        // A session origin (SDK 0.1.8), only when its settings name a prefix: the tests package this plugin under many IDs.
+        if (context.Configuration["Origin"] is { } prefix)
+        {
+            contributions.AddSessionOrigin(new SessionOrigin(prefix, typeof(HelloOriginHandler)));
+        }
         contributions.AddServiceType(new ServiceType(context.Id, "Hello")
         {
             DefaultPort = 7,
@@ -58,6 +64,7 @@ public sealed class HelloPlugin : IPlugin
     {
         services.AddSingleton(new Greeting($"pong from {context.Id} {context.Version}"));
         services.AddScoped<HelloSessionHandler>();
+        services.AddSingleton<HelloOriginHandler>();
     }
 
     public void MapEndpoints(IEndpointRouteBuilder endpoints, PluginContext context)
@@ -72,6 +79,26 @@ public sealed class HelloPlugin : IPlugin
         var use = endpoints.MapHostGroup(HostPermission.Use);
         use.MapGet("/whoami", (HostContext host) => Results.Text($"{host.Name} {host.Permission}"));
         use.MapGet("/services", (HostContext host) => Results.Json(host.Services));
+
+        // Records a plugin audit event (SDK 0.1.7) with the action it's given: its own, or one it mustn't use.
+        use.MapPost("/audit", async (HostContext host, AuditProbe? probe, IPluginAudit audit) =>
+        {
+            // The authorization sweep calls every endpoint without a body.
+            if (probe is null)
+            {
+                return Results.Text("no probe");
+            }
+
+            try
+            {
+                await audit.RecordAsync(probe.Action, host.Id, "probed");
+                return Results.Json(new { message = $"Recorded {probe.Action}." });
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status400BadRequest, detail: ex.Message);
+            }
+        });
 
         // Uses the broker the way a plugin would (SDK 0.1.3), and the ways one mustn't.
         use.MapPost("/credential", async (HostContext host, CredentialProbe? probe, ICredentialBroker broker) =>
@@ -156,9 +183,9 @@ public sealed class HelloPlugin : IPlugin
 
                 return Results.Json(new { output = output.ToString() });
             }
-            catch (SshConnectException ex)
+            catch (ConnectException ex)
             {
-                return Results.Json(new { reason = ex.Reason.ToString(), message = ex.Message, presentedKey = ex.PresentedKey }, statusCode: StatusCodes.Status502BadGateway);
+                return Results.Json(new { reason = ex.Reason.ToString(), message = ex.Message, presentedKey = ex.Presented }, statusCode: StatusCodes.Status502BadGateway);
             }
             catch (CredentialDeniedException ex)
             {
@@ -213,7 +240,19 @@ public sealed class InvalidServiceTypePlugin : IPlugin
 {
     public void Contribute(IPluginContributions contributions, PluginContext context)
     {
-        // Host action rules (SDK 0.1.6): a valid service and session type, and a host action that breaks one.
+        // Session origin rules (SDK 0.1.8): an origin that breaks one.
+        if (context.Configuration["Break"] is { } originRule && originRule.StartsWith("origin-", StringComparison.Ordinal))
+        {
+            contributions.AddSessionOrigin(originRule switch
+            {
+                "origin-handler" => new SessionOrigin("fine", typeof(string)),
+                "origin-taken" => new SessionOrigin("hello", typeof(HelloOriginHandler)),
+                _ => new SessionOrigin("Not-Valid", typeof(HelloOriginHandler)),
+            });
+            return;
+        }
+
+        // Host action rules (SDK 0.1.6, run actions 0.1.7): a valid service and session type, and a host action that breaks one.
         if (context.Configuration["Break"] is { } actionRule && actionRule.StartsWith("action-", StringComparison.Ordinal))
         {
             contributions.AddServiceType(new ServiceType("fine", "Fine"));
@@ -224,6 +263,11 @@ public sealed class InvalidServiceTypePlugin : IPlugin
                 "action-session" => new HostAction("fine.go", "Go", "elsewhere"),
                 "action-credential" => new HostAction("fine.go", "Go", "fine") { Credential = (HostActionCredential)7 },
                 "action-taken" => new HostAction("hello.open", "Open again", "fine"),
+                "action-both" => new HostAction("fine.go", "Go", "fine") { Endpoint = "go", ServiceTypes = ["fine"] },
+                "action-neither" => new HostAction("fine.go", "Go"),
+                "action-endpoint" => new HostAction("fine.go", "Go") { Endpoint = "../go", ServiceTypes = ["fine"] },
+                "action-run-services" => new HostAction("fine.go", "Go") { Endpoint = "go" },
+                "action-session-services" => new HostAction("fine.go", "Go", "fine") { ServiceTypes = ["fine"] },
                 _ => new HostAction("Fine.Go", "Go", "fine"),
             });
             return;
@@ -417,4 +461,13 @@ public sealed class HelloSessionHandler(IConnectivity connectivity) : IStreamSes
             await ssh.DisposeAsync();
         }
     }
+}
+
+/// <summary>An audit event to record, for the plugin audit tests.</summary>
+public sealed record AuditProbe(string Action);
+
+/// <summary>Answers on the test plugin's session origin with the label it was given.</summary>
+public sealed class HelloOriginHandler : ISessionOriginHandler
+{
+    public Task HandleAsync(HttpContext context, string label) => context.Response.WriteAsync($"hello origin {label}");
 }

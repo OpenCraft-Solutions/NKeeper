@@ -35,6 +35,7 @@ public static class SessionErrorCodes
     public const string JumpHostUnsupported = "jump_host_unsupported";
     public const string CredentialDenied = "credential_denied";
     public const string HostKeyRejected = "host_key_rejected";
+    public const string HostKeyUntrusted = "host_key_untrusted";
     public const string HostKeyChanged = "host_key_changed";
     public const string AuthenticationFailed = "authentication_failed";
     public const string NoSecret = "no_secret";
@@ -44,15 +45,20 @@ public static class SessionErrorCodes
     public const string JumpHostUnavailable = "jump_host_unavailable";
     public const string Failed = "failed";
 
-    public static string For(SshConnectFailure failure) => failure switch
+    public const string SecurityNegotiationFailed = "security_negotiation_failed";
+    public const string GatewayUnavailable = "gateway_unavailable";
+
+    public static string For(ConnectFailure failure) => failure switch
     {
-        SshConnectFailure.HostKeyUnknown => HostKeyRejected,
-        SshConnectFailure.HostKeyChanged => HostKeyChanged,
-        SshConnectFailure.AuthenticationFailed => AuthenticationFailed,
-        SshConnectFailure.NoSecret => NoSecret,
-        SshConnectFailure.InvalidPrivateKey => InvalidPrivateKey,
-        SshConnectFailure.TimedOut => Timeout,
-        SshConnectFailure.JumpHostUnavailable => JumpHostUnavailable,
+        ConnectFailure.HostKeyUnknown => HostKeyRejected,
+        ConnectFailure.HostKeyChanged => HostKeyChanged,
+        ConnectFailure.AuthenticationFailed => AuthenticationFailed,
+        ConnectFailure.NoSecret => NoSecret,
+        ConnectFailure.InvalidPrivateKey => InvalidPrivateKey,
+        ConnectFailure.SecurityNegotiationFailed => SecurityNegotiationFailed,
+        ConnectFailure.TimedOut => Timeout,
+        ConnectFailure.GatewayUnavailable => GatewayUnavailable,
+        ConnectFailure.JumpHostUnavailable => JumpHostUnavailable,
         _ => Unreachable,
     };
 }
@@ -90,7 +96,8 @@ public static class StreamSessionEndpoints
         }
 
         var services = context.RequestServices;
-        if (services.GetRequiredService<SessionTypeCatalog>().Find(type) is not var (pluginId, sessionType)
+        // A stateful session type (§7.17) has no stream: its plugin's own endpoints open it.
+        if (services.GetRequiredService<SessionTypeCatalog>().Find(type) is not var (pluginId, sessionType) || sessionType.IsStateful
             || services.GetRequiredService<IAuthSessionAccessor>().CurrentSessionKey(context) is not { } authSessionKey)
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
@@ -335,18 +342,14 @@ internal sealed class StreamSessionRunner(HttpContext context, SessionSocket soc
             try
             {
                 // Resolved here, so a plugin's broken registration or constructor is reported like any failure.
-                handler ??= (IStreamSessionHandler)_services.GetRequiredService(sessionType.Handler);
+                handler ??= (IStreamSessionHandler)_services.GetRequiredService(sessionType.Handler!);
                 return await handler.OpenAsync(request, cancellationToken);
             }
-            catch (SshConnectException ex) when (ex.Reason == SshConnectFailure.HostKeyUnknown && ex.PresentedKey is { } key && prompts < MaxKeyPrompts)
+            catch (ConnectException ex) when (ex.Reason == ConnectFailure.HostKeyUnknown && ex.Presented is { } presented && prompts < MaxKeyPrompts)
             {
-                if (!await socket.AskToTrustAsync(new { type = "hostKey", hostId = key.HostId, serviceId = key.ServiceId, algorithm = key.Algorithm, fingerprint = key.Fingerprint }, cancellationToken)
-                    || await _services.GetRequiredService<TrustStore>().TrustAsync(authSessionKey, key.HostId, key.ServiceId, key.Algorithm, key.Fingerprint, user.Id, cancellationToken) is not null)
-                {
-                    throw new SessionStartException(SessionErrorCodes.HostKeyRejected, "The server's key wasn't trusted, so the session didn't open.");
-                }
+                await AskToTrustAsync(presented, user, cancellationToken);
             }
-            catch (SshConnectException ex)
+            catch (ConnectException ex)
             {
                 throw new SessionStartException(SessionErrorCodes.For(ex.Reason), ex.Message);
             }
@@ -355,6 +358,38 @@ internal sealed class StreamSessionRunner(HttpContext context, SessionSocket soc
                 _logger.LogError(ex, "Opening a {SessionType} session failed", sessionType.Id);
                 throw new SessionStartException(SessionErrorCodes.Failed, $"The {sessionType.Label} session couldn't be opened.");
             }
+        }
+    }
+
+    /// <summary>Asks the user, in-band (§7.7, §7.10), and trusts the key or certificate through the trust store when they say so.</summary>
+    private async Task AskToTrustAsync(PresentedIdentity question, RequestUser user, CancellationToken cancellationToken)
+    {
+        // Only someone who can manage the host may trust for it (§7.7), so no one else is asked.
+        if (await _services.GetRequiredService<HostAccess>().GetPermissionAsync(question.HostId, user, cancellationToken) != Access.HostPermission.Manage)
+        {
+            var what = question.Kind == PresentedIdentityKind.TlsCertificate ? "certificate" : "key";
+            throw new SessionStartException(
+                SessionErrorCodes.HostKeyUntrusted,
+                $"The server's {what} isn't trusted yet. Someone who can manage the host must connect once and trust it.");
+        }
+
+        var message = new
+        {
+            type = "hostKey",
+            hostId = question.HostId,
+            serviceId = question.ServiceId,
+            kind = question.Kind,
+            algorithm = question.Algorithm,
+            fingerprint = question.Fingerprint,
+            subject = question.Subject,
+            notAfterUtc = question.NotAfterUtc,
+        };
+        if (!await socket.AskToTrustAsync(message, cancellationToken)
+            || await _services.GetRequiredService<TrustStore>().TrustAsync(authSessionKey, question.HostId, question.ServiceId, question.Algorithm, question.Fingerprint, user.Id, cancellationToken) is not null)
+        {
+            throw new SessionStartException(
+                SessionErrorCodes.HostKeyRejected,
+                question.Kind == PresentedIdentityKind.TlsCertificate ? "The server's certificate wasn't trusted, so the session didn't open." : "The server's key wasn't trusted, so the session didn't open.");
         }
     }
 
@@ -475,6 +510,7 @@ public static class StreamSessionServices
             .AddSingleton(new SessionTypeCatalog(types))
             .AddSingleton<SessionRegistry>()
             .AddScoped<SessionAccessCheck>()
+            .AddScoped<IPluginSessions, PluginSessions>()
             .AddHostedService<SessionSweeper>();
     }
 }

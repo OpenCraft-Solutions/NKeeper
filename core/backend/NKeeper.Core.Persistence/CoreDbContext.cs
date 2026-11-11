@@ -138,6 +138,8 @@ public sealed class CoreDbContext(DbContextOptions<CoreDbContext> options)
         {
             user.ToTable("users");
             user.Property(u => u.UserName).HasMaxLength(256);
+            user.Property(u => u.ColorScheme).HasMaxLength(64).HasDefaultValue("navy");
+            user.Property(u => u.CustomColorSchemes).HasDefaultValue("[]");
         });
         builder.Entity<ApplicationRole>().ToTable("roles");
         builder.Entity<IdentityUserRole<Guid>>().ToTable("user_roles");

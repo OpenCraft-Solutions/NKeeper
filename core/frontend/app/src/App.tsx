@@ -1,14 +1,26 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { api, ApiError, onUnauthorized, resetAntiforgeryToken } from '@nkeeper/sdk'
+import { ColorSchemeDialog } from './appearance/ColorSchemeDialog'
+import { applyColorScheme, tokensFor, type ColorSchemePreferences } from './appearance/colorSchemes'
 import { buildCatalog } from './catalog'
 import { ChangePassword } from './ChangePassword'
 import { DialogProvider } from './Dialogs'
 import { loadPluginFrontends, type FrontendState, type ModuleImporter, type PluginStatus } from './plugins'
+import { HealthView } from './HealthView'
 import { PluginsView } from './PluginsView'
 import { UsersView } from './UsersView'
 import { SignIn } from './SignIn'
 import { ADMINISTRATOR, type CurrentUser } from './types'
 import { Workspace } from './Workspace'
+import { Alert } from './ui/Alert'
+import frame from './ui/AppLayout.module.css'
+import { AuthLayout } from './ui/AuthLayout'
+import { ContextMenu } from './ui/ContextMenu'
+import { Logo } from './ui/Logo'
+import reports from './ui/Reports.module.css'
+import { Spinner } from './ui/Spinner'
+
+type View = 'workspace' | 'reports' | 'users' | 'settings'
 
 type Load =
   | { kind: 'loading' }
@@ -24,7 +36,11 @@ type Load =
 export function App({ importer }: { importer?: ModuleImporter }) {
   const [load, setLoad] = useState<Load>({ kind: 'loading' })
   const [attempt, setAttempt] = useState(0)
-  const [view, setView] = useState<'workspace' | 'plugins' | 'users'>('workspace')
+  const [view, setView] = useState<View>('workspace')
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
+  const [choosingColors, setChoosingColors] = useState(false)
+  // A host to show in the workspace, from the Health page.
+  const [focus, setFocus] = useState<{ hostId: string; n: number } | null>(null)
   const [signOutError, setSignOutError] = useState<string | null>(null)
   // Bumped whenever the session ends, so a load still in flight can't bring back the signed-in view.
   const session = useRef(0)
@@ -71,6 +87,19 @@ export function App({ importer }: { importer?: ModuleImporter }) {
     }
   }, [importer, attempt])
 
+  // The signed-in user's colour scheme, as soon as the shell knows who they are (§7.14).
+  const colorSchemes = load.kind === 'ready' || load.kind === 'mustChangePassword' ? load.user.colorSchemes : null
+  useEffect(() => {
+    if (colorSchemes) {
+      applyColorScheme(tokensFor(colorSchemes))
+    }
+  }, [colorSchemes])
+
+  /** A scheme chosen in the dialog: shown at once; the dialog saves it. */
+  function colorSchemesChanged(next: ColorSchemePreferences) {
+    setLoad((current) => (current.kind === 'ready' ? { ...current, user: { ...current.user, colorSchemes: next } } : current))
+  }
+
   const catalog = useMemo(() => (load.kind === 'ready' ? buildCatalog(load.plugins, load.frontends) : null), [load])
 
   // Only a sign-out the server confirmed shows the sign-in form: until then the session may still be valid.
@@ -89,64 +118,121 @@ export function App({ importer }: { importer?: ModuleImporter }) {
   }
 
   const isAdministrator = load.kind === 'ready' && load.user.roles.includes(ADMINISTRATOR)
-  return (
-    <div className="nk-app">
-      <header className="nk-header">
-        <h1>NKeeper</h1>
-        {(load.kind === 'ready' || load.kind === 'mustChangePassword') && (
-          <div className="nk-header-tools">
-            {isAdministrator && (
-              <>
-                <button type="button" aria-pressed={view === 'users'} onClick={() => setView((v) => (v === 'users' ? 'workspace' : 'users'))}>
-                  Users
-                </button>
-                <button type="button" aria-pressed={view === 'plugins'} onClick={() => setView((v) => (v === 'plugins' ? 'workspace' : 'plugins'))}>
-                  Plugins
-                </button>
-              </>
-            )}
-            <span className="nk-user">{load.user.userName}</span>
-            <button type="button" onClick={() => void signOut()}>
-              Sign out
-            </button>
-            {signOutError && (
-              <span role="alert" className="nk-header-error">
-                {signOutError}
-              </span>
-            )}
-          </div>
+  if (load.kind === 'signedOut' || load.kind === 'mustChangePassword') {
+    return (
+      <AuthLayout title={load.kind === 'signedOut' ? 'Sign in to NKeeper' : 'Choose a new password'}>
+        {load.kind === 'signedOut' ? <SignIn onSignedIn={() => setAttempt((n) => n + 1)} /> : <ChangePassword onChanged={() => setAttempt((n) => n + 1)} />}
+      </AuthLayout>
+    )
+  }
+  if (load.kind !== 'ready' || !catalog) {
+    return (
+      <div className={frame.status}>
+        {load.kind === 'error' ? (
+          <Alert>{load.message}</Alert>
+        ) : (
+          <Spinner label="Loading NKeeper" />
         )}
+      </div>
+    )
+  }
+
+  const tab = (id: View, label: string) => (
+    <button type="button" className={`${frame.navLink} ${view === id ? frame.navLinkActive : ''}`} aria-current={view === id ? 'page' : undefined} onClick={() => setView(id)}>
+      {label}
+    </button>
+  )
+  return (
+    <div className={frame.shell}>
+      <header className={frame.header}>
+        <Logo size={24} />
+        <nav className={frame.nav} aria-label="Main">
+          {tab('workspace', 'Hosts')}
+          {tab('reports', 'Reports')}
+          {isAdministrator && tab('users', 'Users')}
+          {isAdministrator && tab('settings', 'Settings')}
+        </nav>
+        <button
+          type="button"
+          className={frame.accountButton}
+          aria-haspopup="menu"
+          aria-expanded={menu !== null}
+          title={load.user.email ?? undefined}
+          onClick={(event) => {
+            const rect = event.currentTarget.getBoundingClientRect()
+            setMenu({ x: rect.right - 200, y: rect.bottom + 4 })
+          }}
+        >
+          <span className={frame.avatar} aria-hidden="true">
+            {load.user.userName.slice(0, 1).toUpperCase()}
+          </span>
+          <span className={frame.user}>{load.user.userName}</span>
+          <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
+            <path d="M2.5 4.5 6 8l3.5-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
+        </button>
       </header>
-      {load.kind === 'signedOut' && (
-        <main className="nk-center">
-          <SignIn onSignedIn={() => setAttempt((n) => n + 1)} />
-        </main>
+      {signOutError && (
+        <div className={frame.banner}>
+          <Alert>{signOutError}</Alert>
+        </div>
       )}
-      {load.kind === 'mustChangePassword' && (
-        <main className="nk-center">
-          <ChangePassword onChanged={() => setAttempt((n) => n + 1)} />
-        </main>
-      )}
-      {load.kind === 'loading' && <p className="nk-muted nk-pad">Loading…</p>}
-      {load.kind === 'error' && (
-        <p className="nk-alert nk-pad" role="alert">
-          {load.message}
-        </p>
-      )}
-      {load.kind === 'ready' && catalog && (
+      <main className={frame.content}>
         <DialogProvider>
-          {/* The workspace stays mounted behind the plugin list, so its sessions and drafts carry on. */}
-          {view === 'plugins' && isAdministrator && <PluginsView plugins={load.plugins} frontends={load.frontends} />}
-          {view === 'users' && isAdministrator && (
-            <div className="nk-view">
-              <UsersView currentUserId={load.user.id} />
-            </div>
+          {view === 'reports' && (
+            <ReportsPage>
+              <HealthView
+                catalog={catalog}
+                onShowHost={(hostId) => {
+                  setFocus((current) => ({ hostId, n: (current?.n ?? 0) + 1 }))
+                  setView('workspace')
+                }}
+              />
+            </ReportsPage>
           )}
-          <div className="nk-view" hidden={view !== 'workspace' && isAdministrator}>
-            <Workspace catalog={catalog} canCreate={isAdministrator} />
+          {view === 'users' && isAdministrator && <UsersView currentUserId={load.user.id} />}
+          {view === 'settings' && isAdministrator && <PluginsView plugins={load.plugins} frontends={load.frontends} />}
+          {/* The workspace stays mounted behind the other pages, so its sessions and drafts carry on. */}
+          <div className={frame.content} hidden={view !== 'workspace'}>
+            <Workspace catalog={catalog} canCreate={isAdministrator} focus={focus} />
           </div>
         </DialogProvider>
+      </main>
+      {choosingColors && <ColorSchemeDialog preferences={load.user.colorSchemes} onChange={colorSchemesChanged} onClose={() => setChoosingColors(false)} />}
+      {menu && (
+        <ContextMenu
+          label="Account"
+          x={menu.x}
+          y={menu.y}
+          onClose={() => setMenu(null)}
+          entries={[
+            { kind: 'header', label: load.user.email ?? load.user.userName },
+            { kind: 'item', label: 'Color scheme', onSelect: () => setChoosingColors(true) },
+            { kind: 'separator' },
+            { kind: 'item', label: 'Sign out', onSelect: () => void signOut() },
+          ]}
+        />
       )}
+    </div>
+  )
+}
+
+/** 1.x's Reports page: the list of reports on the left, the chosen one on the right. Health is the only one so far. */
+function ReportsPage({ children }: { children: ReactNode }) {
+  return (
+    <div className={reports.page}>
+      <nav className={reports.sidebar} aria-label="Reports">
+        <h1 className={reports.title}>Reports</h1>
+        <ul className={reports.reportList}>
+          <li>
+            <button type="button" className={`${reports.reportLink} ${reports.reportLinkActive}`} aria-current="page">
+              <span>Health</span>
+              <span className={reports.reportDescription}>What’s down, and certificates about to expire</span>
+            </button>
+          </li>
+        </ul>
+      </nav>
+      <section className={reports.report}>{children}</section>
     </div>
   )
 }

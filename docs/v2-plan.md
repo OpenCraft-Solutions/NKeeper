@@ -566,16 +566,24 @@ Each phase ends in a state that builds, passes tests, **installs as a native Lin
 
 ### Phase 2: Prove different plugin shapes
 - **web**: stateful session kind, separate `nkw-*` origins and middleware, a service type without credentials, plugin settings (base domain), `IWebSessionLauncher` capability.
+  - *As built (architecture.md §7.16–7.19):* the base domain became an install setting, `Origins:BaseDomain`, since wildcard DNS, the certificate and nginx must match it; so plugin settings wait for their first administrator-editable user. `IWebSessionLauncher` waits for iDRAC, in Phase 4. Core opens the HTTP connection and owns certificate trust, as it does for SSH.
 - **wake-on-lan**: an action-only plugin, the minimum size.
 - **desktop, proof only:** RDP connects through guacd with a pinned certificate and a saved credential, **with the browser instruction allow-list (1.x `GuacamoleInstructionFilter`) and its negative tests from the start**, because it is a security control on a deployable relay, not a parity feature. That exercises the external-daemon requirement, the certificate probe in the trust store, and the credential path. AD sign-in pass-through, VNC and clipboard follow in Phase 4, so desktop parity doesn't hold up the SDK freeze.
 - **guacd as a native service (D11):** build guacd 1.6 from source on each supported distribution family in CI, and run the RDP proof against that build. If a family can't build or run it reliably, that family falls back to guacd in a container, and the plan records the result.
+  - *Result so far (2026-11-11):* guacd 1.6.0 builds natively, but crashes at connect on the RHEL 10 family's FreeRDP 3.32 (an upstream bug in FreeRDP 3.31 and newer). So the installer builds FreeRDP 2.11.7 too, as Apache's own images do, on every family, rather than falling back to a container (architecture.md §8).
+  - *Ubuntu 24.04 (2026-11-11):* the same build (FreeRDP 2.11.7, then guacd) works, and the Install workflow opens a desktop through it to xrdp, in a real browser, before and after an upgrade.
 - Health scheduler and TLS probes; the health report.
+  - *As built (architecture.md §7.13, §7.14):* TCP and TLS probes, results in memory, and the shell's Health page, ported from 1.x's report: what's down and which certificates expire within 30 days. 1.x's "down since" waits for health history, which nothing else needs yet.
 - **Exit:** SSH and web parity with 1.x, an RDP session opens end to end, and the ported 1.x tests for those paths pass. wake-on-lan touched zero core files.
 
 ### Phase 3: Freeze SDK v1
 - Review what hurt in Phases 1–2. Remove abstractions nothing used, fix the ones that leaked, and rename freely while there are only four plugins.
 - Write `docs/plugin-authoring.md` with ssh and wake-on-lan as worked examples. Freeze `sdkVersion` 1. From here, SDK changes are additive or versioned.
 - **Exit:** SDK v1 documented, with contract and architecture tests green.
+- *As built (2026-11-11):* the review found one thing to change before the freeze:
+  - **one connect failure.** SSH, HTTP and desktop connections each had an exception, a failure enum and (for two of them) a type for the identity a server presented. Core caught all three, and each new protocol would have added a fourth. They became one `ConnectException` with one `ConnectFailure` and one `PresentedIdentity`, matching the one trust prompt the shell already had.
+
+  Everything else was used by at least one of the four plugins, or by core on their behalf. The credential broker's `DescribeAsync` has no plugin user yet, but stays: it's the one way to check a handle without connecting, which the broker's own tests rely on. The SDK froze as 1.0.0, and the built-in plugins declare `>=1.0.0 <2.0.0`.
 
 ### Phase 4: Port the remaining features
 Each extension point is introduced with its first user (§4.2), and each plugin ports its 1.x tests. Suggested order, cheapest proofs first:

@@ -428,6 +428,11 @@ public sealed class PluginHostTests : IDisposable
     [InlineData("action-label")]
     [InlineData("action-session")]
     [InlineData("action-credential")]
+    [InlineData("action-both")]
+    [InlineData("action-neither")]
+    [InlineData("action-endpoint")]
+    [InlineData("action-run-services")]
+    [InlineData("action-session-services")]
     public async Task A_plugin_contributing_an_invalid_host_action_is_refused_and_registers_nothing(string rule)
     {
         _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "broken", entryType: TestPlugins.InvalidServiceTypeType));
@@ -439,6 +444,31 @@ public sealed class PluginHostTests : IDisposable
         Assert.Empty(result.SessionTypes);
         Assert.Empty(result.HostActions);
         Assert.Empty(services);
+    }
+
+    [Theory]
+    [InlineData("origin-prefix")]
+    [InlineData("origin-handler")]
+    public async Task A_plugin_claiming_an_invalid_session_origin_is_refused(string rule)
+    {
+        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "broken", entryType: TestPlugins.InvalidServiceTypeType));
+
+        var (result, _) = await ConfigureAsync(("Plugins:Settings:broken:Break", rule));
+
+        AssertRefused(result, "broken", HostReasonCodes.ContributionInvalid);
+        Assert.Empty(result.SessionOrigins);
+    }
+
+    [Fact]
+    public async Task A_session_origin_prefix_claimed_by_an_earlier_plugin_is_refused()
+    {
+        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey));
+        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "broken", entryType: TestPlugins.InvalidServiceTypeType, dependsOn: ("hello", ">=1.0.0")));
+
+        var (result, _) = await ConfigureAsync(("Plugins:Settings:hello:Origin", "hello"), ("Plugins:Settings:broken:Break", "origin-taken"));
+
+        AssertRefused(result, "broken", HostReasonCodes.ContributionInvalid);
+        Assert.Equal([("hello", "hello")], result.SessionOrigins.Select(o => (o.PluginId, o.Origin.Prefix)));
     }
 
     [Fact]

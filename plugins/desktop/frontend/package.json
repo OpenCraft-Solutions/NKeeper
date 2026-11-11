@@ -1,0 +1,19 @@
+{
+  "name": "@nkeeper/plugin-desktop",
+  "description": "The desktop plugin's frontend: the remote desktop tab, with Apache Guacamole's client (docs/architecture.md §7.21).",
+  "private": true,
+  "license": "MIT",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -b && vite build",
+    "typecheck": "tsc -b"
+  },
+  "dependencies": {
+    "@nkeeper/sdk": "^1.0.0",
+    "react": "^19.2.8"
+  },
+  "devDependencies": {
+    "@types/guacamole-common-js": "^1.5.5"
+  }
+}

@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The wake-on-lan plugin (docs/architecture.md §7.15). Built, packed and signed by plugins/NKeeperPlugin.targets. -->
+  <Import Project="../../NKeeperPlugin.targets" />
+
+</Project>

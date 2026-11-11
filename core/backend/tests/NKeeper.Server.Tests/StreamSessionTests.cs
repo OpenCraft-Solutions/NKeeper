@@ -13,7 +13,7 @@ using NKeeper.Testing;
 namespace NKeeper.Server.Tests;
 
 /// <summary>
-/// docs/architecture.md §7.10: stream sessions through core's WebSocket endpoint, with the test plugin's session
+/// docs/architecture.md Â§7.10: stream sessions through core's WebSocket endpoint, with the test plugin's session
 /// type (an echo, or a shell over SSH), and the registry that ends them when access changes.
 /// </summary>
 public sealed class StreamSessionTests(PostgresFixture postgres, SshServerFixture ssh) : IClassFixture<PostgresFixture>, IClassFixture<SshServerFixture>
@@ -96,12 +96,22 @@ public sealed class StreamSessionTests(PostgresFixture postgres, SshServerFixtur
     }
 
     [Fact]
-    public async Task An_unknown_key_is_asked_about_in_band_and_the_shell_runs_once_it_is_trusted()
+    public async Task An_unknown_key_is_asked_about_in_band_of_a_manager_and_the_shell_runs_once_it_is_trusted()
     {
         await using var server = await ServerAsync();
         var (admin, cookie) = await SignInAsync(server, ServerScenario.AdminUserName, ServerScenario.AdminPassword);
         var host = await CreateHostAsync(admin, port: ssh.Port, credential: new { username = SshServerFixture.UserName, password = SshServerFixture.Password });
         var start = new { type = "start", hostId = Id(host), serviceId = ServiceId(host), credentialId = CredentialId(host) };
+
+        // Someone with Use only isn't asked: only a manager can trust for the host.
+        var bobId = await server.CreateUserAsync("bob", BobPassword);
+        (await admin.SendWithTokenAsync(HttpMethod.Put, $"/api/users/{bobId}/grants", new[] { new { hostId = Id(host), level = "use" } })).EnsureSuccessStatusCode();
+        var (_, bob) = await SignInAsync(server, "bob", BobPassword);
+        await using (var user = await SessionClient.ConnectAsync(server, bob))
+        {
+            await user.SendAsync(start);
+            Assert.Equal("host_key_untrusted", (await user.ExpectAsync("error")).GetProperty("code").GetString());
+        }
 
         // Refused: nothing is trusted, and the session doesn't open.
         await using (var refused = await SessionClient.ConnectAsync(server, cookie))
@@ -183,7 +193,7 @@ public sealed class StreamSessionTests(PostgresFixture postgres, SshServerFixtur
         var (admin, _) = await SignInAsync(server, ServerScenario.AdminUserName, ServerScenario.AdminPassword);
         var host = await CreateHostAsync(admin, port: ssh.Port, credential: new { username = SshServerFixture.UserName, password = SshServerFixture.Password });
         var bobId = await server.CreateUserAsync("bob", BobPassword);
-        (await admin.SendWithTokenAsync(HttpMethod.Put, $"/api/users/{bobId}/grants", new object[] { new { hostId = Id(host), level = "use" } })).EnsureSuccessStatusCode();
+        (await admin.SendWithTokenAsync(HttpMethod.Put, $"/api/users/{bobId}/grants", new object[] { new { hostId = Id(host), level = "manage" } })).EnsureSuccessStatusCode();
         var (_, bob) = await SignInAsync(server, "bob", BobPassword);
 
         await using var session = await SessionClient.ConnectAsync(server, bob);

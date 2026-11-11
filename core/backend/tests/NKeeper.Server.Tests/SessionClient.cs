@@ -27,6 +27,26 @@ internal sealed class SessionClient(WebSocket socket) : IAsyncDisposable
 
     public Task SendBinaryAsync(byte[] data) => socket.SendAsync(data, WebSocketMessageType.Binary, true, Token);
 
+    /// <summary>A raw text frame: Guacamole instructions, say.</summary>
+    public Task SendTextAsync(string text) => socket.SendAsync(Encoding.UTF8.GetBytes(text), WebSocketMessageType.Text, true, Token);
+
+    /// <summary>Reads text frames until <paramref name="text"/> appears in what came, and returns all of it.</summary>
+    public async Task<string> ReadTextUntilAsync(string text)
+    {
+        var received = new StringBuilder();
+        while (!received.ToString().Contains(text, StringComparison.Ordinal))
+        {
+            var (kind, data) = await ReceiveAsync();
+            Assert.True(kind != WebSocketMessageType.Close, $"The session closed before {text}. It sent: {received}");
+            if (kind == WebSocketMessageType.Text)
+            {
+                received.Append(Encoding.UTF8.GetString(data));
+            }
+        }
+
+        return received.ToString();
+    }
+
     /// <summary>Reads until a text message of <paramref name="type"/>, failing on a different control message.</summary>
     public async Task<JsonElement> ExpectAsync(string type)
     {

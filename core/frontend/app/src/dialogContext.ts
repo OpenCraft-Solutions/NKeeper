@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react'
-import type { HostKeyPrompt } from '@nkeeper/sdk'
+import type { HostKeyPrompt, TrustPrompt } from '@nkeeper/sdk'
 
 /** What core's dialogs (Dialogs.tsx) offer the rest of the shell. */
 
@@ -12,7 +12,8 @@ export interface TypedCredential {
 
 /** Each request waits its turn. Aborting its signal withdraws it: a key is then not trusted, and no credential is given. */
 export interface Dialogs {
-  confirmHostKey(prompt: HostKeyPrompt, hostName: string, signal?: AbortSignal): Promise<boolean>
+  /** A key, or (with its kind) a certificate: the dialog says which, with a certificate's subject and expiry. */
+  confirmHostKey(prompt: HostKeyPrompt | TrustPrompt, hostName: string, signal?: AbortSignal): Promise<boolean>
   askCredential(hostName: string, serviceName: string, signal?: AbortSignal): Promise<TypedCredential | null>
 }
 

@@ -36,10 +36,12 @@ var pluginLogger = startupLogging.CreateLogger("NKeeper.Plugins");
 
 // The shell, if this server serves one, is checked before anything else (§7.3): an index.html with an
 // inline script other than its import map stops the server here.
+// The web domain (§7.18) is checked here too, since the shell's policy lets it be framed.
+var webDomain = new SessionOriginRouter(builder.Configuration[SessionOriginRouter.BaseDomainSetting], []).BaseDomain;
 var frontendRoot = builder.Configuration.GetSection(FrontendOptions.SectionName).Get<FrontendOptions>()?.Root;
 var shell = string.IsNullOrWhiteSpace(frontendRoot)
     ? null
-    : ShellDocument.Load(Path.Combine(builder.Environment.ContentRootPath, frontendRoot));
+    : ShellDocument.Load(Path.Combine(builder.Environment.ContentRootPath, frontendRoot), webDomain);
 
 // Startup order (§9): the core schema first, so plugin records can be read and written…
 var connectionString = builder.Configuration.GetConnectionString("NKeeper")
@@ -79,6 +81,8 @@ builder.Services.AddNKeeperInventory(plugins.ServiceTypes.Select(t => t.Type));
 builder.Services.AddNKeeperSshConnectivity();
 builder.Services.AddNKeeperSessions(plugins.SessionTypes.Select(t => (t.PluginId, t.Type)));
 builder.Services.AddNKeeperHealth(builder.Configuration);
+builder.Services.AddSingleton(new SessionOriginRouter(webDomain, plugins.SessionOrigins.Select(o => o.Origin)));
+builder.Services.AddSingleton<ISessionOrigins>(provider => provider.GetRequiredService<SessionOriginRouter>());
 builder.Services.AddSingleton(plugins);
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.ConfigureHttpJsonOptions(options =>
@@ -90,6 +94,9 @@ await app.InitializeIdentityAsync(CancellationToken.None);
 
 // Behind nginx, the browser's own address and scheme, before anything reads them (architecture.md §8).
 app.UseNKeeperForwardedHeaders();
+
+// A session origin's request goes to its plugin and nowhere else (architecture.md §7.18).
+app.UseSessionOrigins();
 app.UseSecurityHeaders();
 if (shell is not null)
 {

@@ -187,6 +187,9 @@ public enum TrustedKeyKind
 {
     /// <summary>An SSH server's host key.</summary>
     SshHostKey,
+
+    /// <summary>A TLS server's certificate (docs/architecture.md §7.16).</summary>
+    TlsCertificate,
 }
 
 /// <summary>

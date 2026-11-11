@@ -1,5 +1,9 @@
 import { useState, type FormEvent } from 'react'
 import { api, ApiError } from '@nkeeper/sdk'
+import { Alert } from './ui/Alert'
+import { Button } from './ui/Button'
+import form from './ui/Form.module.css'
+import { PasswordField } from './ui/PasswordField'
 
 /** A required password change (docs/architecture.md §6.1, §7.14): nothing else works until it's done. */
 export function ChangePassword({ onChanged }: { onChanged: () => void }) {
@@ -29,25 +33,15 @@ export function ChangePassword({ onChanged }: { onChanged: () => void }) {
   }
 
   return (
-    <form className="nk-form nk-signin" onSubmit={(event) => void submit(event)} aria-label="Change your password">
-      <h2>Change your password</h2>
-      <p className="nk-muted">An administrator asked you to choose a new password before you go on.</p>
-      <label>
-        Current password
-        <input type="password" autoComplete="current-password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} required />
-      </label>
-      <label>
-        New password
-        <input type="password" autoComplete="new-password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} required />
-      </label>
-      <label>
-        Confirm the new password
-        <input type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} required />
-      </label>
-      {error && <p role="alert">{error}</p>}
-      <button type="submit" className="nk-primary" disabled={busy}>
+    <form className={form.form} onSubmit={(event) => void submit(event)} noValidate aria-label="Change your password">
+      <p className={form.lead}>An administrator asked you to choose a new password before you go on.</p>
+      {error && <Alert>{error}</Alert>}
+      <PasswordField label="Current password" autoComplete="current-password" required value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} />
+      <PasswordField label="New password" autoComplete="new-password" required value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
+      <PasswordField label="Confirm the new password" autoComplete="new-password" required value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+      <Button type="submit" fullWidth loading={busy}>
         Change password
-      </button>
+      </Button>
     </form>
   )
 }

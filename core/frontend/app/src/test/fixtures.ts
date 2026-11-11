@@ -40,7 +40,11 @@ export function terminalPlugin(overrides: Partial<PluginStatus> = {}): PluginSta
       },
     ],
     sessionTypes: [{ id: 'term', label: 'Terminal', serviceTypes: ['term'], supportsJumpHost: true }],
-    hostActions: [{ id: 'term.open', label: 'Terminal', sessionType: 'term', credential: 'required' }],
+    hostActions: [
+      { id: 'term.open', label: 'Terminal', sessionType: 'term', endpoint: null, serviceTypes: [], credential: 'required' },
+      // A run action (SDK 0.1.7), listed first, so double-clicking must skip it.
+      { id: 'term.reboot', label: 'Reboot', sessionType: null, endpoint: 'reboot', serviceTypes: ['term'], credential: 'none' },
+    ],
     ...overrides,
   })
 }
@@ -73,7 +77,7 @@ export function host(overrides: Partial<Host> = {}): Host {
   }
 }
 
-export const ADMIN = { id: 'u1', userName: 'admin', email: null, roles: ['Administrator'], mustChangePassword: false }
+export const ADMIN = { id: 'u1', userName: 'admin', email: null, roles: ['Administrator'], mustChangePassword: false, colorSchemes: { active: 'navy', custom: [] } }
 
 type Handler = (init: RequestInit | undefined, url: string) => Response | Promise<Response>
 

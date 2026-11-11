@@ -42,6 +42,7 @@ public sealed class TrustStore(CoreDbContext db, TrustPresentationStore presenta
     public static string KindName(TrustedKeyKind kind) => kind switch
     {
         TrustedKeyKind.SshHostKey => "ssh-host-key",
+        TrustedKeyKind.TlsCertificate => "tls-certificate",
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),
     };
 
