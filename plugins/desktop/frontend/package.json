@@ -1,6 +1,6 @@
 {
   "name": "@nkeeper/plugin-desktop",
-  "description": "The desktop plugin's frontend: the remote desktop tab, with Apache Guacamole's client (docs/architecture.md Â§7.21).",
+  "description": "The desktop plugin's frontend: the remote desktop tab, with Apache Guacamole's client (docs/architecture.md §7.21).",
   "private": true,
   "license": "MIT",
   "version": "0.1.0",

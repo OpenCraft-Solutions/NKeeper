@@ -1,6 +1,6 @@
 {
   "name": "@nkeeper/plugin-web",
-  "description": "The web plugin's frontend: the web page tab (docs/architecture.md Â§7.19).",
+  "description": "The web plugin's frontend: the web page tab (docs/architecture.md §7.19).",
   "private": true,
   "license": "MIT",
   "version": "0.1.0",
