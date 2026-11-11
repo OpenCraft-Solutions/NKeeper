@@ -81,6 +81,18 @@ function EchoView({ connect, host }: SessionViewProps) {
 
 const termImporter = vi.fn(async () => ({ default: definePlugin({ id: 'term', sessionViews: { term: EchoView } }) }))
 
+/** Selects a host in the tree and opens its Connect menu from the details, as 1.x did. */
+async function openConnect(user: ReturnType<typeof userEvent.setup>, hostName: string) {
+  await user.click(await screen.findByRole('button', { name: new RegExp(`^${hostName},`) }))
+  await user.click(within(screen.getByRole('article', { name: hostName })).getByRole('button', { name: 'Connect' }))
+}
+
+/** Chooses an action's entry: the action and service, then the credential in its submenu. */
+async function choose(user: ReturnType<typeof userEvent.setup>, group: string, entry: string) {
+  await user.click(screen.getByRole('menuitem', { name: group }))
+  await user.click(await screen.findByRole('menuitem', { name: entry }))
+}
+
 describe('App', () => {
   it('asks a signed-out user to sign in, then shows the workspace', async () => {
     let signedIn = false
@@ -97,7 +109,7 @@ describe('App', () => {
     const user = userEvent.setup()
 
     render(<App />)
-    await user.type(await screen.findByLabelText('User name or email'), 'admin')
+    await user.type(await screen.findByLabelText('Username or email'), 'admin')
     await user.type(screen.getByLabelText('Password'), 'Admin-Passw0rd-1')
     await user.click(screen.getByRole('button', { name: 'Sign in' }))
 
@@ -114,7 +126,7 @@ describe('App', () => {
     const user = userEvent.setup()
 
     render(<App />)
-    await user.type(await screen.findByLabelText('User name or email'), 'admin')
+    await user.type(await screen.findByLabelText('Username or email'), 'admin')
     await user.type(screen.getByLabelText('Password'), 'wrong-password-1')
     await user.click(screen.getByRole('button', { name: 'Sign in' }))
 
@@ -133,7 +145,9 @@ describe('App', () => {
     const user = userEvent.setup()
 
     render(<App />)
-    await user.click(await screen.findByRole('button', { name: 'Sign out' }))
+    // Sign out is in the user's menu, as in 1.x.
+    await user.click(await screen.findByRole('button', { name: 'admin' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Sign out' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('The server is unavailable.')
     expect(screen.queryByRole('form', { name: 'Sign in' })).not.toBeInTheDocument()
@@ -166,7 +180,7 @@ describe('App', () => {
     const user = userEvent.setup()
 
     render(<App importer={vi.fn(async () => ({ default: definePlugin({ id: 'hello' }) }))} />)
-    await user.click(await screen.findByRole('button', { name: 'Plugins' }))
+    await user.click(await screen.findByRole('button', { name: 'Settings' }))
 
     expect(screen.getByText('hello (built in)')).toBeInTheDocument()
     expect(screen.getByText('Active')).toBeInTheDocument()
@@ -179,7 +193,7 @@ describe('App', () => {
     render(<App />)
 
     expect(await screen.findByRole('button', { name: /^web01,/ })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Plugins' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Settings' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'New host' })).not.toBeInTheDocument()
   })
 })
@@ -287,19 +301,19 @@ describe('the workspace', () => {
     const user = userEvent.setup()
 
     render(<App importer={termImporter} />)
-    const tree = await screen.findByRole('navigation', { name: 'Hosts' })
-    await user.type(within(tree).getByLabelText('Search hosts'), 'env=test')
-    expect(within(tree).queryByRole('button', { name: /^web01,/ })).not.toBeInTheDocument()
-    await user.clear(within(tree).getByLabelText('Search hosts'))
+    const sidebar = await screen.findByRole('complementary', { name: 'Host inventory' })
+    await user.type(within(sidebar).getByLabelText('Search hosts'), 'env=test')
+    expect(within(sidebar).queryByRole('button', { name: /^web01,/ })).not.toBeInTheDocument()
+    await user.clear(within(sidebar).getByLabelText('Search hosts'))
 
-    await user.selectOptions(within(tree).getByLabelText('Group by'), 'env')
-    expect(within(tree).getByRole('heading', { name: /prod/ })).toBeInTheDocument()
-    expect(within(tree).getByRole('heading', { name: /test/ })).toBeInTheDocument()
+    await user.selectOptions(within(sidebar).getByLabelText('Group by'), 'env')
+    expect(within(sidebar).getByRole('button', { name: /prod/, expanded: true })).toBeInTheDocument()
+    expect(within(sidebar).getByRole('button', { name: /test/, expanded: true })).toBeInTheDocument()
 
-    await user.click(within(tree).getByRole('button', { name: /^web01,/ }))
+    await user.click(within(sidebar).getByRole('button', { name: /^web01,/ }))
     const details = screen.getByRole('article', { name: 'web01' })
-    expect(within(details).getByText('Down: refused')).toBeInTheDocument()
-    expect(within(tree).getByRole('img', { name: 'Every checked service is down' })).toBeInTheDocument()
+    expect(within(details).getByText('Down · Connection refused')).toBeInTheDocument()
+    expect(within(sidebar).getByRole('img', { name: 'Not answering' })).toBeInTheDocument()
   })
 
   it('shows a health page of what’s down and which certificates expire, and goes back to a host from it', async () => {
@@ -314,17 +328,18 @@ describe('the workspace', () => {
     const user = userEvent.setup()
 
     render(<App importer={termImporter} />)
-    await user.click(await screen.findByRole('button', { name: 'Health' }))
+    await user.click(await screen.findByRole('button', { name: 'Reports' }))
     expect(await screen.findByText(/1 of 2 services up · 1 down · 1 certificate expiring within 30 days/)).toBeInTheDocument()
     const down = screen.getByRole('region', { name: 'Down' })
-    expect(within(down).getByRole('cell', { name: 'Refused' })).toBeInTheDocument()
+    expect(within(down).getByRole('cell', { name: 'Connection refused' })).toBeInTheDocument()
     const certificates = screen.getByRole('region', { name: 'Certificates' })
     expect(within(certificates).getByRole('cell', { name: 'CN=portal' })).toBeInTheDocument()
-    expect(within(certificates).getByText(/\(in 5 days\)/)).toHaveClass('nk-warning')
+    expect(within(certificates).getByText(/\(in 5 days\)/)).toHaveAttribute('data-warning', 'true')
 
     await user.click(within(certificates).getByRole('button', { name: 'portal' }))
     const details = await screen.findByRole('article', { name: 'portal' })
-    expect(within(details).getByText(/^Up, 4 ms, certificate expires in 5 days$/)).toBeInTheDocument()
+    expect(within(details).getByText('Up · 4 ms')).toBeInTheDocument()
+    expect(within(details).getByText(/Certificate expires in 5 days/)).toBeInTheDocument()
   })
 
   it('opens a session in its own tab with a typed credential, asking about the server key', async () => {
@@ -333,10 +348,9 @@ describe('the workspace', () => {
     const user = userEvent.setup()
 
     render(<App importer={termImporter} />)
-    const connectButton = await screen.findByRole('button', { name: 'Connect to web01' })
-    expect(connectButton).toHaveTextContent(/^Connect$/)
-    await user.click(connectButton)
-    expect(screen.getByRole('menuitem', { name: 'root' })).toBeInTheDocument()
+    await openConnect(user, 'web01')
+    await user.click(screen.getByRole('menuitem', { name: 'Terminal · Term :22' }))
+    expect(await screen.findByRole('menuitem', { name: 'root' })).toBeInTheDocument()
     await user.click(screen.getByRole('menuitem', { name: 'Type a credential…' }))
 
     const typed = await screen.findByRole('dialog', { name: 'Type a credential' })
@@ -372,9 +386,9 @@ describe('the workspace', () => {
     const user = userEvent.setup()
 
     render(<App importer={termImporter} />)
-    const tree = await screen.findByRole('navigation', { name: 'Hosts' })
+    const tree = await screen.findByRole('list', { name: 'Hosts' })
     await user.pointer({ keys: '[MouseRight]', target: within(tree).getByRole('button', { name: /^web01,/ }) })
-    expect(screen.getByRole('menu', { name: 'Connect to web01' })).toBeInTheDocument()
+    expect(screen.getByRole('menu', { name: 'Actions for web01' })).toBeInTheDocument()
     await user.keyboard('{Escape}')
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
 
@@ -395,9 +409,8 @@ describe('the workspace', () => {
     const user = userEvent.setup()
 
     render(<App importer={termImporter} />)
-    await user.click(await screen.findByRole('button', { name: 'Connect to web01' }))
-    expect(screen.getByRole('group', { name: 'Reboot · Term :22' })).toBeInTheDocument()
-    await user.click(screen.getByRole('menuitem', { name: 'Reboot' }))
+    await openConnect(user, 'web01')
+    await user.click(screen.getByRole('menuitem', { name: 'Reboot · Term :22' }))
 
     expect(await screen.findByRole('status')).toHaveTextContent('Rebooting web01.')
     expect(bodyOf(fetch, 'POST /api/p/term/hosts/h1/reboot')).toEqual({ serviceId: 's1' })
@@ -410,22 +423,23 @@ describe('the workspace', () => {
     const user = userEvent.setup()
 
     render(<App importer={termImporter} />)
-    await user.click(await screen.findByRole('button', { name: 'Connect to web01' }))
-    await user.click(screen.getByRole('menuitem', { name: 'root' }))
+    await openConnect(user, 'web01')
+    await choose(user, 'Terminal · Term :22', 'root')
     await waitFor(() => expect(FakeSocket.last).not.toBeNull())
     const socket = FakeSocket.last!
     act(() => socket.open())
     act(() => socket.receiveJson({ type: 'connected' }))
     expect(await screen.findByText('web01: connected')).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'Plugins' }))
-    await user.click(screen.getByRole('button', { name: 'Plugins' }))
+    await user.click(screen.getByRole('button', { name: 'Settings' }))
+    await user.click(screen.getByRole('button', { name: 'Hosts' }))
     expect(screen.getByText('web01: connected')).toBeInTheDocument()
     expect(socket.readyState).toBe(FakeSocket.OPEN)
 
     // A second tab, waiting on a typed credential, is closed before it's answered.
-    await user.click(screen.getByRole('button', { name: 'Connect to web01' }))
-    await user.click(screen.getByRole('menuitem', { name: 'Type a credential…' }))
+    await user.click(screen.getByRole('tab', { name: /Details/ }))
+    await user.click(within(screen.getByRole('article', { name: 'web01' })).getByRole('button', { name: 'Connect' }))
+    await choose(user, 'Terminal · Term :22', 'Type a credential…')
     expect(await screen.findByRole('dialog', { name: 'Type a credential' })).toBeInTheDocument()
     await user.click(screen.getAllByRole('button', { name: 'Close web01 · Terminal' }).at(-1)!)
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Type a credential' })).not.toBeInTheDocument())

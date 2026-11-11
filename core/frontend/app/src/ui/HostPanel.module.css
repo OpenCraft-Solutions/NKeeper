@@ -1,0 +1,338 @@
+/* Shared by HostDetails and HostEditor: a scrolling body between a fixed header and footer. */
+
+.panel {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-5) var(--space-6) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.heading {
+  min-width: 0;
+}
+
+.title {
+  font-size: 1.375rem;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  overflow-wrap: anywhere;
+}
+
+.subtitle {
+  margin-top: var(--space-1);
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.body {
+  /* Positioned so visually-hidden text inside stays in this scroll box instead of growing the page. */
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-6);
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-5) var(--space-6) var(--space-8);
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  max-width: 52rem;
+}
+
+.sectionTitle {
+  font-size: 0.75rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-subtle);
+}
+
+.footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-6);
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-border);
+}
+
+.formGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.full {
+  grid-column: 1 / -1;
+}
+
+.properties {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-2) var(--space-6);
+  margin: 0;
+  font-size: 0.9375rem;
+}
+
+.properties dt {
+  color: var(--color-text-muted);
+}
+
+.properties dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.description {
+  white-space: pre-wrap;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: stretch;
+  padding: 0;
+  overflow: hidden;
+  background: transparent;
+  color: var(--color-text);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: 0.8125rem;
+  line-height: 1.75rem;
+  cursor: pointer;
+}
+
+.chip:hover {
+  border-color: var(--color-accent-text);
+}
+
+.chipName {
+  padding: 0 var(--space-2);
+  background: var(--color-surface-raised);
+  color: var(--color-text-muted);
+}
+
+.chipValue {
+  padding: 0 var(--space-2);
+}
+
+/* Inherited from the host a VM runs on: dashed and muted, so it reads as not the host's own. */
+.chipInherited {
+  border-style: dashed;
+  color: var(--color-text-muted);
+}
+
+.chipInherited .chipName {
+  background: transparent;
+  font-style: italic;
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.9375rem;
+}
+
+.row:last-child {
+  border-bottom: 0;
+}
+
+.rowMain {
+  flex: 1;
+  min-width: 8rem;
+}
+
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.mono {
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 0.875rem;
+}
+
+.muted {
+  color: var(--color-text-muted);
+}
+
+.fingerprint {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+  .header,
+  .body,
+  .footer {
+    padding-left: var(--space-4);
+    padding-right: var(--space-4);
+  }
+
+  .formGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* A form field built outside TextField (e.g. a select), styled to match it. */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.fieldLabel {
+  font-size: 0.875rem;
+  font-weight: 550;
+  color: var(--color-text);
+}
+
+.fieldHint {
+  font-size: 0.8125rem;
+  color: var(--color-text-subtle);
+}
+
+.fieldError {
+  font-size: 0.8125rem;
+  color: var(--color-danger);
+}
+
+/* Text that opens another host. */
+.link {
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--color-accent-text);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.link:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.count {
+  margin-left: var(--space-1);
+  color: var(--color-text-muted);
+  font-weight: 500;
+}
+
+.guests {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: 0.9375rem;
+}
+
+/* A bulk tag change: action, name, value, remove; its effect below. */
+.bulkRow {
+  display: grid;
+  grid-template-columns: 6.5rem minmax(0, 1fr) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.bulkEffect {
+  grid-column: 1 / -1;
+}
+
+.bulkServices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.bulkServices legend {
+  width: 100%;
+  margin-bottom: var(--space-1);
+}
+
+@media (max-width: 40rem) {
+  .bulkRow {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .bulkRow > :nth-child(2),
+  .bulkRow > :nth-child(3) {
+    grid-column: 1 / -1;
+  }
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+/* A service's health: its own line in the service row. */
+.status {
+  flex-basis: 100%;
+  font-size: 0.8125rem;
+}
+
+.up {
+  color: var(--color-success);
+}
+
+.down {
+  color: var(--color-danger);
+}
+
+/* "Reach through": the jump host and its credential side by side. */
+.jump {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: var(--space-3);
+}

@@ -1,145 +1,104 @@
-import { useMemo, useState } from 'react'
-import { connectMenu, type Catalog, type ConnectEntry, type ConnectGroup } from './catalog'
-import { ConnectMenu } from './ConnectMenu'
-import { groupHosts, healthSummary, hostAddress, matchesSearch, tagNames, type HealthSummary } from './hosts'
+import type { CSSProperties } from 'react'
+import type { Catalog } from './catalog'
+import { healthSummary, hostAddress, type HealthSummary, type HostGroup } from './hosts'
 import type { Host, ServiceHealth } from './types'
+import styles from './ui/HostTree.module.css'
 
-const GROUP_BY_KEY = 'nkeeper.groupBy'
-
-const HEALTH_LABELS: Record<HealthSummary, string> = {
-  up: 'Every checked service is up',
-  down: 'Every checked service is down',
-  partial: 'Some checked services are down',
-  unknown: 'Not checked',
+/** 1.x's labels for a host's health dot; a host nothing checked has none. */
+const HEALTH_LABELS: Record<Exclude<HealthSummary, 'unknown'>, string> = {
+  up: 'All services up',
+  partial: 'Some services down',
+  down: 'Not answering',
 }
 
-/** The choice is kept in this browser only; storage that's blocked just means no memory of it. */
-function readGroupBy(): string {
-  try {
-    return localStorage.getItem(GROUP_BY_KEY) ?? ''
-  } catch {
-    return ''
-  }
-}
-
-function writeGroupBy(value: string) {
-  try {
-    localStorage.setItem(GROUP_BY_KEY, value)
-  } catch {
-    // Not kept.
-  }
-}
-
-export function HealthDot({ summary }: { summary: HealthSummary }) {
-  return <span className={`nk-dot nk-dot-${summary}`} role="img" aria-label={HEALTH_LABELS[summary]} title={HEALTH_LABELS[summary]} />
-}
-
-/** The host tree (docs/architecture.md §7.14): search, group by a tag, health, and each host's Connect menu. */
+/**
+ * The host tree (docs/architecture.md §7.14), as 1.x drew it: groups that fold, and per host its health, name,
+ * address and first service. Selecting, double-clicking and right-clicking are the workspace's.
+ */
 export function HostTree({
-  hosts,
+  groups,
+  grouped,
+  collapsed,
+  onToggle,
   health,
   catalog,
   selectedId,
+  menuHostId,
   onSelect,
-  onConnect,
+  onActivate,
+  onContextMenu,
 }: {
-  hosts: Host[]
+  groups: HostGroup[]
+  /** Whether the hosts are grouped: without grouping, the one group has no row of its own. */
+  grouped: boolean
+  collapsed: Set<string>
+  onToggle: (key: string) => void
   health: Map<string, ServiceHealth>
   catalog: Catalog
   selectedId: string | null
+  /** The host whose menu is open, highlighted while it is. */
+  menuHostId: string | null
   onSelect: (host: Host) => void
-  onConnect: (host: Host, group: ConnectGroup, entry: ConnectEntry) => void
+  onActivate: (host: Host) => void
+  onContextMenu: (host: Host, x: number, y: number) => void
 }) {
-  const [query, setQuery] = useState('')
-  const [groupBy, setGroupBy] = useState(readGroupBy)
-  // The host whose Connect menu is open: one at a time.
-  const [menuFor, setMenuFor] = useState<string | null>(null)
-  const names = useMemo(() => tagNames(hosts), [hosts])
-  const effectiveGroupBy = names.includes(groupBy) ? groupBy : ''
-  const groups = useMemo(() => groupHosts(hosts.filter((h) => matchesSearch(h, query)), effectiveGroupBy || null), [hosts, query, effectiveGroupBy])
-  const shown = groups.reduce((n, g) => n + g.hosts.length, 0)
+  const hostRow = (host: Host, depth: number) => {
+    const summary = healthSummary(host, health)
+    const first = host.services[0]
+    return (
+      <li key={host.id}>
+        <button
+          type="button"
+          data-host-id={host.id}
+          className={`${styles.host} ${host.id === menuHostId ? styles.menuOpen : ''}`}
+          style={{ '--depth': depth } as CSSProperties}
+          aria-label={[host.name, hostAddress(host), summary === 'unknown' ? null : HEALTH_LABELS[summary]].filter(Boolean).join(', ')}
+          aria-current={host.id === selectedId ? 'true' : undefined}
+          aria-haspopup="menu"
+          onClick={() => onSelect(host)}
+          onDoubleClick={() => onActivate(host)}
+          onContextMenu={(event) => {
+            event.preventDefault()
+            onContextMenu(host, event.clientX, event.clientY)
+          }}
+        >
+          {summary !== 'unknown' && (
+            <span className={`${styles.health} ${styles[summary]}`} title={HEALTH_LABELS[summary]} role="img" aria-label={HEALTH_LABELS[summary]} />
+          )}
+          <span className={styles.hostText}>
+            <span className={styles.hostName}>{host.name}</span>
+            <span className={styles.hostAddress}>{hostAddress(host)}</span>
+          </span>
+          {first && (
+            <span className={styles.service} title={host.services.map((s) => catalog.serviceTypes.get(s.type)?.label ?? s.type).join(', ')}>
+              {catalog.serviceTypes.get(first.type)?.label ?? first.type}
+              {host.services.length > 1 ? ` +${host.services.length - 1}` : null}
+            </span>
+          )}
+        </button>
+      </li>
+    )
+  }
 
   return (
-    <nav className="nk-tree" aria-label="Hosts">
-      <div className="nk-tree-tools">
-        <input type="search" aria-label="Search hosts" placeholder="Search hosts" value={query} onChange={(e) => setQuery(e.target.value)} />
-        <label>
-          Group by
-          <select
-            value={effectiveGroupBy}
-            onChange={(e) => {
-              setGroupBy(e.target.value)
-              writeGroupBy(e.target.value)
-            }}
-          >
-            <option value="">Nothing</option>
-            {names.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-      {hosts.length === 0 ? (
-        <p className="nk-muted nk-pad">No hosts yet.</p>
-      ) : shown === 0 ? (
-        <p className="nk-muted nk-pad">No host matches.</p>
-      ) : (
-        groups.map((group) => (
-          <section key={group.key} className="nk-tree-group">
-            {effectiveGroupBy && (
-              <h3>
-                {group.label} <span className="nk-muted">({group.hosts.length})</span>
-              </h3>
-            )}
-            <ul>
-              {group.hosts.map((host) => (
-                <li
-                  key={host.id}
-                  className={host.id === selectedId ? 'nk-selected' : undefined}
-                  onContextMenu={(event) => {
-                    // Right-click: the host's Connect menu, here. Without one, the browser's own menu.
-                    if (connectMenu(host, catalog).length > 0) {
-                      event.preventDefault()
-                      onSelect(host)
-                      setMenuFor(host.id)
-                    }
-                  }}
-                >
-                  <button
-                    type="button"
-                    className="nk-tree-host"
-                    aria-label={[host.name, hostAddress(host), HEALTH_LABELS[healthSummary(host, health)]].filter(Boolean).join(', ')}
-                    aria-current={host.id === selectedId ? 'true' : undefined}
-                    onClick={() => onSelect(host)}
-                    onDoubleClick={() => {
-                      // Double-click: the first session entry, with the first saved credential if there is one.
-                      // Sessions only: a run action never runs by accident.
-                      const first = connectMenu(host, catalog).find((g) => g.entries[0]?.target.kind === 'session')
-                      const entry = first?.entries[0]
-                      if (first && entry) {
-                        onConnect(host, first, entry)
-                      }
-                    }}
-                  >
-                    <HealthDot summary={healthSummary(host, health)} />
-                    <span className="nk-tree-name">{host.name}</span>
-                    <span className="nk-tree-address">{hostAddress(host)}</span>
-                  </button>
-                  <ConnectMenu
-                    name={`Connect to ${host.name}`}
-                    groups={connectMenu(host, catalog)}
-                    onChoose={(g, e) => onConnect(host, g, e)}
-                    open={menuFor === host.id}
-                    onOpenChange={(open) => setMenuFor(open ? host.id : null)}
-                  />
-                </li>
-              ))}
-            </ul>
-          </section>
-        ))
-      )}
-    </nav>
+    <ul className={styles.tree} aria-label="Hosts">
+      {grouped
+        ? groups.map((group) => {
+            const expanded = !collapsed.has(group.key)
+            return (
+              <li key={group.key}>
+                <button type="button" className={styles.group} aria-expanded={expanded} onClick={() => onToggle(group.key)}>
+                  <svg className={styles.chevron} viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
+                    <path d="M4.5 2.5 8 6l-3.5 3.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  <span className={styles.groupLabel}>{group.label}</span>
+                  <span className={styles.count}>{group.hosts.length}</span>
+                </button>
+                {expanded && <ul>{group.hosts.map((host) => hostRow(host, 1))}</ul>}
+              </li>
+            )
+          })
+        : groups.flatMap((group) => group.hosts.map((host) => hostRow(host, 0)))}
+    </ul>
   )
 }

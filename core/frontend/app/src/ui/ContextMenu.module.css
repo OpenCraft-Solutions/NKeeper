@@ -1,0 +1,103 @@
+.menu {
+  position: fixed;
+  z-index: 200;
+  min-width: 13rem;
+  max-width: 22rem;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  margin: 0;
+  padding: var(--space-1);
+  list-style: none;
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+  font-size: 0.875rem;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 2rem;
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3);
+  background: transparent;
+  color: var(--color-text);
+  border: 0;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.item:focus,
+.item.open {
+  outline: none;
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+.item[aria-disabled='true'] {
+  color: var(--color-text-subtle);
+  cursor: default;
+}
+
+.item[aria-disabled='true']:focus {
+  background: var(--color-surface);
+  color: var(--color-text-subtle);
+}
+
+.label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail {
+  flex-shrink: 0;
+  max-width: 50%;
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-size: 0.8125rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shortcut {
+  flex-shrink: 0;
+  color: var(--color-text-subtle);
+  font-family: inherit;
+  font-size: 0.75rem;
+}
+
+.item:focus .detail,
+.item.open .detail,
+.item:focus .shortcut {
+  color: color-mix(in srgb, var(--color-on-accent) 80%, transparent);
+}
+
+.chevron {
+  flex-shrink: 0;
+  margin-right: calc(var(--space-1) * -1);
+}
+
+.separator {
+  height: 1px;
+  margin: var(--space-1) var(--space-2);
+  background: var(--color-border);
+}
+
+.header {
+  padding: var(--space-1) var(--space-3) var(--space-2);
+  overflow: hidden;
+  color: var(--color-text-subtle);
+  font-size: 0.75rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}

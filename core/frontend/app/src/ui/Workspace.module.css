@@ -1,0 +1,386 @@
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(18rem, 22rem) minmax(0, 1fr);
+  flex: 1;
+  min-height: 0;
+}
+
+.workspace[hidden] {
+  display: none;
+}
+
+/* Sidebar */
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--color-surface);
+  border-right: 1px solid var(--color-border);
+}
+
+.sidebarHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-3) var(--space-2) var(--space-4);
+}
+
+.sidebarTitle {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: 1rem;
+  font-weight: 650;
+}
+
+.total {
+  color: var(--color-text-subtle);
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+
+/* Wraps under the title when the buttons don't fit the sidebar, rather than running past its edge. */
+.sidebarActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-1);
+  min-width: 0;
+  margin-left: auto;
+}
+
+.iconButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  border: 0;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.iconButton:hover:not(:disabled) {
+  background: var(--color-surface-raised);
+  color: var(--color-text);
+}
+
+.iconButton:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Import, Scan network and New host, side by side above the search box. */
+.addActions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+  padding: 0 var(--space-3) var(--space-2) var(--space-4);
+}
+
+.addActions > button {
+  justify-content: center;
+  white-space: nowrap;
+}
+
+.controls {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: 0 var(--space-3) var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.search {
+  width: 100%;
+  min-height: 2.25rem;
+  padding: 0 var(--space-3);
+  background: var(--color-input);
+  color: var(--color-text);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  font-size: 0.9375rem;
+}
+
+.search::placeholder {
+  color: var(--color-text-subtle);
+}
+
+.search:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 1px;
+  border-color: var(--color-focus);
+}
+
+.sort {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text-muted);
+  font-size: 0.8125rem;
+}
+
+.sort select {
+  padding: var(--space-1) var(--space-2);
+  background: transparent;
+  color: var(--color-text);
+  border: 0;
+  border-radius: var(--radius-sm);
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+
+.sort select:hover {
+  background: var(--color-surface-raised);
+}
+
+.sort option {
+  background: var(--color-surface);
+}
+
+.treeScroll {
+  /* Positioned so the per-host visually-hidden labels (position: absolute) are laid out inside this
+     scroll box; otherwise they anchor to the page and stretch its scroll height with blank space. */
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-2) var(--space-2) var(--space-6);
+}
+
+.sidebarState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-6) var(--space-3);
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+/* Main panel */
+
+.main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.back {
+  display: none;
+}
+
+.view {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.view[hidden] {
+  display: none;
+}
+
+/* Tabs: the host details, then one per terminal session (like mRemoteNG). */
+
+.tabs {
+  display: flex;
+  flex-shrink: 0;
+  gap: 2px;
+  overflow-x: auto;
+  padding: var(--space-1) var(--space-2) 0;
+  background: var(--color-bg);
+  border-bottom: 1px solid var(--color-border);
+  scrollbar-width: thin;
+}
+
+.tab {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  max-width: 14rem;
+  padding: var(--space-1) var(--space-3);
+  background: transparent;
+  color: var(--color-text-muted);
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  font: inherit;
+  line-height: 1.25;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tab:hover {
+  color: var(--color-text);
+}
+
+.tab[aria-selected='true'] {
+  background: var(--color-surface);
+  color: var(--color-text);
+  border-color: var(--color-border);
+  box-shadow: inset 0 2px 0 var(--color-accent);
+}
+
+.tabTitle,
+.tabDetail {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tabTitle {
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.tabDetail {
+  color: var(--color-text-subtle);
+  font-size: 0.6875rem;
+}
+
+.tabWrap {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.tabWrap .tab {
+  padding-right: var(--space-1);
+  border-right: 0;
+  border-top-right-radius: 0;
+}
+
+.tabClose {
+  align-self: stretch;
+  width: 1.75rem;
+  padding: 0;
+  background: transparent;
+  color: var(--color-text-subtle);
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-left: 0;
+  border-radius: 0 var(--radius-sm) 0 0;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.tabClose:hover {
+  color: var(--color-text);
+}
+
+.tabWrapActive .tabClose {
+  background: var(--color-surface);
+  border-color: var(--color-border);
+  box-shadow: inset 0 2px 0 var(--color-accent);
+}
+
+.sessionsLink {
+  display: none;
+}
+
+.mainState {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-8) var(--space-6);
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+.mainState p {
+  max-width: 28rem;
+}
+
+.mainState > button {
+  margin-top: var(--space-3);
+}
+
+.mainState code {
+  padding: 0 var(--space-1);
+  background: var(--color-surface-raised);
+  border-radius: var(--radius-sm);
+  font-size: 0.875em;
+}
+
+.stateTitle {
+  color: var(--color-text);
+  font-size: 1.0625rem;
+  font-weight: 600;
+}
+
+/* Narrow screens: one pane at a time, like a mail app. */
+@media (max-width: 768px) {
+  .workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sidebar {
+    border-right: 0;
+  }
+
+  .main {
+    display: none;
+  }
+
+  .panelOpen .sidebar {
+    display: none;
+  }
+
+  .panelOpen .main {
+    display: flex;
+  }
+
+  .sessionsLink {
+    display: block;
+    margin: 0 var(--space-4) var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    background: var(--color-info-bg);
+    color: var(--color-accent-text);
+    border: 1px solid var(--color-info-border);
+    border-radius: var(--radius-md);
+    font: inherit;
+    font-size: 0.875rem;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .back {
+    display: block;
+    align-self: flex-start;
+    margin: var(--space-3) var(--space-4) 0;
+    padding: var(--space-1) 0;
+    background: none;
+    color: var(--color-accent-text);
+    border: 0;
+    font: inherit;
+    font-size: 0.9375rem;
+    cursor: pointer;
+  }
+}
+
+/* A notice above the panel, e.g. after sending Wake-on-LAN. */
+.notice {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4) 0;
+}
+
+.notice > :first-child {
+  flex: 1;
+}
