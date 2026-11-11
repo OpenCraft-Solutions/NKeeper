@@ -358,6 +358,13 @@ default_names() {
     hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^$' || true
 }
 
+# Whether nginx's certificate is one this installer made: marked as such, or (from before the mark) self-signed.
+installer_certificate() {
+    [ -f "$TLS/self-signed-for" ] && return 0
+    [ -f "$TLS/custom" ] && return 1
+    [ "$(openssl x509 -in "$TLS/nkeeper.crt" -noout -issuer 2>/dev/null | sed 's/^issuer= *//')" =       "$(openssl x509 -in "$TLS/nkeeper.crt" -noout -subject 2>/dev/null | sed 's/^subject= *//')" ]
+}
+
 setup_nginx() {
     step "Configuring nginx with HTTPS"
     if [ ${#names[@]} -eq 0 ]; then
@@ -376,7 +383,8 @@ setup_nginx() {
         install -o root -g root -m 0644 "$cert" "$TLS/nkeeper.crt"
         install -o root -g root -m 0600 "$key" "$TLS/nkeeper.key"
         rm -f "$TLS/self-signed-for"
-    elif [ ! -s "$TLS/nkeeper.crt" ] || { [ -f "$TLS/self-signed-for" ] && [ "$(cat "$TLS/self-signed-for")" != "${all_names[*]}" ]; }; then
+        touch "$TLS/custom"
+    elif [ ! -s "$TLS/nkeeper.crt" ] || { installer_certificate && [ "$(cat "$TLS/self-signed-for" 2>/dev/null)" != "${all_names[*]}" ]; }; then
         # A certificate this installer made is made again when the names change; one given with --cert never is.
         local san="" name
         for name in "${all_names[@]}"; do
@@ -387,6 +395,7 @@ setup_nginx() {
             -keyout "$TLS/nkeeper.key" -out "$TLS/nkeeper.crt" 2>/dev/null) || die "Couldn't create a certificate."
         chmod 0644 "$TLS/nkeeper.crt"
         echo "${all_names[*]}" >"$TLS/self-signed-for"
+        rm -f "$TLS/custom"
         warn "nginx uses a self-signed certificate for ${all_names[*]}; give your own with --cert and --key."
     fi
 
@@ -413,7 +422,7 @@ setup_nginx() {
     nginx -t -q || die "nginx refused the configuration (see above)."
     systemctl enable nginx >/dev/null 2>&1
     systemctl reload-or-restart nginx
-    ok "Serving ${names[*]}."
+    ok "Serving ${all_names[*]}."
 }
 
 open_firewall() {
