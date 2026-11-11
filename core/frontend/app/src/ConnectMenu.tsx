@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ConnectEntry, ConnectGroup } from './catalog'
 
 /** A host's Connect menu (docs/architecture.md §7.12): a button that opens the entries the plugins' actions offer. */
@@ -7,6 +7,8 @@ export function ConnectMenu({
   onChoose,
   label = 'Connect',
   name = label,
+  open: openProp,
+  onOpenChange,
 }: {
   groups: ConnectGroup[]
   onChoose: (group: ConnectGroup, entry: ConnectEntry) => void
@@ -14,8 +16,20 @@ export function ConnectMenu({
   label?: string
   /** Its accessible name, when the label alone isn't enough (several hosts' buttons in one list). */
   name?: string
+  /** For a menu opened from elsewhere too (a right-click on the host's row); uncontrolled when left out. */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
 }) {
-  const [open, setOpen] = useState(false)
+  const [openState, setOpenState] = useState(false)
+  const open = openProp ?? openState
+  const setOpen = useCallback(
+    (next: boolean | ((current: boolean) => boolean)) => {
+      const value = typeof next === 'function' ? next(open) : next
+      setOpenState(value)
+      onOpenChange?.(value)
+    },
+    [open, onOpenChange],
+  )
   const root = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -33,7 +47,7 @@ export function ConnectMenu({
       document.removeEventListener('mousedown', close)
       document.removeEventListener('keydown', close)
     }
-  }, [open])
+  }, [open, setOpen])
 
   if (groups.length === 0) {
     return null

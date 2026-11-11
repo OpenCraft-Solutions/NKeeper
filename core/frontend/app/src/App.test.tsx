@@ -292,6 +292,30 @@ describe('the workspace', () => {
     expect(screen.queryByRole('tab', { name: 'web01 · Terminal' })).not.toBeInTheDocument()
   })
 
+  it('opens a host’s menu on right-click, its first entry on double-click, and says when there’s nothing to connect with', async () => {
+    vi.stubGlobal('WebSocket', FakeSocket)
+    signedIn()
+    const user = userEvent.setup()
+
+    render(<App importer={termImporter} />)
+    const tree = await screen.findByRole('navigation', { name: 'Hosts' })
+    await user.pointer({ keys: '[MouseRight]', target: within(tree).getByRole('button', { name: /^web01,/ }) })
+    expect(screen.getByRole('menu', { name: 'Connect to web01' })).toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+
+    // Double-click: the first saved credential, root.
+    await user.dblClick(within(tree).getByRole('button', { name: /^web01,/ }))
+    await waitFor(() => expect(FakeSocket.last).not.toBeNull())
+    act(() => FakeSocket.last!.open())
+    expect(FakeSocket.last!.sent[0]).toMatchObject({ type: 'start', hostId: 'h1', serviceId: 's1', credentialId: 'c1' })
+    expect(screen.getByRole('tab', { name: 'web01 · Terminal' })).toBeInTheDocument()
+
+    // db01 has no services.
+    await user.click(within(tree).getByRole('button', { name: /^db01,/ }))
+    expect(screen.getByRole('note')).toHaveTextContent('There’s nothing to connect with yet: add a service, such as SSH, with Edit.')
+  })
+
   it('keeps sessions running behind the plugin list, and withdraws a dialog when its tab closes', async () => {
     vi.stubGlobal('WebSocket', FakeSocket)
     signedIn()

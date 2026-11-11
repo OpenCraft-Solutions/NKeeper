@@ -34,6 +34,7 @@ export function HostDetails({
   const [error, setError] = useState<string | null>(null)
   const [checking, setChecking] = useState(false)
   const jumpHost = host.jump ? hosts.find((h) => h.id === host.jump!.hostId) : undefined
+  const groups = connectMenu(host, catalog)
 
   async function remove() {
     setError(null)
@@ -75,7 +76,7 @@ export function HostDetails({
           <p className="nk-muted">{[hostAddress(host), jumpHost ? `through ${jumpHost.name}` : host.jump ? 'through a jump host' : null].filter(Boolean).join(' · ')}</p>
         </div>
         <div className="nk-actions">
-          <ConnectMenu groups={connectMenu(host, catalog)} onChoose={onConnect} />
+          <ConnectMenu groups={groups} onChoose={onConnect} />
           <button type="button" onClick={() => void check()} disabled={checking}>
             Check now
           </button>
@@ -104,6 +105,13 @@ export function HostDetails({
       {error && (
         <p className="nk-alert" role="alert">
           {error}
+        </p>
+      )}
+      {groups.length === 0 && (
+        <p className="nk-muted" role="note">
+          {host.services.length === 0
+            ? `There’s nothing to connect with yet: add a service, such as SSH${host.canManage ? ', with Edit' : ''}.`
+            : 'None of this host’s services can be opened: no loaded plugin opens a session on them here.'}
         </p>
       )}
       {host.description && <p>{host.description}</p>}

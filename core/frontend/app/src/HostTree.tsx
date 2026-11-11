@@ -52,6 +52,8 @@ export function HostTree({
 }) {
   const [query, setQuery] = useState('')
   const [groupBy, setGroupBy] = useState(readGroupBy)
+  // The host whose Connect menu is open: one at a time.
+  const [menuFor, setMenuFor] = useState<string | null>(null)
   const names = useMemo(() => tagNames(hosts), [hosts])
   const effectiveGroupBy = names.includes(groupBy) ? groupBy : ''
   const groups = useMemo(() => groupHosts(hosts.filter((h) => matchesSearch(h, query)), effectiveGroupBy || null), [hosts, query, effectiveGroupBy])
@@ -93,19 +95,44 @@ export function HostTree({
             )}
             <ul>
               {group.hosts.map((host) => (
-                <li key={host.id} className={host.id === selectedId ? 'nk-selected' : undefined}>
+                <li
+                  key={host.id}
+                  className={host.id === selectedId ? 'nk-selected' : undefined}
+                  onContextMenu={(event) => {
+                    // Right-click: the host's Connect menu, here. Without one, the browser's own menu.
+                    if (connectMenu(host, catalog).length > 0) {
+                      event.preventDefault()
+                      onSelect(host)
+                      setMenuFor(host.id)
+                    }
+                  }}
+                >
                   <button
                     type="button"
                     className="nk-tree-host"
                     aria-label={[host.name, hostAddress(host), HEALTH_LABELS[healthSummary(host, health)]].filter(Boolean).join(', ')}
                     aria-current={host.id === selectedId ? 'true' : undefined}
                     onClick={() => onSelect(host)}
+                    onDoubleClick={() => {
+                      // Double-click: the menu's first entry, the first saved credential if there is one.
+                      const [first] = connectMenu(host, catalog)
+                      const entry = first?.entries[0]
+                      if (first && entry) {
+                        onConnect(host, first, entry)
+                      }
+                    }}
                   >
                     <HealthDot summary={healthSummary(host, health)} />
                     <span className="nk-tree-name">{host.name}</span>
                     <span className="nk-tree-address">{hostAddress(host)}</span>
                   </button>
-                  <ConnectMenu name={`Connect to ${host.name}`} groups={connectMenu(host, catalog)} onChoose={(g, e) => onConnect(host, g, e)} />
+                  <ConnectMenu
+                    name={`Connect to ${host.name}`}
+                    groups={connectMenu(host, catalog)}
+                    onChoose={(g, e) => onConnect(host, g, e)}
+                    open={menuFor === host.id}
+                    onOpenChange={(open) => setMenuFor(open ? host.id : null)}
+                  />
                 </li>
               ))}
             </ul>
