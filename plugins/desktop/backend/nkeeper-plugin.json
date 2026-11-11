@@ -1,0 +1,15 @@
+{
+  "formatVersion": 1,
+  "id": "desktop",
+  "name": "Desktop",
+  "version": "0.1.0",
+  "sdkVersion": ">=0.1.9 <0.2.0",
+  "builtIn": true,
+  "frontend": {
+    "entry": "frontend/index.js"
+  },
+  "backend": {
+    "entryAssembly": "backend/NKeeper.Plugins.Desktop.dll",
+    "entryType": "NKeeper.Plugins.Desktop.DesktopPlugin"
+  }
+}

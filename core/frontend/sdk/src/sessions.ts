@@ -36,8 +36,8 @@ export interface TrustPrompt extends HostKeyPrompt {
 }
 
 export interface OpenStreamOptions {
-  /** Asks the user about a key no one trusted yet; resolves true to trust it. */
-  readonly confirmHostKey: (prompt: HostKeyPrompt) => Promise<boolean>
+  /** Asks the user about a key or certificate no one trusted yet; resolves true to trust it. */
+  readonly confirmHostKey: (prompt: TrustPrompt) => Promise<boolean>
   /** Core's progress, e.g. `connecting`. */
   readonly onStatus?: (status: string) => void
   /** Aborting before `connected` closes the socket and rejects with code `aborted`. */
@@ -66,6 +66,8 @@ export interface StreamConnection {
   send(data: Uint8Array<ArrayBuffer> | string): void
   /** Sends a JSON text frame, e.g. `{ type: 'resize', … }`. */
   sendJson(message: object): void
+  /** Sends a text frame as it is: a Guacamole instruction, say (SDK 0.1.9). */
+  sendText(text: string): void
   /** The plugin's binary frames. Frames that came before the first listener are delivered to it. */
   onBinary(listener: (data: Uint8Array) => void): () => void
   /** The plugin's text frames, as they came. */
@@ -86,6 +88,9 @@ interface ControlMessage {
   serviceId?: unknown
   algorithm?: unknown
   fingerprint?: unknown
+  kind?: unknown
+  subject?: unknown
+  notAfterUtc?: unknown
 }
 
 function parseControl(text: string): ControlMessage | null {
@@ -144,6 +149,11 @@ export function openStreamSession(type: string, start: StreamStart, options: Ope
         socket.send(JSON.stringify(message))
       }
     },
+    sendText(text) {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(text)
+      }
+    },
     onBinary: (listener) => binary.listen(listener),
     onText: (listener) => text.listen(listener),
     closed,
@@ -199,10 +209,13 @@ export function openStreamSession(type: string, start: StreamStart, options: Ope
         case 'hostKey':
           void options
             .confirmHostKey({
+              kind: message.kind === 'tls-certificate' ? 'tls-certificate' : 'ssh-host-key',
               hostId: String(message.hostId),
               serviceId: String(message.serviceId),
               algorithm: String(message.algorithm),
               fingerprint: String(message.fingerprint),
+              ...(typeof message.subject === 'string' ? { subject: message.subject } : {}),
+              ...(typeof message.notAfterUtc === 'string' ? { notAfterUtc: message.notAfterUtc } : {}),
             })
             .catch(() => false)
             .then((trust) => {

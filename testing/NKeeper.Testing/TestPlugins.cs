@@ -85,11 +85,17 @@ public static class TestPlugins
     /// The web plugin (plugins/web), packaged from its own manifest, the backend files its build staged for packing
     /// (YARP included), and its frontend, signed with <paramref name="key"/>.
     /// </summary>
-    public static BuiltPackage WebPackage(PluginSigningKey key)
+    public static BuiltPackage WebPackage(PluginSigningKey key) => StagedPackage(key, "Web");
+
+    /// <summary>The desktop plugin (plugins/desktop), packaged like <see cref="WebPackage"/>.</summary>
+    public static BuiltPackage DesktopPackage(PluginSigningKey key) => StagedPackage(key, "Desktop");
+
+    /// <summary>A plugin packaged from its manifest, the backend files its build staged for packing, and its frontend.</summary>
+    private static BuiltPackage StagedPackage(PluginSigningKey key, string name)
     {
-        string Metadata(string name) => typeof(TestPlugins).Assembly.GetCustomAttributes<AssemblyMetadataAttribute>().Single(a => a.Key == name).Value!;
+        string Metadata(string item) => typeof(TestPlugins).Assembly.GetCustomAttributes<AssemblyMetadataAttribute>().Single(a => a.Key == $"{name}Plugin{item}").Value!;
         var files = new Dictionary<string, byte[]>();
-        foreach (var (folder, prefix) in new[] { (Metadata("WebPluginOutput"), "backend/"), (Metadata("WebPluginFrontend"), "frontend/") })
+        foreach (var (folder, prefix) in new[] { (Metadata("Output"), "backend/"), (Metadata("Frontend"), "frontend/") })
         {
             foreach (var path in Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories))
             {
@@ -97,7 +103,7 @@ public static class TestPlugins
             }
         }
 
-        return PackageBuilder.Build(File.ReadAllBytes(Metadata("WebPluginManifest")), files, key);
+        return PackageBuilder.Build(File.ReadAllBytes(Metadata("Manifest")), files, key);
     }
 
     /// <summary>Writes a package into <paramref name="directory"/> and returns its path.</summary>

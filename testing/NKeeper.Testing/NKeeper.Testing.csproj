@@ -21,6 +21,7 @@
     <ProjectReference Include="..\..\plugins\ssh\backend\NKeeper.Plugins.Ssh.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\plugins\wake-on-lan\backend\NKeeper.Plugins.WakeOnLan.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\plugins\web\backend\NKeeper.Plugins.Web.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\plugins\desktop\backend\NKeeper.Plugins.Desktop.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <ItemGroup>
@@ -30,6 +31,9 @@
     <AssemblyMetadata Include="SshPluginFrontend" Value="$(MSBuildThisFileDirectory)../../plugins/ssh/frontend/dist" />
     <AssemblyMetadata Include="WakeOnLanPluginPath" Value="$(MSBuildThisFileDirectory)../../plugins/wake-on-lan/backend/bin/$(Configuration)/$(TargetFramework)/NKeeper.Plugins.WakeOnLan.dll" />
     <AssemblyMetadata Include="WebPluginOutput" Value="$(MSBuildThisFileDirectory)../../plugins/web/backend/obj/$(Configuration)/$(TargetFramework)/package" />
+    <AssemblyMetadata Include="DesktopPluginOutput" Value="$(MSBuildThisFileDirectory)../../plugins/desktop/backend/obj/$(Configuration)/$(TargetFramework)/package" />
+    <AssemblyMetadata Include="DesktopPluginManifest" Value="$(MSBuildThisFileDirectory)../../plugins/desktop/backend/nkeeper-plugin.json" />
+    <AssemblyMetadata Include="DesktopPluginFrontend" Value="$(MSBuildThisFileDirectory)../../plugins/desktop/frontend/dist" />
     <AssemblyMetadata Include="WebPluginManifest" Value="$(MSBuildThisFileDirectory)../../plugins/web/backend/nkeeper-plugin.json" />
     <AssemblyMetadata Include="WebPluginFrontend" Value="$(MSBuildThisFileDirectory)../../plugins/web/frontend/dist" />
     <AssemblyMetadata Include="WakeOnLanPluginManifest" Value="$(MSBuildThisFileDirectory)../../plugins/wake-on-lan/backend/nkeeper-plugin.json" />
