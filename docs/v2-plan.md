@@ -570,6 +570,7 @@ Each phase ends in a state that builds, passes tests, **installs as a native Lin
 - **wake-on-lan**: an action-only plugin, the minimum size.
 - **desktop, proof only:** RDP connects through guacd with a pinned certificate and a saved credential, **with the browser instruction allow-list (1.x `GuacamoleInstructionFilter`) and its negative tests from the start**, because it is a security control on a deployable relay, not a parity feature. That exercises the external-daemon requirement, the certificate probe in the trust store, and the credential path. AD sign-in pass-through, VNC and clipboard follow in Phase 4, so desktop parity doesn't hold up the SDK freeze.
 - **guacd as a native service (D11):** build guacd 1.6 from source on each supported distribution family in CI, and run the RDP proof against that build. If a family can't build or run it reliably, that family falls back to guacd in a container, and the plan records the result.
+  - *Result so far (2026-11-11):* guacd 1.6.0 builds natively, but crashes at connect on the RHEL 10 family's FreeRDP 3.32 (an upstream bug in FreeRDP 3.31 and newer). So the installer builds FreeRDP 2.11.7 too, as Apache's own images do, on every family, rather than falling back to a container (architecture.md §8).
 - Health scheduler and TLS probes; the health report.
 - **Exit:** SSH and web parity with 1.x, an RDP session opens end to end, and the ported 1.x tests for those paths pass. wake-on-lan touched zero core files.
 
