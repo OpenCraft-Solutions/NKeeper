@@ -65,22 +65,29 @@ describe('the Connect menu', () => {
       services: [service({ id: 's1', port: 2222 }), service({ id: 's2', type: 'other' })],
       credentials: [credential({ id: 'c1', username: 'root' }), credential({ id: 'c2', label: 'Deploy', serviceIndexes: [] }), credential({ id: 'c3', username: 'ops', domain: 'CORP', serviceIndexes: [0] })],
     })
-    const [group, ...rest] = connectMenu(h, catalog)
+    const [group, reboot, ...rest] = connectMenu(h, catalog)
     expect(rest).toEqual([])
+    // The run action, on the same service, with no credential.
+    expect(reboot!.label).toBe('Reboot · Term :2222')
+    expect(reboot!.entries).toEqual([
+      { key: 'term.reboot/s1', label: 'Reboot', target: { kind: 'run', pluginId: 'term', endpoint: 'reboot' }, serviceId: 's1', credential: { kind: 'none' } },
+    ])
     expect(group!.label).toBe('Terminal · Term :2222')
-    expect(group!.entries.map((e) => e.label)).toEqual(['root', 'CORP\\ops', 'Type a credential…'])
+    expect(group!.entries.map((e) => e.label)).toEqual(['root', 'CORP\\ops', 'Enter credentials…'])
     expect(group!.entries[0]!.credential).toEqual({ kind: 'saved', id: 'c1', name: 'root' })
   })
 
   it('offers nothing without a view, for an unavailable type, or past a jump host the type can’t use', () => {
     const h = host({ services: [service()] })
-    expect(connectMenu(h, buildCatalog([terminalPlugin()], new Map()))).toEqual([])
+    // Without a view, only the run action is left.
+    expect(connectMenu(h, buildCatalog([terminalPlugin()], new Map())).map((g) => g.actionLabel)).toEqual(['Reboot'])
     expect(connectMenu(host({ services: [service({ available: false })] }), catalog)).toEqual([])
     const noJump = buildCatalog(
       [terminalPlugin({ sessionTypes: [{ id: 'term', label: 'Terminal', serviceTypes: ['term'], supportsJumpHost: false }] })],
       new Map([['term', { kind: 'active', definition: definePlugin({ id: 'term', sessionViews: { term: View } }) }]]),
     )
-    expect(connectMenu(host({ services: [service()], jump: { hostId: 'j', serviceId: 's', credentialId: 'c' } }), noJump)).toEqual([])
+    // The session can't go through a jump host; the run action doesn't need to, since the server runs it.
+    expect(connectMenu(host({ services: [service()], jump: { hostId: 'j', serviceId: 's', credentialId: 'c' } }), noJump).map((g) => g.actionLabel)).toEqual(['Reboot'])
   })
 
   it('takes a plugin’s views only for its own session types', () => {

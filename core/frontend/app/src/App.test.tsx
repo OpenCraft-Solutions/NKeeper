@@ -81,6 +81,18 @@ function EchoView({ connect, host }: SessionViewProps) {
 
 const termImporter = vi.fn(async () => ({ default: definePlugin({ id: 'term', sessionViews: { term: EchoView } }) }))
 
+/** Selects a host in the tree and opens its Connect menu from the details, as 1.x did. */
+async function openConnect(user: ReturnType<typeof userEvent.setup>, hostName: string) {
+  await user.click(await screen.findByRole('button', { name: new RegExp(`^${hostName},`) }))
+  await user.click(within(screen.getByRole('article', { name: hostName })).getByRole('button', { name: 'Connect' }))
+}
+
+/** Chooses an action's entry: the action and service, then the credential in its submenu. */
+async function choose(user: ReturnType<typeof userEvent.setup>, group: string, entry: string) {
+  await user.click(screen.getByRole('menuitem', { name: group }))
+  await user.click(await screen.findByRole('menuitem', { name: entry }))
+}
+
 describe('App', () => {
   it('asks a signed-out user to sign in, then shows the workspace', async () => {
     let signedIn = false
@@ -97,7 +109,7 @@ describe('App', () => {
     const user = userEvent.setup()
 
     render(<App />)
-    await user.type(await screen.findByLabelText('User name or email'), 'admin')
+    await user.type(await screen.findByLabelText('Username or email'), 'admin')
     await user.type(screen.getByLabelText('Password'), 'Admin-Passw0rd-1')
     await user.click(screen.getByRole('button', { name: 'Sign in' }))
 
@@ -114,7 +126,7 @@ describe('App', () => {
     const user = userEvent.setup()
 
     render(<App />)
-    await user.type(await screen.findByLabelText('User name or email'), 'admin')
+    await user.type(await screen.findByLabelText('Username or email'), 'admin')
     await user.type(screen.getByLabelText('Password'), 'wrong-password-1')
     await user.click(screen.getByRole('button', { name: 'Sign in' }))
 
@@ -133,7 +145,9 @@ describe('App', () => {
     const user = userEvent.setup()
 
     render(<App />)
-    await user.click(await screen.findByRole('button', { name: 'Sign out' }))
+    // Sign out is in the user's menu, as in 1.x.
+    await user.click(await screen.findByRole('button', { name: 'admin' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Sign out' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('The server is unavailable.')
     expect(screen.queryByRole('form', { name: 'Sign in' })).not.toBeInTheDocument()
@@ -166,7 +180,7 @@ describe('App', () => {
     const user = userEvent.setup()
 
     render(<App importer={vi.fn(async () => ({ default: definePlugin({ id: 'hello' }) }))} />)
-    await user.click(await screen.findByRole('button', { name: 'Plugins' }))
+    await user.click(await screen.findByRole('button', { name: 'Settings' }))
 
     expect(screen.getByText('hello (built in)')).toBeInTheDocument()
     expect(screen.getByText('Active')).toBeInTheDocument()
@@ -179,7 +193,7 @@ describe('App', () => {
     render(<App />)
 
     expect(await screen.findByRole('button', { name: /^web01,/ })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Plugins' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Settings' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'New host' })).not.toBeInTheDocument()
   })
 })
@@ -206,26 +220,23 @@ describe('the users page', () => {
     render(<App />)
     await user.click(await screen.findByRole('button', { name: 'Users' }))
     await user.click(screen.getByRole('button', { name: 'New user' }))
-    const form = screen.getByRole('form', { name: 'New user' })
-    await user.type(within(form).getByLabelText('User name'), 'bob')
-    await user.type(within(form).getByLabelText('Email'), 'bob@example.com')
-    await user.type(within(form).getByLabelText('Initial password'), 'Bob-Passw0rd-123')
-    await user.click(within(form).getByRole('button', { name: 'Create user' }))
+    const dialog = screen.getByRole('dialog', { name: 'New user' })
+    await user.type(within(dialog).getByLabelText('Username'), 'bob')
+    await user.type(within(dialog).getByLabelText('Email'), 'bob@example.com')
+    await user.type(within(dialog).getByLabelText('Password'), 'Bob-Passw0rd-123')
+    await user.click(within(dialog).getByRole('button', { name: 'Create user' }))
 
     const panel = await screen.findByRole('article', { name: 'bob' })
     expect(bodyOf(fetch, 'POST /api/users')).toEqual({ userName: 'bob', email: 'bob@example.com', role: 'user', password: 'Bob-Passw0rd-123', mustChangePassword: true })
-    const grants = await within(panel).findByRole('form', { name: 'Grants' })
-    await user.click(within(grants).getByRole('button', { name: 'Add grant' }))
-    await user.selectOptions(within(grants).getByLabelText('Host'), 'h1')
-    await user.click(within(grants).getByRole('button', { name: 'Add grant' }))
-    const second = within(grants).getByRole('group', { name: 'Grant 2' })
-    await user.selectOptions(within(second).getByLabelText('On'), 'tag')
-    await user.type(within(second).getByLabelText('Tag name'), 'env')
-    await user.type(within(second).getByLabelText('Value (optional)'), 'prod')
-    await user.selectOptions(within(second).getByLabelText('Level'), 'manage')
-    await user.click(within(grants).getByRole('button', { name: 'Save grants' }))
+    await user.click(await within(panel).findByRole('button', { name: 'Add host' }))
+    await user.selectOptions(within(panel).getByLabelText('Host for grant 1'), 'h1')
+    await user.click(within(panel).getByRole('button', { name: 'Add group' }))
+    await user.type(within(panel).getByLabelText('Tag name for grant 2'), 'env')
+    await user.type(within(panel).getByLabelText('Tag value for grant 2'), 'prod')
+    await user.selectOptions(within(panel).getByLabelText('Access level for grant 2'), 'manage')
+    await user.click(within(panel).getByRole('button', { name: 'Save access' }))
 
-    expect(await within(grants).findByRole('status')).toHaveTextContent('Grants saved.')
+    expect(await within(panel).findByRole('status')).toHaveTextContent('Access saved.')
     expect(bodyOf(fetch, 'PUT /api/users/u2/grants')).toEqual([
       { hostId: 'h1', level: 'use' },
       { tagName: 'env', tagValue: 'prod', level: 'manage' },
@@ -287,19 +298,45 @@ describe('the workspace', () => {
     const user = userEvent.setup()
 
     render(<App importer={termImporter} />)
-    const tree = await screen.findByRole('navigation', { name: 'Hosts' })
-    await user.type(within(tree).getByLabelText('Search hosts'), 'env=test')
-    expect(within(tree).queryByRole('button', { name: /^web01,/ })).not.toBeInTheDocument()
-    await user.clear(within(tree).getByLabelText('Search hosts'))
+    const sidebar = await screen.findByRole('complementary', { name: 'Host inventory' })
+    await user.type(within(sidebar).getByLabelText('Search hosts'), 'env=test')
+    expect(within(sidebar).queryByRole('button', { name: /^web01,/ })).not.toBeInTheDocument()
+    await user.clear(within(sidebar).getByLabelText('Search hosts'))
 
-    await user.selectOptions(within(tree).getByLabelText('Group by'), 'env')
-    expect(within(tree).getByRole('heading', { name: /prod/ })).toBeInTheDocument()
-    expect(within(tree).getByRole('heading', { name: /test/ })).toBeInTheDocument()
+    await user.selectOptions(within(sidebar).getByLabelText('Group by'), 'env')
+    expect(within(sidebar).getByRole('button', { name: /prod/, expanded: true })).toBeInTheDocument()
+    expect(within(sidebar).getByRole('button', { name: /test/, expanded: true })).toBeInTheDocument()
 
-    await user.click(within(tree).getByRole('button', { name: /^web01,/ }))
+    await user.click(within(sidebar).getByRole('button', { name: /^web01,/ }))
     const details = screen.getByRole('article', { name: 'web01' })
-    expect(within(details).getByText('Down: refused')).toBeInTheDocument()
-    expect(within(tree).getByRole('img', { name: 'Every checked service is down' })).toBeInTheDocument()
+    expect(within(details).getByText('Down · Connection refused')).toBeInTheDocument()
+    expect(within(sidebar).getByRole('img', { name: 'Not answering' })).toBeInTheDocument()
+  })
+
+  it('shows a health page of what’s down and which certificates expire, and goes back to a host from it', async () => {
+    const soon = new Date(Date.now() + 5 * 86_400_000 + 3_600_000).toISOString()
+    signedIn({
+      'GET /api/hosts': [...hosts, host({ id: 'h3', name: 'portal', services: [service({ id: 's3', label: 'Portal' })] })],
+      'GET /api/health': [
+        { hostId: 'h1', serviceId: 's1', state: 'down', latencyMs: 3, checkedAtUtc: '2026-01-01T00:00:00Z', reason: 'refused' },
+        { hostId: 'h3', serviceId: 's3', state: 'up', latencyMs: 4, checkedAtUtc: '2026-01-01T00:01:00Z', reason: null, certificateSubject: 'CN=portal', certificateExpiresAtUtc: soon },
+      ],
+    })
+    const user = userEvent.setup()
+
+    render(<App importer={termImporter} />)
+    await user.click(await screen.findByRole('button', { name: 'Reports' }))
+    expect(await screen.findByText(/1 of 2 services up · 1 down · 1 certificate expiring within 30 days/)).toBeInTheDocument()
+    const down = screen.getByRole('region', { name: 'Down' })
+    expect(within(down).getByRole('cell', { name: 'Connection refused' })).toBeInTheDocument()
+    const certificates = screen.getByRole('region', { name: 'Certificates' })
+    expect(within(certificates).getByRole('cell', { name: 'CN=portal' })).toBeInTheDocument()
+    expect(within(certificates).getByText(/\(in 5 days\)/)).toHaveAttribute('data-warning', 'true')
+
+    await user.click(within(certificates).getByRole('button', { name: 'portal' }))
+    const details = await screen.findByRole('article', { name: 'portal' })
+    expect(within(details).getByText('Up · 4 ms')).toBeInTheDocument()
+    expect(within(details).getByText(/Certificate expires in 5 days/)).toBeInTheDocument()
   })
 
   it('opens a session in its own tab with a typed credential, asking about the server key', async () => {
@@ -308,14 +345,13 @@ describe('the workspace', () => {
     const user = userEvent.setup()
 
     render(<App importer={termImporter} />)
-    const connectButton = await screen.findByRole('button', { name: 'Connect to web01' })
-    expect(connectButton).toHaveTextContent(/^Connect$/)
-    await user.click(connectButton)
-    expect(screen.getByRole('menuitem', { name: 'root' })).toBeInTheDocument()
-    await user.click(screen.getByRole('menuitem', { name: 'Type a credential…' }))
+    await openConnect(user, 'web01')
+    await user.click(screen.getByRole('menuitem', { name: 'Terminal · Term :22' }))
+    expect(await screen.findByRole('menuitem', { name: 'root' })).toBeInTheDocument()
+    await user.click(screen.getByRole('menuitem', { name: 'Enter credentials…' }))
 
-    const typed = await screen.findByRole('dialog', { name: 'Type a credential' })
-    await user.type(within(typed).getByLabelText('User name'), 'ops')
+    const typed = await screen.findByRole('dialog', { name: 'Enter credentials' })
+    await user.type(within(typed).getByLabelText('Username'), 'ops')
     await user.type(within(typed).getByLabelText('Password'), 'secret-1')
     await user.click(within(typed).getByRole('button', { name: 'Connect' }))
 
@@ -327,9 +363,9 @@ describe('the workspace', () => {
     expect(socket.sent[0]).toEqual({ type: 'start', hostId: 'h1', serviceId: 's1', promptReference: 'ref-1', options: { columns: 80 } })
 
     act(() => socket.receiveJson({ type: 'hostKey', hostId: 'h1', serviceId: 's1', algorithm: 'ssh-ed25519', fingerprint: 'abc123' }))
-    const key = await screen.findByRole('dialog', { name: 'Trust this server key?' })
+    const key = await screen.findByRole('dialog', { name: 'Trust this host key?' })
     expect(within(key).getByText('SHA256:abc123')).toBeInTheDocument()
-    await user.click(within(key).getByRole('button', { name: 'Trust' }))
+    await user.click(within(key).getByRole('button', { name: 'Trust and connect' }))
     await waitFor(() => expect(socket.sent.at(-1)).toEqual({ type: 'hostKeyDecision', trust: true }))
 
     act(() => socket.receiveJson({ type: 'connected' }))
@@ -347,9 +383,9 @@ describe('the workspace', () => {
     const user = userEvent.setup()
 
     render(<App importer={termImporter} />)
-    const tree = await screen.findByRole('navigation', { name: 'Hosts' })
+    const tree = await screen.findByRole('list', { name: 'Hosts' })
     await user.pointer({ keys: '[MouseRight]', target: within(tree).getByRole('button', { name: /^web01,/ }) })
-    expect(screen.getByRole('menu', { name: 'Connect to web01' })).toBeInTheDocument()
+    expect(screen.getByRole('menu', { name: 'Actions for web01' })).toBeInTheDocument()
     await user.keyboard('{Escape}')
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
 
@@ -365,31 +401,45 @@ describe('the workspace', () => {
     expect(screen.getByRole('note')).toHaveTextContent('There’s nothing to connect with yet: add a service, such as SSH, with Edit.')
   })
 
+  it('runs a plugin’s run action and shows its answer', async () => {
+    const fetch = signedIn({ 'POST /api/p/term/hosts/h1/reboot': { message: 'Rebooting web01.' } })
+    const user = userEvent.setup()
+
+    render(<App importer={termImporter} />)
+    await openConnect(user, 'web01')
+    await user.click(screen.getByRole('menuitem', { name: 'Reboot · Term :22' }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Rebooting web01.')
+    expect(bodyOf(fetch, 'POST /api/p/term/hosts/h1/reboot')).toEqual({ serviceId: 's1' })
+    expect(screen.queryByRole('tab', { name: /Reboot/ })).not.toBeInTheDocument()
+  })
+
   it('keeps sessions running behind the plugin list, and withdraws a dialog when its tab closes', async () => {
     vi.stubGlobal('WebSocket', FakeSocket)
     signedIn()
     const user = userEvent.setup()
 
     render(<App importer={termImporter} />)
-    await user.click(await screen.findByRole('button', { name: 'Connect to web01' }))
-    await user.click(screen.getByRole('menuitem', { name: 'root' }))
+    await openConnect(user, 'web01')
+    await choose(user, 'Terminal · Term :22', 'root')
     await waitFor(() => expect(FakeSocket.last).not.toBeNull())
     const socket = FakeSocket.last!
     act(() => socket.open())
     act(() => socket.receiveJson({ type: 'connected' }))
     expect(await screen.findByText('web01: connected')).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'Plugins' }))
-    await user.click(screen.getByRole('button', { name: 'Plugins' }))
+    await user.click(screen.getByRole('button', { name: 'Settings' }))
+    await user.click(screen.getByRole('button', { name: 'Hosts' }))
     expect(screen.getByText('web01: connected')).toBeInTheDocument()
     expect(socket.readyState).toBe(FakeSocket.OPEN)
 
     // A second tab, waiting on a typed credential, is closed before it's answered.
-    await user.click(screen.getByRole('button', { name: 'Connect to web01' }))
-    await user.click(screen.getByRole('menuitem', { name: 'Type a credential…' }))
-    expect(await screen.findByRole('dialog', { name: 'Type a credential' })).toBeInTheDocument()
+    await user.click(screen.getByRole('tab', { name: /Details/ }))
+    await user.click(within(screen.getByRole('article', { name: 'web01' })).getByRole('button', { name: 'Connect' }))
+    await choose(user, 'Terminal · Term :22', 'Enter credentials…')
+    expect(await screen.findByRole('dialog', { name: 'Enter credentials' })).toBeInTheDocument()
     await user.click(screen.getAllByRole('button', { name: 'Close web01 · Terminal' }).at(-1)!)
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Type a credential' })).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Enter credentials' })).not.toBeInTheDocument())
   })
 
   it('catches a port that isn’t a number before sending', async () => {
@@ -401,11 +451,11 @@ describe('the workspace', () => {
     const form = screen.getByRole('form', { name: 'New host' })
     await user.type(within(form).getByLabelText('Name'), 'new01')
     await user.click(within(form).getByRole('button', { name: 'Add service' }))
-    await user.type(within(form).getByLabelText('Port'), 'abc')
-    await user.selectOptions(within(form).getByLabelText('Mode'), 'fast')
+    await user.type(within(form).getByLabelText('Port for service 1'), 'abc')
+    await user.selectOptions(within(form).getByLabelText('Mode for service 1'), 'fast')
     await user.click(within(form).getByRole('button', { name: 'Create host' }))
 
-    expect(await within(form).findByText('Enter a port from 1 to 65535.', { selector: '.nk-field-error' })).toBeInTheDocument()
+    expect(await within(form).findByText('Enter a port from 1 to 65535.')).toBeInTheDocument()
     expect(fetch.mock.calls.some(([url, init]) => url === '/api/hosts' && init?.method === 'POST')).toBe(false)
   })
 
@@ -426,16 +476,16 @@ describe('the workspace', () => {
     await user.type(within(form).getByLabelText('Name'), 'new01')
     await user.type(within(form).getByLabelText('IP address'), '192.0.2.99')
     await user.click(within(form).getByRole('button', { name: 'Add service' }))
-    await user.type(within(form).getByLabelText('Port'), '99999')
-    await user.type(within(form).getByLabelText('Shell'), '/bin/zsh')
-    await user.selectOptions(within(form).getByLabelText('Mode'), 'safe')
-    await user.type(within(form).getByLabelText('Retries'), '3')
-    await user.click(within(form).getByLabelText('Compress'))
+    await user.type(within(form).getByLabelText('Port for service 1'), '99999')
+    await user.type(within(form).getByLabelText('Shell for service 1'), '/bin/zsh')
+    await user.selectOptions(within(form).getByLabelText('Mode for service 1'), 'safe')
+    await user.type(within(form).getByLabelText('Retries for service 1'), '3')
+    await user.click(within(form).getByLabelText('Compress for service 1'))
     await user.click(within(form).getByRole('button', { name: 'Add credential' }))
-    await user.type(within(form).getByLabelText('User name'), 'root')
+    await user.type(within(form).getByLabelText('Username'), 'root')
     await user.click(within(form).getByRole('button', { name: 'Create host' }))
 
-    expect(await within(form).findByText('Use a port from 1 to 65535.', { selector: '.nk-field-error' })).toBeInTheDocument()
+    expect(await within(form).findByText('Use a port from 1 to 65535.')).toBeInTheDocument()
     expect(bodyOf(fetch, 'POST /api/hosts')).toEqual({
       name: 'new01',
       hostname: null,
@@ -449,7 +499,7 @@ describe('the workspace', () => {
       jump: null,
     })
 
-    await user.clear(within(form).getByLabelText(/^Port/))
+    await user.clear(within(form).getByLabelText('Port for service 1'))
     await user.click(within(form).getByRole('button', { name: 'Create host' }))
     expect(await screen.findByRole('article', { name: 'new01' })).toBeInTheDocument()
     // It's checked at once, rather than at the next background round.
@@ -470,7 +520,7 @@ describe('the workspace', () => {
     render(<App importer={termImporter} />)
     await user.click(await screen.findByRole('button', { name: /^db01,/ }))
     await user.click(screen.getByRole('button', { name: 'Edit' }))
-    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
 
     expect(await screen.findByText('Someone else changed this host since you started editing it.')).toBeInTheDocument()
     expect(bodyOf(fetch, 'PUT /api/hosts/h2')).toMatchObject({ name: 'db01', version: 1 })

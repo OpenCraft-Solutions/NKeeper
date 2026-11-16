@@ -35,12 +35,26 @@ function sharedRuntime(): Plugin {
   }
 }
 
+/**
+ * public/color-scheme.js, which paints the user's colour scheme before the shell loads (docs/architecture.md §7.14).
+ * A build's public folder is the runtime's (above), so the script is emitted on its own; the dev server serves it as is.
+ */
+function colorSchemeScript(): Plugin {
+  return {
+    name: 'nkeeper-color-scheme-script',
+    apply: 'build',
+    generateBundle() {
+      this.emitFile({ type: 'asset', fileName: 'color-scheme.js', source: readFileSync(fileURLToPath(new URL('./public/color-scheme.js', import.meta.url)), 'utf8') })
+    },
+  }
+}
+
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
 
   return {
-    plugins: [react(), sharedRuntime()],
+    plugins: [react(), sharedRuntime(), colorSchemeScript()],
     build: {
       target: 'es2023',
       // Vite's modulepreload polyfill isn't needed by the browsers NKeeper supports.

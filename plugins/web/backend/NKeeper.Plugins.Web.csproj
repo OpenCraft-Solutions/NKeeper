@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The web plugin (docs/architecture.md §7.19). Built, packed and signed by plugins/NKeeperPlugin.targets. -->
+  <PropertyGroup>
+    <NKeeperPluginFrontendPackage>@nkeeper/plugin-web</NKeeperPluginFrontendPackage>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Yarp.ReverseProxy" />
+  </ItemGroup>
+
+  <Import Project="../../NKeeperPlugin.targets" />
+
+</Project>

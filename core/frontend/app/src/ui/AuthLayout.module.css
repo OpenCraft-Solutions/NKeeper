@@ -1,0 +1,64 @@
+.page {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-8) var(--space-4);
+}
+
+.main {
+  width: 100%;
+  max-width: 26rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  text-align: center;
+}
+
+.brand :global(svg) + span {
+  font-size: 1.5rem;
+}
+
+.tagline {
+  color: var(--color-text-muted);
+  font-size: 0.9375rem;
+}
+
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  padding: var(--space-8);
+}
+
+.title {
+  font-size: 1.25rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  margin-bottom: var(--space-6);
+}
+
+.footer {
+  margin-top: var(--space-5);
+  font-size: 0.875rem;
+}
+
+@media (max-width: 480px) {
+  .page {
+    align-items: flex-start;
+    padding-top: var(--space-8);
+  }
+
+  .card {
+    padding: var(--space-6) var(--space-5);
+  }
+}

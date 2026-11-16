@@ -28,8 +28,11 @@ public sealed record PluginStatusResponse(
     IReadOnlyList<SessionTypeResponse>? SessionTypes = null,
     IReadOnlyList<HostActionResponse>? HostActions = null);
 
-/// <summary>A Connect menu entry: the session type it opens, and whether it needs a credential.</summary>
-public sealed record HostActionResponse(string Id, string Label, string SessionType, HostActionCredential Credential);
+/// <summary>A host menu entry: the session type it opens, or the endpoint it runs (§7.12), and whether it needs a credential.</summary>
+/// <param name="SessionType">For an action that opens a session; null for a run action.</param>
+/// <param name="Endpoint">For a run action: its path in the plugin's host group; null otherwise.</param>
+/// <param name="ServiceTypes">For a run action, the service types it applies to; empty for a session action.</param>
+public sealed record HostActionResponse(string Id, string Label, string? SessionType, string? Endpoint, IReadOnlyList<string> ServiceTypes, HostActionCredential Credential);
 
 /// <summary>A session type: what it is called, and the service types it opens on.</summary>
 public sealed record SessionTypeResponse(string Id, string Label, IReadOnlyList<string> ServiceTypes, bool SupportsJumpHost);
@@ -111,7 +114,7 @@ internal static class PluginEndpoints
                     entry is null ? null : Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(loaded!.Files[entry].Span)),
                     loaded is null ? null : [.. plugins.ServiceTypes.Where(t => t.PluginId == s.Id).Select(t => ServiceTypeResponse.From(t.Type))],
                     loaded is null ? null : [.. plugins.SessionTypes.Where(t => t.PluginId == s.Id).Select(t => new SessionTypeResponse(t.Type.Id, t.Type.Label, t.Type.ServiceTypes, t.Type.SupportsJumpHost))],
-                    loaded is null ? null : [.. plugins.HostActions.Where(a => a.PluginId == s.Id).Select(a => new HostActionResponse(a.Action.Id, a.Action.Label, a.Action.SessionType, a.Action.Credential))]);
+                    loaded is null ? null : [.. plugins.HostActions.Where(a => a.PluginId == s.Id).Select(a => new HostActionResponse(a.Action.Id, a.Action.Label, a.Action.SessionType, a.Action.Endpoint, a.Action.ServiceTypes, a.Action.Credential))]);
             })
             .ToList());
 

@@ -1,64 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!--
-    The ssh plugin (docs/architecture.md §7.11). It references only the SDK, without copying it (§7.1).
-    Building it builds its frontend (plugins/ssh/frontend, with npm), then packs and signs both with the
-    developer's development key, as every built-in plugin is
-    (plugin-security.md §10): the key is created under .dev/keys on first use, and the package goes to
-    artifacts/plugins, the directory to point Plugins:Directory at in development.
-  -->
+  <!-- The ssh plugin (docs/architecture.md §7.11). Built, packed and signed by plugins/NKeeperPlugin.targets. -->
   <PropertyGroup>
-    <IsPackable>false</IsPackable>
-    <NKeeperRoot>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', '..', '..', '..'))</NKeeperRoot>
-    <NKeeperDevelopmentKeys>$(NKeeperRoot).dev/keys/</NKeeperDevelopmentKeys>
-    <NKeeperPluginPackages Condition="'$(NKeeperPluginPackages)' == ''">$(NKeeperRoot)artifacts/plugins/</NKeeperPluginPackages>
-    <!-- The native installer signs with its one-time install key instead (docs/architecture.md §8). -->
-    <NKeeperSigningKey Condition="'$(NKeeperSigningKey)' == ''">$(NKeeperDevelopmentKeys)dev.private.pem</NKeeperSigningKey>
-    <NKeeperPluginFrontend>$(MSBuildProjectDirectory)/../frontend/</NKeeperPluginFrontend>
-    <NKeeperPluginTool>$(NKeeperRoot)tools/NKeeper.PluginTool/bin/$(Configuration)/$(TargetFramework)/nkeeper-plugin.dll</NKeeperPluginTool>
+    <NKeeperPluginFrontendPackage>@nkeeper/plugin-ssh</NKeeperPluginFrontendPackage>
   </PropertyGroup>
 
-  <ItemGroup>
-    <FrameworkReference Include="Microsoft.AspNetCore.App" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <ProjectReference Include="..\..\..\core\backend\NKeeper.Abstractions\NKeeper.Abstractions.csproj" Private="false" ExcludeAssets="runtime" />
-  </ItemGroup>
-
-  <!-- The frontend is rebuilt when its sources change. It needs the workspace's packages: npm ci at the root. -->
-  <Target Name="BuildNKeeperPluginFrontend"
-          Condition="'$(NKeeperPackPlugins)' != 'false'"
-          Inputs="@(NKeeperFrontendSource)"
-          Outputs="$(NKeeperPluginFrontend)dist/index.js">
-    <Error Condition="!Exists('$(NKeeperRoot)node_modules')" Text="The ssh plugin's frontend needs the npm packages: run 'npm ci' at the repository root first." />
-    <Exec Command="npm run build -w @nkeeper/plugin-ssh" WorkingDirectory="$(NKeeperRoot)" />
-  </Target>
-
-  <ItemGroup>
-    <NKeeperFrontendSource Include="$(NKeeperPluginFrontend)src/**;$(NKeeperPluginFrontend)package.json;$(NKeeperPluginFrontend)vite.config.ts;$(NKeeperPluginFrontend)tsconfig.json;$(NKeeperRoot)core/frontend/sdk/src/**;$(NKeeperRoot)package-lock.json" />
-  </ItemGroup>
-
-  <Target Name="PackNKeeperPlugin" AfterTargets="Build" DependsOnTargets="BuildNKeeperPluginFrontend" Condition="'$(NKeeperPackPlugins)' != 'false'">
-    <PropertyGroup>
-      <NKeeperPackStaging>$(MSBuildProjectDirectory)/$(IntermediateOutputPath)package/</NKeeperPackStaging>
-      <NKeeperPacked>$(MSBuildProjectDirectory)/$(IntermediateOutputPath)packed/</NKeeperPacked>
-    </PropertyGroup>
-    <!--
-      Builds the packaging tool here rather than referencing it: a plugin references only the SDK. Restoring it
-      first, in its own evaluation, lets the plugin build on a clean checkout.
-    -->
-    <MSBuild Projects="$(NKeeperRoot)tools/NKeeper.PluginTool/NKeeper.PluginTool.csproj" Targets="Restore" Properties="MSBuildRestoreSessionId=$([System.Guid]::NewGuid())" />
-    <MSBuild Projects="$(NKeeperRoot)tools/NKeeper.PluginTool/NKeeper.PluginTool.csproj" Targets="Build" />
-    <Exec Condition="'$(NKeeperSigningKey)' == '$(NKeeperDevelopmentKeys)dev.private.pem' And !Exists('$(NKeeperSigningKey)')"
-          Command="dotnet &quot;$(NKeeperPluginTool)&quot; keygen --out &quot;$(NKeeperDevelopmentKeys).&quot; --name dev --comment &quot;local development key&quot;" />
-    <RemoveDir Directories="$(NKeeperPackStaging);$(NKeeperPacked)" />
-    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(NKeeperPackStaging)" />
-    <Exec Command="dotnet &quot;$(NKeeperPluginTool)&quot; pack --manifest &quot;$(MSBuildProjectDirectory)/nkeeper-plugin.json&quot; --backend &quot;$(NKeeperPackStaging).&quot; --frontend &quot;$(NKeeperPluginFrontend)dist/.&quot; --key &quot;$(NKeeperSigningKey)&quot; --out &quot;$(NKeeperPacked).&quot;" />
-    <ItemGroup>
-      <NKeeperPackage Include="$(NKeeperPacked)*.nkp" />
-    </ItemGroup>
-    <Copy SourceFiles="@(NKeeperPackage)" DestinationFolder="$(NKeeperPluginPackages)" />
-  </Target>
+  <Import Project="../../NKeeperPlugin.targets" />
 
 </Project>

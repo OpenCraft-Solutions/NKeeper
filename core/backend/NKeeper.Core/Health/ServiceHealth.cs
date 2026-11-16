@@ -61,7 +61,20 @@ public enum ServiceDownReason
 /// <summary>The latest check of one service.</summary>
 /// <param name="LatencyMs">How long the check took.</param>
 /// <param name="Reason">Why it's down; null when it's up.</param>
-public sealed record ServiceHealthResponse(Guid HostId, Guid ServiceId, ServiceHealthState State, int LatencyMs, DateTimeOffset CheckedAtUtc, ServiceDownReason? Reason);
+/// <param name="CertificateSubject">For a TLS probe that completed its handshake: the certificate's subject.</param>
+/// <param name="CertificateExpiresAtUtc">For a TLS probe that completed its handshake: when the certificate expires.</param>
+public sealed record ServiceHealthResponse(
+    Guid HostId,
+    Guid ServiceId,
+    ServiceHealthState State,
+    int LatencyMs,
+    DateTimeOffset CheckedAtUtc,
+    ServiceDownReason? Reason,
+    string? CertificateSubject = null,
+    DateTimeOffset? CertificateExpiresAtUtc = null);
+
+/// <summary>One probe of an address and port.</summary>
+internal sealed record ProbeResult(int LatencyMs, DateTimeOffset At, ServiceDownReason? Reason, string? CertificateSubject = null, DateTimeOffset? CertificateExpiresAtUtc = null);
 
 /// <summary>
 /// The latest results, in memory only: after a restart, services have no status until their next check.
@@ -191,20 +204,20 @@ public sealed class ServiceHealthChecker(
     {
         var targets = host.Services
             .Select(s => (Service: s, Type: serviceTypes.Find(s.Type)))
-            .Where(t => t.Type?.Health == HealthProbe.Tcp)
-            .Select(t => (t.Service, Address: t.Service.Address ?? host.IpAddress ?? host.Hostname, Port: t.Service.Port ?? t.Type!.DefaultPort))
+            .Where(t => t.Type?.Health is not null)
+            .Select(t => (t.Service, Probe: t.Type!.Health!, Address: t.Service.Address ?? host.IpAddress ?? host.Hostname, Port: t.Service.Port ?? t.Type!.DefaultPort))
             .Where(t => t.Address is not null && t.Port is not null)
             .ToList();
 
-        // The same address and port once, even when two services share it.
-        var probes = new Dictionary<(string, int), (int LatencyMs, DateTimeOffset At, ServiceDownReason? Reason)>();
+        // The same address, port and probe once, even when two services share them.
+        var probes = new Dictionary<(string, int, string), ProbeResult>();
         var checks = new List<ServiceHealthResponse>(targets.Count);
-        foreach (var (service, address, port) in targets)
+        foreach (var (service, kind, address, port) in targets)
         {
-            var key = (address!.ToUpperInvariant(), port!.Value);
+            var key = (address!.ToUpperInvariant(), port!.Value, kind.Kind);
             if (!probes.TryGetValue(key, out var probe))
             {
-                probe = probes[key] = await ProbeAsync(address, port.Value, cancellationToken);
+                probe = probes[key] = await ProbeAsync(kind, address, port.Value, cancellationToken);
             }
 
             checks.Add(new ServiceHealthResponse(
@@ -213,18 +226,35 @@ public sealed class ServiceHealthChecker(
                 probe.Reason is null ? ServiceHealthState.Up : ServiceHealthState.Down,
                 probe.LatencyMs,
                 probe.At,
-                probe.Reason));
+                probe.Reason,
+                probe.CertificateSubject,
+                probe.CertificateExpiresAtUtc));
         }
 
         return checks;
     }
 
-    private async Task<(int LatencyMs, DateTimeOffset At, ServiceDownReason? Reason)> ProbeAsync(string address, int port, CancellationToken cancellationToken)
+    private async Task<ProbeResult> ProbeAsync(HealthProbe kind, string address, int port, CancellationToken cancellationToken)
     {
         await _probes.WaitAsync(cancellationToken);
         try
         {
-            return await ProbeNowAsync(address, port, cancellationToken);
+            var probe = await ProbeNowAsync(address, port, cancellationToken);
+            if (probe.Reason is not null || kind != HealthProbe.Tls)
+            {
+                return probe;
+            }
+
+            // TLS: the certificate is a bonus. A server that answers but won't complete a handshake is still up.
+            try
+            {
+                using var presented = await Connectivity.HttpConnector.HandshakeAsync(address, port, cancellationToken);
+                return probe with { CertificateSubject = presented.Certificate.Subject, CertificateExpiresAtUtc = presented.Certificate.NotAfter.ToUniversalTime() };
+            }
+            catch (ConnectException)
+            {
+                return probe;
+            }
         }
         finally
         {
@@ -232,7 +262,7 @@ public sealed class ServiceHealthChecker(
         }
     }
 
-    private async Task<(int LatencyMs, DateTimeOffset At, ServiceDownReason? Reason)> ProbeNowAsync(string address, int port, CancellationToken cancellationToken)
+    private async Task<ProbeResult> ProbeNowAsync(string address, int port, CancellationToken cancellationToken)
     {
         var at = time.GetUtcNow();
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -258,7 +288,7 @@ public sealed class ServiceHealthChecker(
             };
         }
 
-        return ((int)watch.ElapsedMilliseconds, at, reason);
+        return new ProbeResult((int)watch.ElapsedMilliseconds, at, reason);
     }
 }
 

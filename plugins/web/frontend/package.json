@@ -1,0 +1,16 @@
+{
+  "name": "@nkeeper/plugin-web",
+  "description": "The web plugin's frontend: the web page tab (docs/architecture.md §7.19).",
+  "private": true,
+  "license": "MIT",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -b && vite build",
+    "typecheck": "tsc -b"
+  },
+  "dependencies": {
+    "@nkeeper/sdk": "^1.0.0",
+    "react": "^19.2.8"
+  }
+}

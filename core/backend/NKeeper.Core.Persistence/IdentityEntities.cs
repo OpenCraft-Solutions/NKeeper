@@ -15,6 +15,12 @@ public sealed class ApplicationUser : IdentityUser<Guid>
 
     /// <summary>Set when an administrator assigns a password: the user must choose their own before anything else.</summary>
     public bool MustChangePassword { get; set; }
+
+    /// <summary>The colour scheme the user chose: a preset's ID or one of theirs (docs/architecture.md §6.1).</summary>
+    public string ColorScheme { get; set; } = "navy";
+
+    /// <summary>The colour schemes the user built, as JSON; the shell derives the full palette from their four colours.</summary>
+    public string CustomColorSchemes { get; set; } = "[]";
 }
 
 public sealed class ApplicationRole : IdentityRole<Guid>

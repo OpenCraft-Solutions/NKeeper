@@ -14,6 +14,9 @@ public interface IPluginContributions
 
     /// <summary>Contributes an entry in hosts' Connect menu (docs/architecture.md §7.12, SDK 0.1.6).</summary>
     void AddHostAction(HostAction hostAction);
+
+    /// <summary>Claims an origin prefix for the plugin's sessions (docs/architecture.md §7.18, SDK 0.1.8).</summary>
+    void AddSessionOrigin(SessionOrigin origin);
 }
 
 /// <summary>

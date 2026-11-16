@@ -1,3 +1,5 @@
+import type { ColorSchemePreferences } from './appearance/colorSchemes'
+
 /** The API's shapes, as the shell reads them (docs/architecture.md §6, §7). */
 
 /** The signed-in user, as `/api/auth/login` and `/api/auth/me` return them. */
@@ -7,6 +9,8 @@ export interface CurrentUser {
   email: string | null
   roles: string[]
   mustChangePassword: boolean
+  /** The user's colour scheme and the schemes they built (docs/architecture.md §6.1). */
+  colorSchemes: ColorSchemePreferences
 }
 
 export const ADMINISTRATOR = 'Administrator'
@@ -42,7 +46,12 @@ export interface SessionTypeInfo {
 export interface HostActionInfo {
   id: string
   label: string
-  sessionType: string
+  /** The session type it opens; null for a run action. */
+  sessionType: string | null
+  /** For a run action: its path in the plugin's host group. */
+  endpoint: string | null
+  /** For a run action: the service types it applies to. */
+  serviceTypes: string[]
   credential: 'required' | 'none'
 }
 
@@ -114,4 +123,7 @@ export interface ServiceHealth {
   latencyMs: number
   checkedAtUtc: string
   reason: 'refused' | 'timeout' | 'unreachable' | null
+  /** For a TLS probe that completed its handshake. */
+  certificateSubject?: string | null
+  certificateExpiresAtUtc?: string | null
 }

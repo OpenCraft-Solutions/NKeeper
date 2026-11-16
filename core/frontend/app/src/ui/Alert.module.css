@@ -1,0 +1,25 @@
+.alert {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid;
+  border-radius: var(--radius-md);
+  font-size: 0.875rem;
+}
+
+.error {
+  background: var(--color-danger-bg);
+  border-color: var(--color-danger-border);
+  color: var(--color-danger);
+}
+
+.info {
+  background: var(--color-info-bg);
+  border-color: var(--color-border-strong);
+  color: var(--color-text);
+}
+
+/* The warning token is a text colour that stays readable on the surface; the tint is mixed from it. */
+.warning {
+  background: color-mix(in srgb, var(--color-warning) 10%, var(--color-surface));
+  border-color: color-mix(in srgb, var(--color-warning) 55%, transparent);
+  color: var(--color-text);
+}

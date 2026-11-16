@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The desktop plugin (docs/architecture.md §7.21). Built, packed and signed by plugins/NKeeperPlugin.targets. -->
+  <PropertyGroup>
+    <NKeeperPluginFrontendPackage>@nkeeper/plugin-desktop</NKeeperPluginFrontendPackage>
+  </PropertyGroup>
+
+  <Import Project="../../NKeeperPlugin.targets" />
+
+</Project>

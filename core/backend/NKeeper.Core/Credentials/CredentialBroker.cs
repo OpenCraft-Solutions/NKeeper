@@ -19,6 +19,20 @@ public sealed class PluginEndpointMetadata(string pluginId)
 /// <summary>Marks core's stream session endpoint (docs/architecture.md §7.10). Not in the SDK.</summary>
 public sealed class SessionEndpointMetadata;
 
+/// <summary>
+/// Which plugin a request acts for, from where core routed it, never from anything the plugin says: a plugin's
+/// own endpoint, or a stream session of the plugin's type. Used by the credential broker and the plugin audit.
+/// </summary>
+public static class PluginCaller
+{
+    public static string? Of(HttpContext? context)
+    {
+        var metadata = context?.GetEndpoint()?.Metadata;
+        return metadata?.GetMetadata<PluginEndpointMetadata>()?.PluginId
+            ?? (metadata?.GetMetadata<SessionEndpointMetadata>() is null ? null : context!.Features.Get<SessionPluginFeature>()?.PluginId);
+    }
+}
+
 /// <summary>On core's stream session endpoint: the plugin whose session type is being opened.</summary>
 public sealed class SessionPluginFeature(string pluginId)
 {
@@ -130,12 +144,7 @@ public sealed class CredentialBroker(
     /// The plugin this request acts for: a plugin's own endpoint names it in core's metadata, and core's stream
     /// session endpoint (§7.10) in a feature it sets for the session type's plugin. Nothing a plugin says counts.
     /// </summary>
-    private static string? CallerPlugin(HttpContext? context)
-    {
-        var metadata = context?.GetEndpoint()?.Metadata;
-        return metadata?.GetMetadata<PluginEndpointMetadata>()?.PluginId
-            ?? (metadata?.GetMetadata<SessionEndpointMetadata>() is null ? null : context!.Features.Get<SessionPluginFeature>()?.PluginId);
-    }
+    private static string? CallerPlugin(HttpContext? context) => PluginCaller.Of(context);
 
     private async Task<CredentialDeniedException> DenyAsync(Caller caller, HostContext host, Guid serviceId, CredentialDenial reason, string message, CancellationToken cancellationToken)
     {

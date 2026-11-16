@@ -1,0 +1,171 @@
+.tree,
+.tree ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.group,
+.host {
+  --indent: calc(var(--depth, 0) * 1rem);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-1) var(--space-3) var(--space-1) calc(var(--space-3) + var(--indent));
+  background: transparent;
+  color: var(--color-text);
+  border: 0;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.group:hover,
+.host:hover {
+  background: var(--color-surface-raised);
+}
+
+.group:focus-visible,
+.host:focus-visible {
+  outline-offset: -2px;
+}
+
+.group {
+  min-height: 2rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.chevron {
+  flex-shrink: 0;
+  color: var(--color-text-subtle);
+  transition: transform 120ms ease;
+}
+
+.group[aria-expanded='true'] .chevron {
+  transform: rotate(90deg);
+}
+
+.groupLabel {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.groupKey {
+  margin-right: var(--space-1);
+  color: var(--color-text-subtle);
+  font-weight: 500;
+}
+
+.missing .groupLabel {
+  color: var(--color-text-muted);
+  font-style: italic;
+  font-weight: 500;
+}
+
+.count {
+  flex-shrink: 0;
+  min-width: 1.5rem;
+  padding: 0 var(--space-1);
+  background: var(--color-surface-raised);
+  color: var(--color-text-muted);
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 550;
+  text-align: center;
+}
+
+.host {
+  min-height: 2.75rem;
+  padding-left: calc(var(--space-3) + var(--indent) + 1.25rem);
+}
+
+/* Top-level hosts (no grouping) need no space for a chevron. */
+.tree > li > .host {
+  padding-left: var(--space-3);
+}
+
+.host.menuOpen {
+  outline: 1px solid var(--color-focus);
+  outline-offset: -1px;
+}
+
+.host[aria-current='true'] {
+  background: var(--color-info-bg);
+  box-shadow: inset 2px 0 0 var(--color-accent);
+}
+
+.hostText {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.3;
+}
+
+.hostName,
+.hostAddress {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hostName {
+  font-size: 0.9375rem;
+  font-weight: 550;
+}
+
+.hostAddress {
+  color: var(--color-text-muted);
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 0.75rem;
+}
+
+.host[aria-current='true'] .hostName {
+  color: var(--color-accent-text);
+}
+
+.service {
+  flex-shrink: 0;
+  color: var(--color-text-subtle);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+/* Hosts selected together for bulk changes. */
+.host.bulk {
+  background: var(--color-info-bg);
+  box-shadow: inset 2px 0 0 var(--color-accent);
+}
+
+.check {
+  flex-shrink: 0;
+  margin-left: -1rem;
+  color: var(--color-accent-text);
+}
+
+/* Service health: a dot before the name. */
+.health {
+  flex-shrink: 0;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+}
+
+.health.up {
+  background: #4ade80;
+}
+
+.health.partial {
+  background: #fbbf24;
+}
+
+.health.down {
+  background: #f87171;
+}

@@ -14,7 +14,7 @@ namespace NKeeper.Abstractions;
 public sealed record PluginContext(string Id, string Version, IConfiguration Configuration);
 
 /// <summary>
-/// A plugin's entry point (SDK v0, docs/v2-plan.md §4.1). The manifest names the implementing type;
+/// A plugin's entry point (SDK v1, docs/plugin-authoring.md). The manifest names the implementing type;
 /// the server creates one instance with a public parameterless constructor, at startup.
 /// </summary>
 /// <remarks>

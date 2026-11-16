@@ -29,6 +29,7 @@ public sealed class PluginHostResult
     private readonly List<ContributedServiceType> _serviceTypes = [];
     private readonly List<ContributedSessionType> _sessionTypes = [];
     private readonly List<ContributedHostAction> _hostActions = [];
+    private readonly List<ContributedSessionOrigin> _sessionOrigins = [];
 
     public IReadOnlyList<PluginStatus> Statuses => _statuses;
 
@@ -43,6 +44,10 @@ public sealed class PluginHostResult
     /// <summary>The host actions the loaded plugins contributed, in load order (docs/architecture.md §7.12).</summary>
     public IReadOnlyList<ContributedHostAction> HostActions =>
         [.. _hostActions.Where(a => _loaded.Exists(p => p.Manifest.Id == a.PluginId))];
+
+    /// <summary>The session origins the loaded plugins claimed (docs/architecture.md §7.18).</summary>
+    public IReadOnlyList<ContributedSessionOrigin> SessionOrigins =>
+        [.. _sessionOrigins.Where(o => _loaded.Exists(p => p.Manifest.Id == o.PluginId))];
 
     /// <summary>Loaded plugins, dependencies before dependants.</summary>
     public IReadOnlyList<LoadedPlugin> Loaded => _loaded;
@@ -69,6 +74,9 @@ public sealed class PluginHostResult
 
     internal void AddHostActions(string pluginId, IEnumerable<HostAction> actions) =>
         _hostActions.AddRange(actions.Select(a => new ContributedHostAction(pluginId, a)));
+
+    internal void AddSessionOrigins(string pluginId, IEnumerable<SessionOrigin> origins) =>
+        _sessionOrigins.AddRange(origins.Select(o => new ContributedSessionOrigin(pluginId, o)));
 
     /// <summary>Marks a loaded plugin as refused, with every loaded plugin that depends on it.</summary>
     internal IReadOnlyList<string> Fail(string id, string reasonCode, string message)
@@ -297,9 +305,29 @@ public sealed class PluginHost(
 
             if (code is null)
             {
+                var taken = result.SessionOrigins.ToDictionary(o => o.Origin.Prefix, o => o.PluginId, StringComparer.Ordinal);
+                foreach (var origin in collected.SessionOrigins)
+                {
+                    problem = ContributionRules.Check(origin)
+                        ?? (taken.TryGetValue(origin.Prefix, out var owner)
+                            ? $"The session origin prefix '{origin.Prefix}' is already claimed by plugin {owner}."
+                            : null);
+                    if (problem is not null)
+                    {
+                        code = HostReasonCodes.ContributionInvalid;
+                        break;
+                    }
+
+                    taken[origin.Prefix] = id;
+                }
+            }
+
+            if (code is null)
+            {
                 result.AddServiceTypes(id, collected.ServiceTypes);
                 result.AddSessionTypes(id, collected.SessionTypes);
                 result.AddHostActions(id, collected.HostActions);
+                result.AddSessionOrigins(id, collected.SessionOrigins);
                 continue;
             }
 

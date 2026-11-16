@@ -20,6 +20,19 @@ readonly STATE=/var/lib/nkeeper
 readonly CACHE=/var/cache/nkeeper-build
 readonly SERVER_PORT=5080
 
+# guacd, for remote desktops (docs/architecture.md §7.20, D11): built from the Apache Guacamole source release, whose
+# SHA-256 is pinned here (checked against the release's signature by Apache's code-signing key when it was pinned).
+readonly GUACD_VERSION=1.6.0
+readonly GUACD_SHA256=8bc45675da96d7b6f39728160181e3d4ff3c08f460f6d26de5805b642bf13f2b
+readonly GUACD_PREFIX=/usr/lib/nkeeper/guacd
+
+# The FreeRDP guacd runs on (docs/architecture.md §8): 2.11, as Apache's own guacd images use, since guacd 1.6.0
+# crashes on FreeRDP 3.31 and newer. Its SHA-256 matched both pub.freerdp.com's copy and its GitHub release's.
+readonly FREERDP_VERSION=2.11.7
+readonly FREERDP_SHA256=5a2d54e1ca0f1facd1632bcc94c73b9f071a80c5fdbbb3f26e79f02aaa586ca3
+# Bumped when the build itself changes, so upgrades rebuild it.
+readonly GUACD_BUILD="guacd-$GUACD_VERSION+freerdp-$FREERDP_VERSION-2"
+
 usage() {
     cat <<'EOF'
 NKeeper's native installer (docs/architecture.md §8).
@@ -33,6 +46,9 @@ NKeeper's native installer (docs/architecture.md §8).
         --admin-user <name>     the first administrator, on a fresh install (default: admin)
         --admin-email <email>   their email address (default: admin@<host name>)
         --admin-password <pw>   their password (default: generated, and printed once)
+        --no-guacd              don't build or run guacd: remote desktops then say the gateway is unavailable
+        --web-domain <domain>   where web pages open: nkw-<id>.<domain> (docs/architecture.md §7.18). Needs a
+                                wildcard DNS record, *.<domain>, pointing at this server. Kept on upgrade.
         --yes                   don't ask anything
 
   sudo deploy/setup.sh uninstall [--purge]
@@ -73,16 +89,18 @@ selinux() { command -v selinuxenabled >/dev/null 2>&1 && selinuxenabled; }
 
 command=${1:-}
 [ $# -gt 0 ] && shift
-names=() cert="" key="" admin_user=admin admin_email="" admin_password="" assume_yes=false purge=false
+names=() cert="" key="" admin_user=admin admin_email="" admin_password="" assume_yes=false purge=false web_domain="" no_guacd=false
 while [ $# -gt 0 ]; do
     case $1 in
         --server-name) names+=("${2:?--server-name needs a value}"); shift 2 ;;
+        --web-domain) web_domain=$(tr '[:upper:]' '[:lower:]' <<<"${2:?--web-domain needs a value}"); shift 2 ;;
         --cert) cert=${2:?--cert needs a file}; shift 2 ;;
         --key) key=${2:?--key needs a file}; shift 2 ;;
         --admin-user) admin_user=${2:?--admin-user needs a value}; shift 2 ;;
         --admin-email) admin_email=${2:?--admin-email needs a value}; shift 2 ;;
         --admin-password) admin_password=${2:?--admin-password needs a value}; shift 2 ;;
         --yes) assume_yes=true; shift ;;
+        --no-guacd) no_guacd=true; shift ;;
         --purge) purge=true; shift ;;
         -h|--help) usage; exit 0 ;;
         *) die "Unknown option: $1 (see --help)" ;;
@@ -301,6 +319,12 @@ configure() {
     set_env "$ENV_FILE" ASPNETCORE_URLS "http://127.0.0.1:$SERVER_PORT"
     set_env "$ENV_FILE" Frontend__Root "$PREFIX/shell"
     set_env "$ENV_FILE" ForwardedHeaders__Enabled true
+    # The web domain: given now, or kept from the last install.
+    web_domain=${web_domain:-$(get_env "$ENV_FILE" Origins__BaseDomain)}
+    if [ -n "$web_domain" ]; then
+        [[ $web_domain =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,62}$ ]] || die "--web-domain $web_domain isn't a DNS name such as web.example.com."
+        set_env "$ENV_FILE" Origins__BaseDomain "$web_domain"
+    fi
     set_env "$ENV_FILE" DataProtection__CertificatePath "$KEYRING"
     set_env "$ENV_FILE" DOTNET_CLI_TELEMETRY_OPTOUT 1
 
@@ -341,12 +365,134 @@ configure() {
     ok "In $ENV_FILE."
 }
 
+# --- guacd -----------------------------------------------------------------------------------------
+
+# The packages guacd and FreeRDP build against. FreeRDP itself is built from source (below), not the distribution's.
+guacd_build_packages() {
+    if [ "$pm" = apt ]; then
+        apt-get install -y -qq build-essential cmake pkg-config libtool-bin libcairo2-dev libjpeg-dev libpng-dev uuid-dev \
+            libssl-dev libwebp-dev zlib1g-dev >/dev/null
+    else
+        # A few of these are in CRB on the RHEL family.
+        if [ -f /etc/os-release ] && ! grep -qi '^ID="\?fedora' /etc/os-release; then
+            dnf install -y -q dnf-plugins-core >/dev/null
+            dnf config-manager --set-enabled crb >/dev/null 2>&1 || dnf config-manager --set-enabled powertools >/dev/null 2>&1 || true
+        fi
+        dnf install -y -q gcc gcc-c++ make cmake pkgconf libtool cairo-devel libjpeg-turbo-devel libpng-devel libuuid-devel \
+            openssl-devel libwebp-devel zlib-devel >/dev/null
+    fi
+}
+
+# download URL... TARGET SHA256: the first URL that works, checked against the pinned hash.
+download_checked() {
+    local target=${*: -2:1} sha256=${*: -1} url
+    for url in "${@:1:$#-2}"; do
+        curl -fsSL "$url" -o "$target" && break
+    done
+    [ -s "$target" ] || die "Couldn't download $(basename "$target")."
+    echo "$sha256  $target" | sha256sum -c --quiet - || die "$(basename "$target") failed its checksum."
+}
+
+build_guacd() {
+    step "Building FreeRDP $FREERDP_VERSION and guacd $GUACD_VERSION (several minutes)"
+    guacd_build_packages
+    local work=$CACHE/guacd freerdp guacd
+    rm -rf "$work" "$GUACD_PREFIX" && mkdir -p "$work/freerdp" "$work/guacd"
+    freerdp="freerdp-$FREERDP_VERSION.tar.gz"
+    guacd="guacamole-server-$GUACD_VERSION.tar.gz"
+    download_checked "https://pub.freerdp.com/releases/$freerdp" \
+        "https://github.com/FreeRDP/FreeRDP/releases/download/$FREERDP_VERSION/$freerdp" "$work/$freerdp" "$FREERDP_SHA256"
+    download_checked "https://downloads.apache.org/guacamole/$GUACD_VERSION/source/$guacd" \
+        "https://archive.apache.org/dist/guacamole/$GUACD_VERSION/source/$guacd" "$work/$guacd" "$GUACD_SHA256"
+    tar -xzf "$work/$freerdp" -C "$work/freerdp" --strip-components=1
+    tar -xzf "$work/$guacd" -C "$work/guacd" --strip-components=1
+
+    # FreeRDP, as Apache's own guacd images build it: a client library only, no X11, server or sound. NLA's NTLM
+    # needs MD4, which OpenSSL 3 leaves out by default, so FreeRDP uses its own.
+    (cmake -S "$work/freerdp" -B "$work/freerdp/build" -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX="$GUACD_PREFIX" -DCMAKE_INSTALL_LIBDIR=lib -DCMAKE_INSTALL_RPATH="$GUACD_PREFIX/lib" \
+        -DCMAKE_C_FLAGS="-Wno-error=incompatible-pointer-types -Wno-error=int-conversion" \
+        -DBUILTIN_CHANNELS=OFF -DCHANNEL_URBDRC=OFF -DWITH_CHANNELS=ON -DWITH_CLIENT=ON -DWITH_CAIRO=ON -DWITH_JPEG=ON \
+        -DWITH_OPENSSL=ON -DWITH_INTERNAL_MD4=ON -DWITH_ZLIB=ON \
+        -DWITH_SERVER=OFF -DWITH_SERVER_INTERFACE=OFF -DWITH_SAMPLE=OFF -DWITH_X11=OFF \
+        -DWITH_WAYLAND=OFF -DWITH_ALSA=OFF -DWITH_PULSE=OFF -DWITH_OSS=OFF -DWITH_CUPS=OFF -DWITH_PCSC=OFF -DWITH_FFMPEG=OFF \
+        -DWITH_DSP_FFMPEG=OFF -DWITH_SWSCALE=OFF -DWITH_GSM=OFF -DWITH_GSSAPI=OFF -DWITH_KRB5=OFF -DWITH_OPENH264=OFF \
+        -DWITH_X264=OFF -DWITH_LIBSYSTEMD=OFF -DWITH_MANPAGES=OFF -DWITH_SHADOW_X11=OFF -DWITH_SHADOW_MAC=OFF \
+        -DWITH_PROXY=OFF -DWITH_FUSE=OFF >"$work/freerdp.log" 2>&1 &&
+        cmake --build "$work/freerdp/build" -j "$(nproc)" >>"$work/freerdp.log" 2>&1 &&
+        cmake --install "$work/freerdp/build" >>"$work/freerdp.log" 2>&1) ||
+        { tail -n 30 "$work/freerdp.log" >&2; die "Building FreeRDP failed (above)."; }
+
+    # guacd against that FreeRDP, RDP only. It builds with warnings as errors, which FreeRDP's deprecations aren't.
+    (cd "$work/guacd" && PKG_CONFIG_PATH="$GUACD_PREFIX/lib/pkgconfig" CFLAGS="-O2 -Wno-error=deprecated-declarations" \
+        LDFLAGS="-Wl,-rpath,$GUACD_PREFIX/lib" ./configure --prefix="$GUACD_PREFIX" \
+        --with-freerdp-plugin-dir="$GUACD_PREFIX/lib/freerdp2" --without-vnc --without-ssh --without-telnet \
+        --without-websockets --without-pango --without-terminal --disable-guacenc --disable-guaclog --disable-kubernetes \
+        >"$work/guacd.log" 2>&1) ||
+        { tail -n 30 "$work/guacd.log" >&2; die "guacamole-server's configure failed (above)."; }
+    grep -q 'RDP .*\.\.\. yes' "$work/guacd.log" ||
+        { grep -A12 'Protocol support' "$work/guacd.log" >&2; die "guacamole-server would build without RDP support."; }
+    grep -q "$GUACD_PREFIX/include/freerdp2" "$work/guacd/config.log" ||
+        die "guacamole-server didn't pick the FreeRDP built for it."
+    (cd "$work/guacd" && make -j"$(nproc)" >>"$work/guacd.log" 2>&1 && make install >>"$work/guacd.log" 2>&1) ||
+        { tail -n 30 "$work/guacd.log" >&2; die "Building guacd failed (above)."; }
+    chown -R root:root "$GUACD_PREFIX"
+    chmod -R u=rwX,go=rX "$GUACD_PREFIX"
+    echo "$GUACD_BUILD" >"$GUACD_PREFIX/.version"
+    ok "Built guacd $GUACD_VERSION on FreeRDP $FREERDP_VERSION into $GUACD_PREFIX."
+}
+
+install_guacd() {
+    if $no_guacd; then
+        warn "Skipping guacd (--no-guacd): remote desktops won't work."
+        return
+    fi
+    if [ "$(cat "$GUACD_PREFIX/.version" 2>/dev/null)" != "$GUACD_BUILD" ] || [ ! -x "$GUACD_PREFIX/sbin/guacd" ]; then
+        # In a subshell: a failed build mustn't stop NKeeper itself from installing and starting.
+        if ! (build_guacd); then
+            warn "guacd couldn't be built (above): NKeeper carries on, and remote desktops say the gateway is unavailable."
+            [ -x "$GUACD_PREFIX/sbin/guacd" ] || return 0
+        fi
+    else
+        ok "guacd $GUACD_VERSION on FreeRDP $FREERDP_VERSION is already built."
+    fi
+
+    id nkeeper-guacd >/dev/null 2>&1 || useradd --system --home-dir /nonexistent --no-create-home --shell /usr/sbin/nologin nkeeper-guacd
+    if selinux; then
+        semanage fcontext -a -t bin_t "$GUACD_PREFIX/sbin/guacd" 2>/dev/null ||
+            semanage fcontext -m -t bin_t "$GUACD_PREFIX/sbin/guacd"
+        restorecon -R "$GUACD_PREFIX" >/dev/null
+    fi
+    install -o root -g root -m 0644 "$REPO/deploy/systemd/nkeeper-guacd.service" /etc/systemd/system/nkeeper-guacd.service
+    systemctl daemon-reload
+    systemctl enable nkeeper-guacd >/dev/null 2>&1
+    systemctl restart nkeeper-guacd
+    local i
+    for ((i = 0; i < 30; i++)); do
+        ss -ltn 2>/dev/null | grep -q '127.0.0.1:4822 ' && break
+        sleep 1
+    done
+    if ss -ltn 2>/dev/null | grep -q '127.0.0.1:4822 '; then
+        ok "guacd listens on 127.0.0.1:4822."
+    else
+        journalctl -u nkeeper-guacd -n 20 --no-pager >&2 || true
+        warn "guacd didn't start (log above): remote desktops won't work until it does."
+    fi
+}
+
 # --- nginx ---------------------------------------------------------------------------------------
 
 default_names() {
     hostname -f 2>/dev/null || true
     hostname -s 2>/dev/null || true
     hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^$' || true
+}
+
+# Whether nginx's certificate is one this installer made: marked as such, or (from before the mark) self-signed.
+installer_certificate() {
+    [ -f "$TLS/self-signed-for" ] && return 0
+    [ -f "$TLS/custom" ] && return 1
+    [ "$(openssl x509 -in "$TLS/nkeeper.crt" -noout -issuer 2>/dev/null | sed 's/^issuer= *//')" =       "$(openssl x509 -in "$TLS/nkeeper.crt" -noout -subject 2>/dev/null | sed 's/^subject= *//')" ]
 }
 
 setup_nginx() {
@@ -356,25 +502,36 @@ setup_nginx() {
     fi
     [ ${#names[@]} -gt 0 ] || die "Couldn't tell this machine's names; give one with --server-name."
 
+    # Web pages' session origins (docs/architecture.md §7.18): nkw-<id>.<web domain>, answered by the same server.
+    local all_names=("${names[@]}")
+    if [ -n "$web_domain" ]; then
+        all_names+=("*.$web_domain")
+    fi
+
     if [ -n "$cert" ]; then
         [ -n "$key" ] || die "--cert needs --key."
         install -o root -g root -m 0644 "$cert" "$TLS/nkeeper.crt"
         install -o root -g root -m 0600 "$key" "$TLS/nkeeper.key"
-    elif [ ! -s "$TLS/nkeeper.crt" ]; then
+        rm -f "$TLS/self-signed-for"
+        touch "$TLS/custom"
+    elif [ ! -s "$TLS/nkeeper.crt" ] || { installer_certificate && [ "$(cat "$TLS/self-signed-for" 2>/dev/null)" != "${all_names[*]}" ]; }; then
+        # A certificate this installer made is made again when the names change; one given with --cert never is.
         local san="" name
-        for name in "${names[@]}"; do
+        for name in "${all_names[@]}"; do
             if [[ $name =~ ^[0-9.]+$ || $name == *:* ]]; then san+="IP:$name,"; else san+="DNS:$name,"; fi
         done
         (umask 077 && openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 825 \
             -subj "/CN=${names[0]}" -addext "subjectAltName=${san%,}" \
             -keyout "$TLS/nkeeper.key" -out "$TLS/nkeeper.crt" 2>/dev/null) || die "Couldn't create a certificate."
         chmod 0644 "$TLS/nkeeper.crt"
-        warn "nginx uses a self-signed certificate for ${names[*]}; give your own with --cert and --key."
+        echo "${all_names[*]}" >"$TLS/self-signed-for"
+        rm -f "$TLS/custom"
+        warn "nginx uses a self-signed certificate for ${all_names[*]}; give your own with --cert and --key."
     fi
 
     # IPv6 addresses stay in the certificate, but not in server_name: the HTTPS server is the default one anyway.
     local server_names
-    server_names=$(printf '%s\n' "${names[@]}" | grep -v ':' | tr '\n' ' ')
+    server_names=$(printf '%s\n' "${all_names[@]}" | grep -v ':' | tr '\n' ' ')
     # nginx 1.25.1 moved HTTP/2 from `listen … http2` to its own directive, and warns about the old form.
     local listen_http2=" http2" http2="" version
     version=$(nginx -v 2>&1 | sed -n 's|.*nginx/\([0-9.]*\).*|\1|p')
@@ -395,7 +552,7 @@ setup_nginx() {
     nginx -t -q || die "nginx refused the configuration (see above)."
     systemctl enable nginx >/dev/null 2>&1
     systemctl reload-or-restart nginx
-    ok "Serving ${names[*]}."
+    ok "Serving ${all_names[*]}."
 }
 
 open_firewall() {
@@ -462,6 +619,7 @@ do_install() {
     fetch_toolchain
     build
     install_files
+    install_guacd
     configure
     setup_nginx
     open_firewall
@@ -472,8 +630,8 @@ do_install() {
 do_uninstall() {
     [ "$(id -u)" -eq 0 ] || die "Run it with sudo."
     step "Removing NKeeper"
-    systemctl disable --now nkeeper >/dev/null 2>&1 || true
-    rm -f /etc/systemd/system/nkeeper.service
+    systemctl disable --now nkeeper nkeeper-guacd >/dev/null 2>&1 || true
+    rm -f /etc/systemd/system/nkeeper.service /etc/systemd/system/nkeeper-guacd.service
     systemctl daemon-reload
     rm -rf "$PREFIX" "$CACHE" /etc/nginx/conf.d/nkeeper.conf
     systemctl reload nginx >/dev/null 2>&1 || true
@@ -481,6 +639,7 @@ do_uninstall() {
         postgres_psql -qc 'DROP DATABASE IF EXISTS nkeeper' -c 'DROP ROLE IF EXISTS nkeeper' >/dev/null 2>&1 || true
         rm -rf "$CONFIG" "$STATE"
         userdel nkeeper >/dev/null 2>&1 || true
+        userdel nkeeper-guacd >/dev/null 2>&1 || true
         ok "Removed, with the database and $CONFIG."
     else
         ok "Removed. The nkeeper database and $CONFIG are kept; --purge removes them."

@@ -1,0 +1,119 @@
+.shell {
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-2) var(--space-4);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.nav {
+  display: flex;
+  flex: 1;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.navLink {
+  /* A button here (1.x's were links), so the browser's button look is reset. */
+  background: transparent;
+  border: 0;
+  font-family: inherit;
+  line-height: inherit;
+  cursor: pointer;
+  padding: var(--space-1) var(--space-3);
+  color: var(--color-text-muted);
+  border-radius: var(--radius-md);
+  font-size: 0.875rem;
+  font-weight: 550;
+  text-decoration: none;
+}
+
+.navLink:hover {
+  background: var(--color-surface-raised);
+  color: var(--color-text);
+}
+
+.navLinkActive,
+.navLinkActive:hover {
+  background: var(--color-info-bg);
+  color: var(--color-accent-text);
+}
+
+.accountButton {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-1) var(--space-2);
+  background: transparent;
+  color: var(--color-text-muted);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  font: inherit;
+  cursor: pointer;
+}
+
+.accountButton:hover,
+.accountButton[aria-expanded='true'] {
+  background: var(--color-surface-raised);
+  color: var(--color-text);
+}
+
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  flex-shrink: 0;
+  background: var(--color-info-bg);
+  color: var(--color-accent-text);
+  border-radius: 999px;
+  font-size: 0.8125rem;
+  font-weight: 650;
+}
+
+.user {
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.banner {
+  padding: var(--space-4) var(--space-6) 0;
+}
+
+.content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+@media (max-width: 480px) {
+  .user {
+    display: none;
+  }
+}
+
+/* Loading, or a failure to load, before the shell can show (as 1.x's FullPageStatus). */
+.status {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-8) var(--space-4);
+  color: var(--color-text-muted);
+}

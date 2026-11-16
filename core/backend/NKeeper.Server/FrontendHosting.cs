@@ -38,7 +38,8 @@ public sealed partial class ShellDocument
     /// Reads index.html. Refuses (throws) if it has any inline script other than at most one import
     /// map, so a build mistake can't quietly widen the policy.
     /// </summary>
-    public static ShellDocument Load(string root)
+    /// <param name="webDomain">The web domain (docs/architecture.md §7.18): session origins under it may be framed.</param>
+    public static ShellDocument Load(string root, string? webDomain = null)
     {
         var path = Path.Combine(root, "index.html");
         if (!File.Exists(path))
@@ -91,6 +92,7 @@ public sealed partial class ShellDocument
             "object-src 'none'",
             "base-uri 'none'",
             "form-action 'self'",
+            webDomain is null ? "frame-src 'self'" : $"frame-src 'self' https://*.{webDomain}",
             "frame-ancestors 'none'");
         return new ShellDocument(Path.GetFullPath(root), index, policy);
     }

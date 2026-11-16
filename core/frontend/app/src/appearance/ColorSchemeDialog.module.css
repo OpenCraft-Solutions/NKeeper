@@ -1,0 +1,194 @@
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.legend {
+  margin-bottom: var(--space-2);
+  padding: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.hint {
+  color: var(--color-text-muted);
+  font-size: 0.8125rem;
+}
+
+.options {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+  gap: var(--space-2);
+}
+
+.option {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.option:hover {
+  background: var(--color-surface-raised);
+}
+
+.option:focus-within {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.optionActive {
+  background: var(--color-info-bg);
+  border-color: var(--color-accent-text);
+}
+
+.optionName {
+  overflow: hidden;
+  font-size: 0.875rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.swatch {
+  position: relative;
+  display: block;
+  flex-shrink: 0;
+  width: 2.75rem;
+  height: 2rem;
+  overflow: hidden;
+  border: 1px solid;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 0 0 1px var(--color-border);
+}
+
+.swatchPanel {
+  position: absolute;
+  inset: 3px 3px auto;
+  border-radius: 3px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1rem;
+  text-align: center;
+}
+
+.swatchAccent {
+  position: absolute;
+  inset: auto 3px 3px;
+  height: 0.3125rem;
+  border-radius: 2px;
+}
+
+.customRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.colorFields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: var(--space-4);
+}
+
+.colorInputs {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.colorPicker {
+  flex-shrink: 0;
+  width: 2.75rem;
+  height: 2.75rem;
+  padding: 2px;
+  background: var(--color-input);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.colorHex {
+  min-width: 0;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+}
+
+/* The tokens of the scheme being built are set on this element, and reach everything inside. */
+.preview {
+  padding: var(--space-4);
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.previewPanel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: 0.875rem;
+}
+
+.previewMuted {
+  color: var(--color-text-muted);
+}
+
+.previewLink {
+  color: var(--color-accent-text);
+  text-decoration: underline;
+}
+
+.previewStates,
+.previewActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.previewSuccess {
+  color: var(--color-success);
+}
+
+.previewWarning {
+  color: var(--color-warning);
+}
+
+.previewDanger {
+  color: var(--color-danger);
+}
+
+.previewPrimary,
+.previewSecondary {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+}
+
+.previewPrimary {
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+.previewSecondary {
+  border-color: var(--color-border-strong);
+}

@@ -81,10 +81,27 @@ describe('openStreamSession', () => {
     socket.open()
     socket.receiveJson({ type: 'hostKey', hostId: 'h', serviceId: 's', algorithm: 'ssh-ed25519', fingerprint: 'abc' })
     await flush()
-    expect(confirmHostKey).toHaveBeenCalledWith({ hostId: 'h', serviceId: 's', algorithm: 'ssh-ed25519', fingerprint: 'abc' })
+    expect(confirmHostKey).toHaveBeenCalledWith({ kind: 'ssh-host-key', hostId: 'h', serviceId: 's', algorithm: 'ssh-ed25519', fingerprint: 'abc' })
     expect(socket.sent.at(-1)).toEqual({ type: 'hostKeyDecision', trust: true })
     socket.receiveJson({ type: 'connected' })
     await session
+  })
+
+  it('asks about a certificate, with its subject and expiry', async () => {
+    const confirmHostKey = vi.fn(() => Promise.resolve(false))
+    const { socket } = open({ confirmHostKey })
+    socket.open()
+    socket.receiveJson({ type: 'hostKey', kind: 'tls-certificate', hostId: 'h', serviceId: 's', algorithm: 'x509', fingerprint: 'def', subject: 'CN=rdp', notAfterUtc: '2027-01-01T00:00:00Z' })
+    await flush()
+    expect(confirmHostKey).toHaveBeenCalledWith({
+      kind: 'tls-certificate',
+      hostId: 'h',
+      serviceId: 's',
+      algorithm: 'x509',
+      fingerprint: 'def',
+      subject: 'CN=rdp',
+      notAfterUtc: '2027-01-01T00:00:00Z',
+    })
   })
 
   it('rejects with core’s error code', async () => {

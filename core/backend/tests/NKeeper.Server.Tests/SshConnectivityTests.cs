@@ -72,11 +72,21 @@ public sealed class SshConnectivityTests(PostgresFixture postgres, SshServerFixt
             Assert.Equal("trust_not_presented", (await response.ProblemAsync()).GetProperty("code").GetString());
         }
 
-        // Another user's session, with Use on the host, wasn't shown this key.
+        // Another user's session, with Manage on the host, wasn't shown this key.
         var bobId = await server.CreateUserAsync("bob", BobPassword);
-        (await admin.SendWithTokenAsync(HttpMethod.Put, $"/api/users/{bobId}/grants", new[] { new { hostId = Id(host), level = "use" } })).EnsureSuccessStatusCode();
+        (await admin.SendWithTokenAsync(HttpMethod.Put, $"/api/users/{bobId}/grants", new[] { new { hostId = Id(host), level = "manage" } })).EnsureSuccessStatusCode();
         using var bob = await SignInAsync(server, "bob");
         await TrustAsync(bob, key, HttpStatusCode.BadRequest);
+
+        // Someone with Use only can't trust for the host at all.
+        var carolId = await server.CreateUserAsync("carol", BobPassword);
+        (await admin.SendWithTokenAsync(HttpMethod.Put, $"/api/users/{carolId}/grants", new[] { new { hostId = Id(host), level = "use" } })).EnsureSuccessStatusCode();
+        using var carol = await SignInAsync(server, "carol");
+        using (var response = await carol.SendWithTokenAsync(HttpMethod.Post, $"/api/hosts/{Id(host)}/services/{ServiceId(host)}/trusted-keys", forged))
+        {
+            Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+            Assert.Equal("trust_needs_manage", (await response.ProblemAsync()).GetProperty("code").GetString());
+        }
 
         // Nor is it trusted after signing out and in again.
         (await admin.LogoutAsync()).EnsureSuccessStatusCode();

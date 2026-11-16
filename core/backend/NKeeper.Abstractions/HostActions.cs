@@ -11,16 +11,26 @@ public enum HostActionCredential
 }
 
 /// <summary>
-/// An entry in a host's Connect menu (docs/architecture.md §7.12, SDK 0.1.6): it opens one of the plugin's
-/// session types on a service. The plugin only names the session type; the shell builds the menu, and core
-/// resolves the credential.
+/// An entry in a host's menu (docs/architecture.md §7.12). It either opens one of the plugin's session types on a
+/// service (SDK 0.1.6), or runs one of the plugin's host endpoints (<see cref="Endpoint"/>, SDK 0.1.7). The plugin
+/// only names what it opens or runs; the shell builds the menu, and core resolves any credential.
 /// </summary>
 /// <param name="Id">Like a service type's ID, plus dots between segments (<c>ssh.terminal</c>). Unique across plugins.</param>
 /// <param name="Label">What users see, e.g. <c>Terminal</c>.</param>
-/// <param name="SessionType">A session type the same plugin contributes. The action applies to the services it opens on.</param>
-public sealed record HostAction(string Id, string Label, string SessionType)
+/// <param name="SessionType">A session type the same plugin contributes. The action applies to the services it opens on. Null for a run action.</param>
+public sealed record HostAction(string Id, string Label, string? SessionType = null)
 {
     public HostActionCredential Credential { get; init; } = HostActionCredential.Required;
+
+    /// <summary>
+    /// For a run action: a path in the plugin's host group, such as <c>wake</c>. The shell posts
+    /// <c>{ serviceId }</c> (with the credential, if it needs one) to <c>/api/p/&lt;plugin&gt;/hosts/{hostId}/&lt;endpoint&gt;</c>,
+    /// and shows the <c>{ message }</c> it answers.
+    /// </summary>
+    public string? Endpoint { get; init; }
+
+    /// <summary>For a run action: the service types it applies to. A session action takes them from its session type.</summary>
+    public IReadOnlyList<string> ServiceTypes { get; init; } = [];
 }
 
 /// <summary>
@@ -33,6 +43,9 @@ public sealed class HealthProbe
 
     /// <summary>A TCP connection to the service's address and port, closed at once. Nothing is sent.</summary>
     public static HealthProbe Tcp { get; } = new("tcp");
+
+    /// <summary>A TCP connection and a TLS handshake that accepts any certificate, reporting its subject and expiry (SDK 0.1.8).</summary>
+    public static HealthProbe Tls { get; } = new("tls");
 
     /// <summary>The probe's name, as <c>GET /api/plugins</c> reports it.</summary>
     public string Kind { get; }

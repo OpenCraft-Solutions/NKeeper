@@ -18,9 +18,14 @@ public sealed class NamingTests
 
     /// <summary>
     /// Literals core may use although they equal an ID, as "path in core: literal" with the reason.
-    /// Each must be about something other than the plugin, such as a trust-store scope. Empty so far.
+    /// Each must be about something other than the plugin, such as a trust-store scope.
     /// </summary>
-    private static readonly Dictionary<string, string> Allowed = new(StringComparer.Ordinal);
+    private static readonly Dictionary<string, string> Allowed = new(StringComparer.Ordinal)
+    {
+        // guacd's own protocol name in the Guacamole handshake ("select rdp"), not the desktop plugin's service type,
+        // which happens to share it (docs/architecture.md §7.20).
+        ["core/backend/NKeeper.Core/Connectivity/DesktopConnector.cs: rdp"] = "guacd's protocol name in the handshake",
+    };
 
     public static IReadOnlySet<string> Ids { get; } = PlannedIds
         .Concat(Directory.Exists(Path.Combine(Repository.Root, "plugins"))

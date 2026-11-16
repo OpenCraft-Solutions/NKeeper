@@ -1,11 +1,20 @@
-import { useState, type FormEvent, type ReactNode } from 'react'
+import { useState, type FormEvent } from 'react'
 import { api, ApiError } from '@nkeeper/sdk'
 import { credentialName, serviceName } from './hosts'
 import type { Host, HostCredential, HostService, ServiceSetting, ServiceTypeInfo } from './types'
+import { Alert } from './ui/Alert'
+import { Button } from './ui/Button'
+import { Checkbox } from './ui/Checkbox'
+import creds from './ui/CredentialsEditor.module.css'
+import panel from './ui/HostPanel.module.css'
+import list from './ui/ListEditor.module.css'
+import { PasswordField } from './ui/PasswordField'
+import { TextArea } from './ui/TextArea'
+import { TextField } from './ui/TextField'
 
 /**
- * Creates and edits a host (docs/architecture.md §7.14): its own fields, its services with settings forms
- * drawn from their types' schemas, its credentials (secrets write-only) and its jump host. The server's
+ * Creates and edits a host (docs/architecture.md §7.14), laid out as 1.x's host editor: its own fields and jump host,
+ * its tags, its services with settings drawn from their types' schemas, and its credentials (secrets write-only). The server's
  * validation is what counts: its field errors are shown next to their fields.
  */
 
@@ -136,11 +145,6 @@ function requestOf(draft: Draft, version: number | null) {
 
 type Errors = Record<string, string[]>
 
-function FieldError({ errors, field }: { errors: Errors; field: string }) {
-  const messages = errors[field]
-  return messages ? <span className="nk-field-error">{messages.join(' ')}</span> : null
-}
-
 export interface HostEditorProps {
   /** The host to edit; null to create one. */
   host: Host | null
@@ -202,408 +206,518 @@ export function HostEditor({ host, hosts, serviceTypes, onSaved, onCancel, onRel
   const jumpHost = draft.jump ? hosts.find((h) => h.id === draft.jump!.hostId) : undefined
   const fieldErrors = Object.entries(errors).filter(([, messages]) => messages.length > 0)
 
+  const title = host ? `Edit ${host.name}` : 'New host'
+  const firstError = (field: string) => errors[field]?.join(' ')
+  const removeService = (key: string) =>
+    setDraft((d) => ({
+      ...d,
+      services: d.services.filter((s) => s.key !== key),
+      credentials: d.credentials.map((c) => ({ ...c, serviceKeys: c.serviceKeys.filter((k) => k !== key) })),
+    }))
+  const moveService = (index: number, step: -1 | 1) =>
+    setDraft((d) => {
+      const services = [...d.services]
+      const [moved] = services.splice(index, 1)
+      if (moved) {
+        services.splice(index + step, 0, moved)
+      }
+      return { ...d, services }
+    })
+  const newService = (type: ServiceTypeInfo): ServiceDraft => ({
+    key: newKey(),
+    id: null,
+    type: type.id,
+    label: '',
+    port: '',
+    address: '',
+    // A required switch shows as off, so it starts as off rather than unset.
+    settings: Object.fromEntries(type.settings.filter((s) => s.kind === 'switch' && s.required).map((s) => [s.key, false])),
+    available: true,
+  })
+
   return (
-    <form className="nk-form nk-editor" onSubmit={(e) => void submit(e)} aria-label={host ? `Edit ${host.name}` : 'New host'}>
-      <h2>{host ? `Edit ${host.name}` : 'New host'}</h2>
-      {message && (
-        <div className="nk-alert" role="alert">
-          <p>{message}</p>
-          {fieldErrors.length > 0 && (
-            <ul>
-              {fieldErrors.map(([field, messages]) => (
-                <li key={field}>
-                  <code>{field}</code>: {messages.join(' ')}
-                </li>
-              ))}
-            </ul>
-          )}
-          {conflict && (
-            <button type="button" onClick={onReload}>
-              Reload the host
-            </button>
-          )}
+    <form className={panel.panel} onSubmit={(e) => void submit(e)} noValidate aria-label={title}>
+      <header className={panel.header}>
+        <div className={panel.heading}>
+          <h1 className={panel.title}>{title}</h1>
+          {!host && <p className={panel.subtitle}>Add a server or device to the inventory.</p>}
         </div>
-      )}
+      </header>
 
-      <Section title="Host">
-        <label>
-          Name
-          <input value={draft.name} onChange={(e) => update({ name: e.target.value })} required maxLength={200} />
-          <FieldError errors={errors} field="name" />
-        </label>
-        <div className="nk-row">
-          <label>
-            Hostname
-            <input value={draft.hostname} onChange={(e) => update({ hostname: e.target.value })} />
-            <FieldError errors={errors} field="hostname" />
-          </label>
-          <label>
-            IP address
-            <input value={draft.ipAddress} onChange={(e) => update({ ipAddress: e.target.value })} />
-            <FieldError errors={errors} field="ipAddress" />
-          </label>
-        </div>
-        <label>
-          Description
-          <textarea rows={2} value={draft.description} onChange={(e) => update({ description: e.target.value })} />
-          <FieldError errors={errors} field="description" />
-        </label>
-      </Section>
+      <div className={panel.body}>
+        {message && (
+          <Alert>
+            <p>{message}</p>
+            {fieldErrors.length > 0 && (
+              <ul>
+                {fieldErrors.map(([field, messages]) => (
+                  <li key={field}>
+                    <code>{field}</code>: {messages.join(' ')}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {conflict && (
+              <Button variant="secondary" size="sm" onClick={onReload}>
+                Reload the host
+              </Button>
+            )}
+          </Alert>
+        )}
 
-      <Section title="Tags">
-        {draft.tags.map((tag, i) => (
-          <div className="nk-row" key={tag.key}>
-            <label>
-              Tag name
-              <input value={tag.name} onChange={(e) => update({ tags: draft.tags.map((t) => (t.key === tag.key ? { ...t, name: e.target.value } : t)) })} />
-              <FieldError errors={errors} field={`tags[${i}].name`} />
-            </label>
-            <label>
-              Value
-              <input value={tag.value} onChange={(e) => update({ tags: draft.tags.map((t) => (t.key === tag.key ? { ...t, value: e.target.value } : t)) })} />
-            </label>
-            <button type="button" className="nk-remove" onClick={() => update({ tags: draft.tags.filter((t) => t.key !== tag.key) })}>
-              Remove tag
-            </button>
-          </div>
-        ))}
-        <button type="button" onClick={() => update({ tags: [...draft.tags, { key: newKey(), name: '', value: '' }] })}>
-          Add tag
-        </button>
-      </Section>
-
-      <Section title="Services">
-        {draft.services.map((service, i) => {
-          const type = serviceTypes.get(service.type)
-          return (
-            <fieldset key={service.key} className="nk-item">
-              <legend>{type?.label ?? service.type}</legend>
-              {!service.available || !type ? (
-                <p className="nk-muted">No enabled plugin provides this type, so the service can only be kept as it is, or removed.</p>
-              ) : (
+        <section className={panel.section} aria-labelledby="host-details-title">
+          <h2 id="host-details-title" className={panel.sectionTitle}>
+            Details
+          </h2>
+          <div className={panel.formGrid}>
+            <TextField
+              className={panel.full}
+              label="Name"
+              value={draft.name}
+              onChange={(e) => update({ name: e.target.value })}
+              error={firstError('name')}
+              maxLength={200}
+              autoComplete="off"
+              autoFocus
+              required
+            />
+            <TextField
+              label="Hostname"
+              value={draft.hostname}
+              onChange={(e) => update({ hostname: e.target.value })}
+              error={firstError('hostname')}
+              placeholder="server01.example.com"
+              maxLength={253}
+              autoComplete="off"
+              spellCheck={false}
+            />
+            <TextField
+              label="IP address"
+              value={draft.ipAddress}
+              onChange={(e) => update({ ipAddress: e.target.value })}
+              error={firstError('ipAddress')}
+              placeholder="10.0.0.10"
+              maxLength={45}
+              autoComplete="off"
+              spellCheck={false}
+            />
+            <TextArea
+              className={panel.full}
+              label="Description"
+              value={draft.description}
+              onChange={(e) => update({ description: e.target.value })}
+              error={firstError('description')}
+              maxLength={4000}
+              rows={2}
+            />
+            <div className={`${panel.full} ${panel.jump}`}>
+              <div className={panel.field}>
+                <label htmlFor="jump-host" className={panel.fieldLabel}>
+                  Reach through
+                </label>
+                <select
+                  id="jump-host"
+                  className={list.input}
+                  value={draft.jump?.hostId ?? ''}
+                  onChange={(e) => update({ jump: e.target.value ? { hostId: e.target.value, serviceId: '', credentialId: '' } : null })}
+                  aria-invalid={firstError('jump.hostId') ? true : undefined}
+                >
+                  <option value="">Directly (no jump host)</option>
+                  {jumpHosts.map((h) => (
+                    <option key={h.id} value={h.id}>
+                      {h.name}
+                    </option>
+                  ))}
+                  {draft.jump && !jumpHost && <option value={draft.jump.hostId}>A host you can’t see</option>}
+                </select>
+                {firstError('jump.hostId') && <p className={panel.fieldError}>{firstError('jump.hostId')}</p>}
+                <p className={panel.fieldHint}>Connections to this host are tunnelled through the jump host over SSH, where the session type can go through one.</p>
+              </div>
+              {draft.jump && jumpHost && (
                 <>
-                  <div className="nk-row">
-                    <label>
-                      Label
-                      <input value={service.label} onChange={(e) => updateService(service.key, { label: e.target.value })} maxLength={100} />
-                      <FieldError errors={errors} field={`services[${i}].label`} />
+                  <div className={panel.field}>
+                    <label htmlFor="jump-service" className={panel.fieldLabel}>
+                      Its SSH service
                     </label>
-                    <label>
-                      Port
-                      <input
-                        inputMode="numeric"
-                        placeholder={type.defaultPort?.toString() ?? ''}
-                        value={service.port}
-                        onChange={(e) => updateService(service.key, { port: e.target.value })}
-                      />
-                      <FieldError errors={errors} field={`services[${i}].port`} />
-                    </label>
-                    <label>
-                      Address
-                      <input placeholder="The host’s own" value={service.address} onChange={(e) => updateService(service.key, { address: e.target.value })} />
-                      <FieldError errors={errors} field={`services[${i}].address`} />
-                    </label>
+                    <select id="jump-service" className={list.input} value={draft.jump.serviceId} onChange={(e) => update({ jump: { ...draft.jump!, serviceId: e.target.value } })}>
+                      <option value="">Choose a service</option>
+                      {jumpHost.services.map((s: HostService) => (
+                        <option key={s.id} value={s.id}>
+                          {serviceName(s, serviceTypes)}
+                        </option>
+                      ))}
+                    </select>
+                    {firstError('jump.serviceId') && <p className={panel.fieldError}>{firstError('jump.serviceId')}</p>}
                   </div>
-                  <SettingsFields
-                    settings={type.settings}
-                    values={service.settings}
-                    errors={errors}
-                    field={`services[${i}].settings`}
-                    onChange={(settings) => updateService(service.key, { settings })}
-                  />
+                  <div className={panel.field}>
+                    <label htmlFor="jump-credential" className={panel.fieldLabel}>
+                      Sign in to {jumpHost.name} as
+                    </label>
+                    <select id="jump-credential" className={list.input} value={draft.jump.credentialId} onChange={(e) => update({ jump: { ...draft.jump!, credentialId: e.target.value } })}>
+                      <option value="">Choose a credential</option>
+                      {jumpHost.credentials.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {credentialName(c)}
+                        </option>
+                      ))}
+                    </select>
+                    {firstError('jump.credentialId') && <p className={panel.fieldError}>{firstError('jump.credentialId')}</p>}
+                  </div>
                 </>
               )}
-              <FieldError errors={errors} field={`services[${i}]`} />
-              <button
-                type="button"
-                className="nk-remove"
+            </div>
+          </div>
+        </section>
+
+        <section className={panel.section}>
+          <fieldset className={list.fieldset}>
+            <legend className={list.legend}>Tags</legend>
+            <p className={list.hint}>
+              Name and optional value, e.g. <code>site: Datacenter A</code> or <code>env: production</code>. Group the host tree by any tag name.
+            </p>
+            {draft.tags.length === 0 && <p className={list.empty}>No tags yet.</p>}
+            <ol className={list.list}>
+              {draft.tags.map((tag, i) => {
+                const position = `tag ${i + 1}`
+                const error = firstError(`tags[${i}].name`) ?? firstError(`tags[${i}].value`)
+                const setTag = (change: Partial<typeof tag>) => update({ tags: draft.tags.map((t) => (t.key === tag.key ? { ...t, ...change } : t)) })
+                return (
+                  <li key={tag.key} className={list.tagRow}>
+                    <input
+                      className={list.input}
+                      value={tag.name}
+                      onChange={(e) => setTag({ name: e.target.value.replace(/[:=]/g, '') })}
+                      placeholder="Name"
+                      maxLength={64}
+                      aria-label={`Name for ${position}`}
+                      aria-invalid={firstError(`tags[${i}].name`) ? true : undefined}
+                      autoComplete="off"
+                    />
+                    <span className={list.separator} aria-hidden="true">
+                      :
+                    </span>
+                    <input
+                      className={list.input}
+                      value={tag.value}
+                      onChange={(e) => setTag({ value: e.target.value })}
+                      placeholder="Value (optional)"
+                      maxLength={255}
+                      aria-label={`Value for ${position}`}
+                      aria-invalid={firstError(`tags[${i}].value`) ? true : undefined}
+                      autoComplete="off"
+                    />
+                    <span />
+                    <button type="button" className={list.iconButton} onClick={() => update({ tags: draft.tags.filter((t) => t.key !== tag.key) })} aria-label={`Remove ${position}`}>
+                      ×
+                    </button>
+                    {error && <p className={list.error}>{error}</p>}
+                  </li>
+                )
+              })}
+            </ol>
+            <div>
+              <Button variant="secondary" size="sm" onClick={() => update({ tags: [...draft.tags, { key: newKey(), name: '', value: '' }] })}>
+                Add tag
+              </Button>
+            </div>
+          </fieldset>
+        </section>
+
+        <section className={panel.section}>
+          <fieldset className={list.fieldset}>
+            <legend className={list.legend}>Services</legend>
+            <p className={list.hint}>How you connect to this host. Leave the port empty to use the default, and the address empty to use the host’s own.</p>
+            {draft.services.length === 0 && <p className={list.empty}>{types.length === 0 ? 'No plugin provides a service type yet.' : 'No services yet.'}</p>}
+            <ol className={list.list}>
+              {draft.services.map((service, i) => {
+                const type = serviceTypes.get(service.type)
+                const position = `service ${i + 1}`
+                const rowError = firstError(`services[${i}]`) ?? firstError(`services[${i}].port`) ?? firstError(`services[${i}].label`) ?? firstError(`services[${i}].address`)
+                return (
+                  <li key={service.key} className={list.row}>
+                    <select
+                      className={list.input}
+                      value={service.type}
+                      disabled={service.id !== null || !type}
+                      onChange={(e) => {
+                        const next = serviceTypes.get(e.target.value)
+                        if (next) {
+                          updateService(service.key, { type: next.id, settings: newService(next).settings })
+                        }
+                      }}
+                      aria-label={`Type for ${position}`}
+                    >
+                      {!type && <option value={service.type}>{service.type} (no plugin provides it)</option>}
+                      {types.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.label}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      className={`${list.input} ${list.port}`}
+                      inputMode="numeric"
+                      value={service.port}
+                      onChange={(e) => updateService(service.key, { port: e.target.value })}
+                      placeholder={type?.defaultPort ? String(type.defaultPort) : 'Port'}
+                      aria-label={`Port for ${position}`}
+                      aria-invalid={firstError(`services[${i}].port`) ? true : undefined}
+                      disabled={!service.available || !type}
+                    />
+                    <input
+                      className={`${list.input} ${list.label}`}
+                      value={service.label}
+                      onChange={(e) => updateService(service.key, { label: e.target.value })}
+                      placeholder="Label (optional)"
+                      maxLength={100}
+                      aria-label={`Label for ${position}`}
+                      disabled={!service.available || !type}
+                    />
+                    <div className={list.actions}>
+                      <button type="button" className={list.iconButton} onClick={() => moveService(i, -1)} disabled={i === 0} aria-label={`Move ${position} up`}>
+                        ↑
+                      </button>
+                      <button type="button" className={list.iconButton} onClick={() => moveService(i, 1)} disabled={i === draft.services.length - 1} aria-label={`Move ${position} down`}>
+                        ↓
+                      </button>
+                      <button type="button" className={list.iconButton} onClick={() => removeService(service.key)} aria-label={`Remove ${position}`}>
+                        ×
+                      </button>
+                    </div>
+                    {!service.available || !type ? (
+                      <p className={`${list.hint} ${list.rowNote}`}>No enabled plugin provides this type, so the service can only be kept as it is, or removed.</p>
+                    ) : (
+                      <>
+                        <label className={list.option}>
+                          <span>Address</span>
+                          <input
+                            className={list.input}
+                            value={service.address}
+                            onChange={(e) => updateService(service.key, { address: e.target.value })}
+                            placeholder="The host’s own"
+                            maxLength={253}
+                            spellCheck={false}
+                            aria-label={`Address for ${position}`}
+                          />
+                        </label>
+                        <SettingsFields
+                          settings={type.settings}
+                          values={service.settings}
+                          errors={errors}
+                          field={`services[${i}].settings`}
+                          position={position}
+                          onChange={(settings) => updateService(service.key, { settings })}
+                        />
+                      </>
+                    )}
+                    {rowError && <p className={list.error}>{rowError}</p>}
+                  </li>
+                )
+              })}
+            </ol>
+            {types.length > 0 && (
+              <div>
+                <Button variant="secondary" size="sm" onClick={() => update({ services: [...draft.services, newService(types[0]!)] })}>
+                  Add service
+                </Button>
+              </div>
+            )}
+          </fieldset>
+        </section>
+
+        <section className={panel.section}>
+          <fieldset className={creds.fieldset}>
+            <legend className={creds.legend}>Credentials</legend>
+            <p className={creds.hint}>Accounts for signing in to this host. Secrets are encrypted at rest and never shown again after saving.</p>
+            {draft.credentials.length === 0 && <p className={creds.hint}>No credentials yet.</p>}
+            <ol className={creds.list}>
+              {draft.credentials.map((credential, i) => {
+                const field = (name: string) => firstError(`credentials[${i}].${name}`)
+                const heading = credential.label.trim() || credential.username.trim() || `Credential ${i + 1}`
+                return (
+                  <li key={credential.key} className={creds.card} aria-label={heading}>
+                    <div className={creds.cardHeader}>
+                      <span className={creds.cardTitle}>{heading}</span>
+                      <Button variant="ghost" size="sm" onClick={() => update({ credentials: draft.credentials.filter((c) => c.key !== credential.key) })}>
+                        Remove
+                      </Button>
+                    </div>
+                    {field('id') && <p className={creds.error}>{field('id')}</p>}
+                    <div className={creds.grid}>
+                      <TextField
+                        label="Username"
+                        value={credential.username}
+                        onChange={(e) => updateCredential(credential.key, { username: e.target.value })}
+                        error={field('username')}
+                        maxLength={256}
+                        autoComplete="off"
+                        spellCheck={false}
+                      />
+                      <TextField
+                        label="Domain"
+                        value={credential.domain}
+                        onChange={(e) => updateCredential(credential.key, { domain: e.target.value })}
+                        error={field('domain')}
+                        hint="Optional"
+                        maxLength={256}
+                        autoComplete="off"
+                        spellCheck={false}
+                      />
+                      <TextField
+                        label="Label"
+                        value={credential.label}
+                        onChange={(e) => updateCredential(credential.key, { label: e.target.value })}
+                        error={field('label')}
+                        hint="Optional, e.g. “Local admin”"
+                        maxLength={100}
+                        autoComplete="off"
+                      />
+                      <div className={creds.secret}>
+                        <PasswordField
+                          label="Password"
+                          value={credential.password}
+                          onChange={(e) => updateCredential(credential.key, { password: e.target.value, clearPassword: false })}
+                          error={field('password')}
+                          hint={credential.hasPassword && !credential.clearPassword ? 'Stored. Leave empty to keep it.' : undefined}
+                          disabled={credential.clearPassword}
+                          maxLength={1024}
+                          autoComplete="new-password"
+                        />
+                        {credential.hasPassword && (
+                          <Checkbox
+                            label="Remove stored password"
+                            checked={credential.clearPassword}
+                            onChange={(e) => updateCredential(credential.key, { clearPassword: e.target.checked, password: '' })}
+                          />
+                        )}
+                      </div>
+                      <div className={`${creds.secret} ${creds.full}`}>
+                        <TextArea
+                          label="SSH private key"
+                          value={credential.privateKey}
+                          onChange={(e) => updateCredential(credential.key, { privateKey: e.target.value, clearPrivateKey: false })}
+                          error={field('privateKey')}
+                          hint={credential.hasPrivateKey && !credential.clearPrivateKey ? 'Stored. Leave empty to keep it.' : 'Optional. PEM or OpenSSH format.'}
+                          disabled={credential.clearPrivateKey}
+                          placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+                          spellCheck={false}
+                          rows={2}
+                        />
+                        {credential.hasPrivateKey && (
+                          <Checkbox
+                            label="Remove stored key"
+                            checked={credential.clearPrivateKey}
+                            onChange={(e) => updateCredential(credential.key, { clearPrivateKey: e.target.checked, privateKey: '' })}
+                          />
+                        )}
+                      </div>
+                      <fieldset className={`${creds.full} ${creds.useWith}`}>
+                        <legend className={creds.useWithLegend}>Use with</legend>
+                        <Checkbox
+                          label="All services"
+                          checked={credential.allServices}
+                          // Choosing services starts from all of them ticked: untick the ones it isn't for.
+                          onChange={(e) => updateCredential(credential.key, { allServices: e.target.checked, serviceKeys: e.target.checked ? [] : draft.services.map((s) => s.key) })}
+                        />
+                        {!credential.allServices &&
+                          (draft.services.length === 0 ? (
+                            <p className={creds.hint}>Add services above, then choose which this credential is for.</p>
+                          ) : (
+                            <div className={creds.serviceChoices}>
+                              {draft.services.map((service) => (
+                                <Checkbox
+                                  key={service.key}
+                                  label={service.label || serviceTypes.get(service.type)?.label || service.type}
+                                  checked={credential.serviceKeys.includes(service.key)}
+                                  onChange={(e) =>
+                                    updateCredential(credential.key, {
+                                      serviceKeys: e.target.checked ? [...credential.serviceKeys, service.key] : credential.serviceKeys.filter((k) => k !== service.key),
+                                    })
+                                  }
+                                />
+                              ))}
+                            </div>
+                          ))}
+                        {field('serviceIndexes') && <p className={creds.error}>{field('serviceIndexes')}</p>}
+                      </fieldset>
+                      <TextArea
+                        className={creds.full}
+                        label="Notes"
+                        value={credential.notes}
+                        onChange={(e) => updateCredential(credential.key, { notes: e.target.value })}
+                        error={field('notes')}
+                        maxLength={2000}
+                        rows={1}
+                      />
+                    </div>
+                  </li>
+                )
+              })}
+            </ol>
+            <div>
+              <Button
+                variant="secondary"
+                size="sm"
                 onClick={() =>
-                  setDraft((d) => ({
-                    ...d,
-                    services: d.services.filter((s) => s.key !== service.key),
-                    credentials: d.credentials.map((c) => ({ ...c, serviceKeys: c.serviceKeys.filter((k) => k !== service.key) })),
-                  }))
+                  update({
+                    credentials: [
+                      ...draft.credentials,
+                      {
+                        key: newKey(),
+                        id: null,
+                        label: '',
+                        username: '',
+                        domain: '',
+                        notes: '',
+                        hasPassword: false,
+                        hasPrivateKey: false,
+                        password: '',
+                        clearPassword: false,
+                        privateKey: '',
+                        clearPrivateKey: false,
+                        allServices: true,
+                        serviceKeys: [],
+                      },
+                    ],
+                  })
                 }
               >
-                Remove service
-              </button>
-            </fieldset>
-          )
-        })}
-        {types.length === 0 ? (
-          <p className="nk-muted">No plugin provides a service type yet.</p>
-        ) : (
-          <AddService
-            types={types}
-            onAdd={(type) =>
-              update({
-                services: [
-                  ...draft.services,
-                  // A required switch shows as off, so it starts as off rather than unset.
-                  {
-                    key: newKey(),
-                    id: null,
-                    type: type.id,
-                    label: '',
-                    port: '',
-                    address: '',
-                    settings: Object.fromEntries(type.settings.filter((s) => s.kind === 'switch' && s.required).map((s) => [s.key, false])),
-                    available: true,
-                  },
-                ],
-              })
-            }
-          />
-        )}
-      </Section>
-
-      <Section title="Credentials">
-        {draft.credentials.map((credential, i) => (
-          <fieldset key={credential.key} className="nk-item">
-            <legend>{credential.label || credential.username || 'New credential'}</legend>
-            <div className="nk-row">
-              <label>
-                Label
-                <input value={credential.label} onChange={(e) => updateCredential(credential.key, { label: e.target.value })} />
-              </label>
-              <label>
-                User name
-                <input autoComplete="off" value={credential.username} onChange={(e) => updateCredential(credential.key, { username: e.target.value })} />
-                <FieldError errors={errors} field={`credentials[${i}].username`} />
-              </label>
-              <label>
-                Domain
-                <input autoComplete="off" value={credential.domain} onChange={(e) => updateCredential(credential.key, { domain: e.target.value })} />
-              </label>
+                Add credential
+              </Button>
             </div>
-            <Secret
-              label="Password"
-              has={credential.hasPassword}
-              value={credential.password}
-              clear={credential.clearPassword}
-              onChange={(password) => updateCredential(credential.key, { password, clearPassword: false })}
-              onClear={(clearPassword) => updateCredential(credential.key, { clearPassword, password: '' })}
-              error={<FieldError errors={errors} field={`credentials[${i}].password`} />}
-            />
-            <Secret
-              label="Private key"
-              multiline
-              has={credential.hasPrivateKey}
-              value={credential.privateKey}
-              clear={credential.clearPrivateKey}
-              onChange={(privateKey) => updateCredential(credential.key, { privateKey, clearPrivateKey: false })}
-              onClear={(clearPrivateKey) => updateCredential(credential.key, { clearPrivateKey, privateKey: '' })}
-              error={<FieldError errors={errors} field={`credentials[${i}].privateKey`} />}
-            />
-            <fieldset className="nk-inline">
-              <legend>Used with</legend>
-              <label>
-                <input type="checkbox" checked={credential.allServices} onChange={(e) => updateCredential(credential.key, { allServices: e.target.checked })} /> All
-                services
-              </label>
-              {!credential.allServices &&
-                draft.services.map((service) => (
-                  <label key={service.key}>
-                    <input
-                      type="checkbox"
-                      checked={credential.serviceKeys.includes(service.key)}
-                      onChange={(e) =>
-                        updateCredential(credential.key, {
-                          serviceKeys: e.target.checked ? [...credential.serviceKeys, service.key] : credential.serviceKeys.filter((k) => k !== service.key),
-                        })
-                      }
-                    />{' '}
-                    {service.label || serviceTypes.get(service.type)?.label || service.type}
-                  </label>
-                ))}
-              <FieldError errors={errors} field={`credentials[${i}].serviceIndexes`} />
-            </fieldset>
-            <label>
-              Notes
-              <textarea rows={2} value={credential.notes} onChange={(e) => updateCredential(credential.key, { notes: e.target.value })} />
-            </label>
-            <FieldError errors={errors} field={`credentials[${i}]`} />
-            <button type="button" className="nk-remove" onClick={() => update({ credentials: draft.credentials.filter((c) => c.key !== credential.key) })}>
-              Remove credential
-            </button>
           </fieldset>
-        ))}
-        <button
-          type="button"
-          onClick={() =>
-            update({
-              credentials: [
-                ...draft.credentials,
-                {
-                  key: newKey(),
-                  id: null,
-                  label: '',
-                  username: '',
-                  domain: '',
-                  notes: '',
-                  hasPassword: false,
-                  hasPrivateKey: false,
-                  password: '',
-                  clearPassword: false,
-                  privateKey: '',
-                  clearPrivateKey: false,
-                  allServices: true,
-                  serviceKeys: [],
-                },
-              ],
-            })
-          }
-        >
-          Add credential
-        </button>
-      </Section>
-
-      <Section title="Jump host">
-        <label>
-          Reach this host through
-          <select
-            value={draft.jump?.hostId ?? ''}
-            onChange={(e) => update({ jump: e.target.value ? { hostId: e.target.value, serviceId: '', credentialId: '' } : null })}
-          >
-            <option value="">No jump host</option>
-            {jumpHosts.map((h) => (
-              <option key={h.id} value={h.id}>
-                {h.name}
-              </option>
-            ))}
-            {draft.jump && !jumpHost && <option value={draft.jump.hostId}>A host you can’t see</option>}
-          </select>
-          <FieldError errors={errors} field="jump.hostId" />
-        </label>
-        {draft.jump && jumpHost && (
-          <div className="nk-row">
-            <label>
-              Its service
-              <select value={draft.jump.serviceId} onChange={(e) => update({ jump: { ...draft.jump!, serviceId: e.target.value } })}>
-                <option value="">Choose a service</option>
-                {jumpHost.services.map((s: HostService) => (
-                  <option key={s.id} value={s.id}>
-                    {serviceName(s, serviceTypes)}
-                  </option>
-                ))}
-              </select>
-              <FieldError errors={errors} field="jump.serviceId" />
-            </label>
-            <label>
-              Its credential
-              <select value={draft.jump.credentialId} onChange={(e) => update({ jump: { ...draft.jump!, credentialId: e.target.value } })}>
-                <option value="">Choose a credential</option>
-                {jumpHost.credentials.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {credentialName(c)}
-                  </option>
-                ))}
-              </select>
-              <FieldError errors={errors} field="jump.credentialId" />
-            </label>
-          </div>
-        )}
-      </Section>
-
-      <div className="nk-actions">
-        <button type="button" onClick={onCancel}>
-          Cancel
-        </button>
-        <button type="submit" className="nk-primary" disabled={busy}>
-          {host ? 'Save' : 'Create host'}
-        </button>
+        </section>
       </div>
+
+      <footer className={panel.footer}>
+        <Button variant="secondary" onClick={onCancel} disabled={busy}>
+          Cancel
+        </Button>
+        <Button type="submit" loading={busy}>
+          {host ? 'Save changes' : 'Create host'}
+        </Button>
+      </footer>
     </form>
   )
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="nk-section">
-      <h3>{title}</h3>
-      {children}
-    </section>
-  )
-}
-
-function AddService({ types, onAdd }: { types: ServiceTypeInfo[]; onAdd: (type: ServiceTypeInfo) => void }) {
-  const [typeId, setTypeId] = useState(types[0]?.id ?? '')
-  return (
-    <div className="nk-row nk-add">
-      <label>
-        Service type
-        <select value={typeId} onChange={(e) => setTypeId(e.target.value)}>
-          {types.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.label}
-            </option>
-          ))}
-        </select>
-      </label>
-      <button
-        type="button"
-        onClick={() => {
-          const type = types.find((t) => t.id === typeId)
-          if (type) {
-            onAdd(type)
-          }
-        }}
-      >
-        Add service
-      </button>
-    </div>
-  )
-}
-
-/** A write-only secret: the editor says whether one is set, and can replace or clear it. */
-function Secret(props: {
-  label: string
-  has: boolean
-  value: string
-  clear: boolean
-  multiline?: boolean
-  onChange: (value: string) => void
-  onClear: (clear: boolean) => void
-  error: ReactNode
-}) {
-  const placeholder = props.has ? (props.clear ? 'Will be cleared' : 'Set. Type to replace it') : 'Not set'
-  return (
-    <div className="nk-secret">
-      <label>
-        {props.label}
-        {props.multiline ? (
-          <textarea className="nk-mono" rows={3} placeholder={placeholder} value={props.value} onChange={(e) => props.onChange(e.target.value)} />
-        ) : (
-          <input type="password" autoComplete="new-password" placeholder={placeholder} value={props.value} onChange={(e) => props.onChange(e.target.value)} />
-        )}
-        {props.error}
-      </label>
-      {props.has && (
-        <label className="nk-check">
-          <input type="checkbox" checked={props.clear} onChange={(e) => props.onClear(e.target.checked)} /> Clear the {props.label.toLowerCase()}
-        </label>
-      )}
-    </div>
-  )
-}
-
-/** A service's settings, drawn from its type's schema (docs/architecture.md §7.4). */
+/** A service's settings, drawn from its type's schema (docs/architecture.md §7.4), as option lines under its row, as 1.x drew them. */
 export function SettingsFields({
   settings,
   values,
   errors,
   field,
+  position,
   onChange,
 }: {
   settings: ServiceSetting[]
   values: Record<string, unknown>
   errors: Errors
   field: string
+  /** Which service, for the fields' names: "service 1". */
+  position: string
   onChange: (values: Record<string, unknown>) => void
 }) {
-  if (settings.length === 0) {
-    return null
-  }
   const set = (key: string, value: unknown) => {
     const next = { ...values }
     if (value === null || value === '') {
@@ -613,65 +727,65 @@ export function SettingsFields({
     }
     onChange(next)
   }
-  return (
-    <div className="nk-settings">
-      {settings.map((setting) => {
-        const value = values[setting.key]
-        const error = <FieldError errors={errors} field={`${field}.${setting.key}`} />
-        switch (setting.kind) {
-          case 'switch':
-            return (
-              <label key={setting.key} className="nk-check">
-                <input type="checkbox" checked={value === true} onChange={(e) => set(setting.key, e.target.checked)} /> {setting.label}
-                {error}
-              </label>
-            )
-          case 'choice':
-            return (
-              <label key={setting.key}>
-                {setting.label}
-                <select value={typeof value === 'string' ? value : ''} required={setting.required} onChange={(e) => set(setting.key, e.target.value)}>
-                  <option value="">{setting.required ? 'Choose…' : 'Not set'}</option>
-                  {(setting.choices ?? []).map((choice) => (
-                    <option key={choice} value={choice}>
-                      {choice}
-                    </option>
-                  ))}
-                </select>
-                {error}
-              </label>
-            )
-          case 'number':
-            return (
-              <label key={setting.key}>
-                {setting.label}
-                <input
-                  type="number"
-                  step={1}
-                  min={setting.minimum ?? undefined}
-                  max={setting.maximum ?? undefined}
-                  required={setting.required}
-                  value={typeof value === 'number' ? value : ''}
-                  onChange={(e) => set(setting.key, e.target.value === '' ? null : Number(e.target.value))}
-                />
-                {error}
-              </label>
-            )
-          default:
-            return (
-              <label key={setting.key}>
-                {setting.label}
-                <input
-                  maxLength={setting.maxLength ?? undefined}
-                  required={setting.required}
-                  value={typeof value === 'string' ? value : ''}
-                  onChange={(e) => set(setting.key, e.target.value)}
-                />
-                {error}
-              </label>
-            )
-        }
-      })}
-    </div>
-  )
+  return settings.map((setting) => {
+    const value = values[setting.key]
+    const error = errors[`${field}.${setting.key}`]?.join(' ')
+    const name = `${setting.label} for ${position}`
+    const control = (() => {
+      switch (setting.kind) {
+        case 'switch':
+          return (
+            <label className={list.toolOption}>
+              <input type="checkbox" checked={value === true} onChange={(e) => set(setting.key, e.target.checked)} aria-label={name} />
+              {setting.label}
+            </label>
+          )
+        case 'choice':
+          return (
+            <select className={list.input} value={typeof value === 'string' ? value : ''} required={setting.required} onChange={(e) => set(setting.key, e.target.value)} aria-label={name}>
+              <option value="">{setting.required ? 'Choose…' : 'Not set'}</option>
+              {(setting.choices ?? []).map((choice) => (
+                <option key={choice} value={choice}>
+                  {choice}
+                </option>
+              ))}
+            </select>
+          )
+        case 'number':
+          return (
+            <input
+              className={list.input}
+              type="number"
+              step={1}
+              min={setting.minimum ?? undefined}
+              max={setting.maximum ?? undefined}
+              required={setting.required}
+              value={typeof value === 'number' ? value : ''}
+              onChange={(e) => set(setting.key, e.target.value === '' ? null : Number(e.target.value))}
+              aria-label={name}
+              aria-invalid={error ? true : undefined}
+            />
+          )
+        default:
+          return (
+            <input
+              className={list.input}
+              maxLength={setting.maxLength ?? undefined}
+              required={setting.required}
+              value={typeof value === 'string' ? value : ''}
+              onChange={(e) => set(setting.key, e.target.value)}
+              aria-label={name}
+              aria-invalid={error ? true : undefined}
+            />
+          )
+      }
+    })()
+    return (
+      <div key={setting.key} className={list.option}>
+        {setting.kind !== 'switch' && <span>{setting.label}</span>}
+        {control}
+        {error && <span className={list.error}>{error}</span>}
+      </div>
+    )
+  })
 }

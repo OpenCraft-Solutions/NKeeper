@@ -151,8 +151,38 @@ public sealed class AuthTests(PostgresFixture postgres) : IClassFixture<Postgres
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(Token));
-        Assert.Equal(["email", "id", "mustChangePassword", "roles", "userName"], json.RootElement.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
+        Assert.Equal(["colorSchemes", "email", "id", "mustChangePassword", "roles", "userName"], json.RootElement.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
         Assert.Equal("no-store", response.Headers.CacheControl?.ToString());
+        Assert.Equal("navy", json.RootElement.GetProperty("colorSchemes").GetProperty("active").GetString());
+    }
+
+    [Fact]
+    public async Task A_user_keeps_their_colour_schemes_on_their_account()
+    {
+        await using var server = new ServerScenario(await postgres.CreateDatabaseAsync());
+        using var client = await server.SignedInClientAsync();
+        var ocean = new { id = "custom-ocean", name = " Ocean ", background = "#001122", surface = "#112233", text = "#eeffff", accent = "#0088cc" };
+
+        using (var saved = await client.SendWithTokenAsync(HttpMethod.Put, "/api/account/color-schemes", new { active = "custom-ocean", custom = new[] { ocean } }))
+        {
+            Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+        }
+
+        using var me = JsonDocument.Parse(await client.GetStringAsync(new Uri("/api/auth/me", UriKind.Relative), Token));
+        var schemes = me.RootElement.GetProperty("colorSchemes");
+        Assert.Equal("custom-ocean", schemes.GetProperty("active").GetString());
+        Assert.Equal("Ocean", schemes.GetProperty("custom")[0].GetProperty("name").GetString());
+
+        // Only well-formed colours, and at most 20 schemes.
+        using (var bad = await client.SendWithTokenAsync(HttpMethod.Put, "/api/account/color-schemes", new { active = "navy", custom = new[] { ocean with { accent = "red" } } }))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, bad.StatusCode);
+        }
+
+        using (var many = await client.SendWithTokenAsync(HttpMethod.Put, "/api/account/color-schemes", new { active = "navy", custom = Enumerable.Range(0, 21).Select(i => ocean with { id = $"custom-{i}" }).ToArray() }))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, many.StatusCode);
+        }
     }
 
     [Fact]
