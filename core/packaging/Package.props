@@ -8,7 +8,9 @@
   <PropertyGroup>
     <NKeeperSdkVersionFile>$([MSBuild]::NormalizePath('$(MSBuildThisFileDirectory)', '..', 'backend', 'NKeeper.Abstractions', 'SdkVersion.cs'))</NKeeperSdkVersionFile>
     <NKeeperSdkVersion>$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText($(NKeeperSdkVersionFile))), 'Current\s*=\s*"([^"]+)"').Groups[1].Value)</NKeeperSdkVersion>
-    <Version>$(NKeeperSdkVersion)</Version>
+    <!-- The package version is the SDK's; NKeeperPackageVersion overrides it for the smoke test's throwaway packages. -->
+    <Version Condition="'$(NKeeperPackageVersion)' == ''">$(NKeeperSdkVersion)</Version>
+    <Version Condition="'$(NKeeperPackageVersion)' != ''">$(NKeeperPackageVersion)</Version>
     <Authors>OpenCraft-Solutions</Authors>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/OpenCraft-Solutions/NKeeper</PackageProjectUrl>
