@@ -19,7 +19,7 @@ concurrency:
 jobs:
   ubuntu:
     name: Native install (Ubuntu 24.04)
-    runs-on: ubuntu-24.04
+    runs-on: nkeeper-install
     timeout-minutes: 45
     env:
       ADMIN_PASSWORD: Install-Check-Passw0rd-1
