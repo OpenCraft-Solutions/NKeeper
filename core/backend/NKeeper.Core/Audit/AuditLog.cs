@@ -81,9 +81,12 @@ public sealed class AuditLog(
         }
         catch (Exception ex) when (ex is DbUpdateException or System.Data.Common.DbException or InvalidOperationException or TimeoutException or OperationCanceledException)
         {
-            logger.LogError(ex, "Couldn't record the audit event {Action} for {Actor}.", entry.Action, actor);
+            // The actor can be a name typed at a failed sign-in: no line breaks into the log, so it can't forge entries.
+            logger.LogError(ex, "Couldn't record the audit event {Action} for {Actor}.", entry.Action, OneLine(actor));
         }
     }
+
+    private static string OneLine(string value) => value.Replace("\r", string.Empty, StringComparison.Ordinal).Replace("\n", string.Empty, StringComparison.Ordinal);
 
     private static string Truncate(string value, int length) => value.Length > length ? value[..length] : value;
 }
