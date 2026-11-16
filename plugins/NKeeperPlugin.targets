@@ -53,8 +53,11 @@
     -->
     <MSBuild Projects="$(NKeeperRoot)tools/NKeeper.PluginTool/NKeeper.PluginTool.csproj" Targets="Restore" Properties="MSBuildRestoreSessionId=$([System.Guid]::NewGuid())" />
     <MSBuild Projects="$(NKeeperRoot)tools/NKeeper.PluginTool/NKeeper.PluginTool.csproj" Targets="Build" />
+    <!-- Plugins build in parallel: another one may create the key first, which is fine as long as it exists after. -->
     <Exec Condition="'$(NKeeperSigningKey)' == '$(NKeeperDevelopmentKeys)dev.private.pem' And !Exists('$(NKeeperSigningKey)')"
-          Command="dotnet &quot;$(NKeeperPluginTool)&quot; keygen --out &quot;$(NKeeperDevelopmentKeys).&quot; --name dev --comment &quot;local development key&quot;" />
+          Command="dotnet &quot;$(NKeeperPluginTool)&quot; keygen --out &quot;$(NKeeperDevelopmentKeys).&quot; --name dev --comment &quot;local development key&quot;"
+          IgnoreExitCode="true" IgnoreStandardErrorWarningFormat="true" />
+    <Error Condition="!Exists('$(NKeeperSigningKey)')" Text="The signing key $(NKeeperSigningKey) doesn't exist and couldn't be created." />
     <RemoveDir Directories="$(NKeeperPackStaging);$(NKeeperPacked)" />
     <ItemGroup>
       <!-- The plugin and the assemblies it brings: never the SDK, which is shared from the server (§7.1). -->
