@@ -1,0 +1,91 @@
+name: SDK release
+
+# A tag sdk-v<version> publishes the SDK packages (docs/architecture.md §9). The version must be SdkVersion.Current.
+on:
+  push:
+    tags: ['sdk-v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sdk-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build, test and publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    env:
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: global.json
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          registry-url: https://npm.pkg.github.com
+          scope: '@opencraft-solutions'
+
+      - name: Check the tag against the SDK version
+        run: |
+          version="${TAG#sdk-v}"
+          current=$(sed -nE 's/.*Current\s*=\s*"([^"]+)".*/\1/p' core/backend/NKeeper.Abstractions/SdkVersion.cs)
+          npm_version=$(node -p "require('./core/frontend/sdk/package.json').version")
+          if [ -z "$current" ] || [ "$version" != "$current" ] || [ "$version" != "$npm_version" ]; then
+            echo "Tag $TAG does not match SdkVersion.Current ($current) and the frontend SDK's version ($npm_version)." >&2
+            exit 1
+          fi
+
+      - name: Install npm packages (from the lock file)
+        run: npm ci
+
+      - name: Restore (locked)
+        run: dotnet restore NKeeper.slnx --locked-mode
+
+      - name: Build
+        run: dotnet build NKeeper.slnx --no-restore --configuration Release
+
+      - name: Test (backend)
+        run: dotnet test NKeeper.slnx --no-build --configuration Release
+
+      - name: Test (frontend)
+        run: |
+          npm run lint
+          npm run typecheck
+          npm test
+
+      - name: Pack the NuGet packages
+        run: |
+          for project in core/backend/NKeeper.Abstractions core/packaging/NKeeper.Plugin.Build testing/NKeeper.Testing; do
+            dotnet pack "$project" --configuration Release --output artifacts/packages
+          done
+
+      - name: Pack the frontend SDK
+        run: |
+          npm run build --workspace @nkeeper/sdk
+          npm pack core/frontend/sdk/dist --pack-destination artifacts/packages
+
+      - name: Push the NuGet packages to GitHub Packages
+        env:
+          GITHUB_PACKAGES_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          dotnet nuget push 'artifacts/packages/*.nupkg' \
+            --source https://nuget.pkg.github.com/OpenCraft-Solutions/index.json \
+            --api-key "$GITHUB_PACKAGES_TOKEN"
+
+      - name: Publish the frontend SDK to GitHub Packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm publish artifacts/packages/opencraft-solutions-nkeeper-sdk-*.tgz

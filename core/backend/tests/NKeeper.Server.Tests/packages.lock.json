@@ -545,14 +545,6 @@
         "resolved": "13.0.3",
         "contentHash": "HrC5BXdl00IP9zeV+0Z848QWPAoCr9P3bDEZguI+gkLcBKAOxix/tLEAAHC+UvDNPv4a2d18lOReHMOagPa+zQ=="
       },
-      "Npgsql": {
-        "type": "Transitive",
-        "resolved": "10.0.3",
-        "contentHash": "7nb5YzXuvWWJxB0J8DiyL3we+X4FOctZrt0fIBnucOIaIevFEEwGQVZKtiu9olXdlNAK1eNgqSral6r/jlhI4w==",
-        "dependencies": {
-          "Microsoft.Extensions.Logging.Abstractions": "10.0.0"
-        }
-      },
       "SharpZipLib": {
         "type": "Transitive",
         "resolved": "1.4.2",
@@ -653,7 +645,7 @@
       "nkeeper.connectivity.ssh": {
         "type": "Project",
         "dependencies": {
-          "NKeeper.Abstractions": "[2.0.0-dev, )",
+          "NKeeper.Abstractions": "[1.0.0, )",
           "NKeeper.Core": "[2.0.0-dev, )",
           "SSH.NET": "[2026.0.0, )"
         }
@@ -683,7 +675,7 @@
       "nkeeper.plugins.host": {
         "type": "Project",
         "dependencies": {
-          "NKeeper.Abstractions": "[2.0.0-dev, )",
+          "NKeeper.Abstractions": "[1.0.0, )",
           "NKeeper.Plugins.Packaging": "[2.0.0-dev, )"
         }
       },
@@ -693,7 +685,7 @@
       "nkeeper.server": {
         "type": "Project",
         "dependencies": {
-          "NKeeper.Abstractions": "[2.0.0-dev, )",
+          "NKeeper.Abstractions": "[1.0.0, )",
           "NKeeper.Connectivity.Ssh": "[2.0.0-dev, )",
           "NKeeper.Core": "[2.0.0-dev, )",
           "NKeeper.Core.Persistence": "[2.0.0-dev, )",
@@ -705,8 +697,7 @@
       "nkeeper.testing": {
         "type": "Project",
         "dependencies": {
-          "NKeeper.Core.Persistence": "[2.0.0-dev, )",
-          "NKeeper.Plugins.Packaging": "[2.0.0-dev, )",
+          "Npgsql": "[10.0.3, )",
           "Testcontainers.PostgreSql": "[4.14.0, )",
           "xunit.v3.extensibility.core": "[3.2.2, )"
         }
@@ -753,6 +744,15 @@
           "Microsoft.Extensions.Caching.Memory": "10.0.13",
           "Microsoft.Extensions.Configuration.Abstractions": "10.0.13",
           "Microsoft.Extensions.Logging": "10.0.13"
+        }
+      },
+      "Npgsql": {
+        "type": "CentralTransitive",
+        "requested": "[10.0.3, )",
+        "resolved": "10.0.3",
+        "contentHash": "7nb5YzXuvWWJxB0J8DiyL3we+X4FOctZrt0fIBnucOIaIevFEEwGQVZKtiu9olXdlNAK1eNgqSral6r/jlhI4w==",
+        "dependencies": {
+          "Microsoft.Extensions.Logging.Abstractions": "10.0.0"
         }
       },
       "Npgsql.EntityFrameworkCore.PostgreSQL": {
