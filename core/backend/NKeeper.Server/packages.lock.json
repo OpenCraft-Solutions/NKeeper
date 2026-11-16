@@ -17,18 +17,13 @@
         "resolved": "10.0.13",
         "contentHash": "zBx6VeEz/hkhlm0BJ2V+9xebUuDDIszcKvurJceQHuZPEXuXubrL6Lneo9VZiliRyJbQlB2oNKLkJXd3gHteQA=="
       },
-      "Npgsql": {
-        "type": "Transitive",
-        "resolved": "10.0.3",
-        "contentHash": "7nb5YzXuvWWJxB0J8DiyL3we+X4FOctZrt0fIBnucOIaIevFEEwGQVZKtiu9olXdlNAK1eNgqSral6r/jlhI4w=="
-      },
       "nkeeper.abstractions": {
         "type": "Project"
       },
       "nkeeper.connectivity.ssh": {
         "type": "Project",
         "dependencies": {
-          "NKeeper.Abstractions": "[2.0.0-dev, )",
+          "NKeeper.Abstractions": "[1.0.0, )",
           "NKeeper.Core": "[2.0.0-dev, )",
           "SSH.NET": "[2026.0.0, )"
         }
@@ -58,7 +53,7 @@
       "nkeeper.plugins.host": {
         "type": "Project",
         "dependencies": {
-          "NKeeper.Abstractions": "[2.0.0-dev, )",
+          "NKeeper.Abstractions": "[1.0.0, )",
           "NKeeper.Plugins.Packaging": "[2.0.0-dev, )"
         }
       },
@@ -101,6 +96,12 @@
         "dependencies": {
           "Microsoft.EntityFrameworkCore": "10.0.13"
         }
+      },
+      "Npgsql": {
+        "type": "CentralTransitive",
+        "requested": "[10.0.3, )",
+        "resolved": "10.0.3",
+        "contentHash": "7nb5YzXuvWWJxB0J8DiyL3we+X4FOctZrt0fIBnucOIaIevFEEwGQVZKtiu9olXdlNAK1eNgqSral6r/jlhI4w=="
       },
       "Npgsql.EntityFrameworkCore.PostgreSQL": {
         "type": "CentralTransitive",

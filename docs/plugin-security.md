@@ -165,7 +165,7 @@ The host refuses for reasons that concern the server rather than one package:
 
 ### 6.1 Keys
 
-- **Official key(s):** the public keys are embedded in the NKeeper server binary for each release. Built-in plugins (ssh, desktop, web…) are signed with them.
+- **Official key(s):** the public keys are embedded in the NKeeper server binary for each release. Built-in plugins (ssh, desktop, web…) are signed with them, by each plugin repository's release workflow; the private key is an organisation secret that only an approved release run can use (architecture.md §9).
 - **Additional keys:** one JSON file per key in `/etc/nkeeper/plugin-trust/`, root-owned:
   ```json
   { "keyId": "…", "publicKey": "<SPKI base64>", "allowedIds": ["com.example.*"], "notAfter": "2028-01-01", "comment": "Example Corp plugins" }
@@ -174,7 +174,7 @@ The host refuses for reasons that concern the server rather than one package:
   - **In `Development`** (and the test environment), a development key in the configured development trust directory may sign official, unprefixed IDs. This is the only way anything but an official key can sign them.
   - **In any other environment**, development keys are refused outright, whatever they claim to be allowed to sign (`untrusted_key`). So this authority can't exist in production.
   - The development trust directory is configurable only in `Development`. Production always uses `/etc/nkeeper/plugin-trust/`.
-- **Install keys:** made by the native installer when it builds the built-in plugins from source, before there are release-signed packages to install (architecture.md §8). They're marked `"install": true`.
+- **Install keys** (retired once the built-in plugins are released as signed packages, architecture.md §9): made by the native installer when it built the built-in plugins from source, before there were release-signed packages to install (architecture.md §8). They're marked `"install": true`.
   - The installer makes a fresh key pair and signs only the packages it has just built. Then it deletes the private key, so nothing can sign with the key again. The key never leaves the machine.
   - Its key file lists exact IDs only (`["ssh"]`): no patterns. It may sign those IDs, official ones included, in any environment.
   - Each install or upgrade makes a new key and replaces the previous key file, so packages signed with an earlier install key stop verifying (`untrusted_key`).

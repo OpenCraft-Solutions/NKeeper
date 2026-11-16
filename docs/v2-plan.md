@@ -584,6 +584,7 @@ Each phase ends in a state that builds, passes tests, **installs as a native Lin
   - **one connect failure.** SSH, HTTP and desktop connections each had an exception, a failure enum and (for two of them) a type for the identity a server presented. Core caught all three, and each new protocol would have added a fourth. They became one `ConnectException` with one `ConnectFailure` and one `PresentedIdentity`, matching the one trust prompt the shell already had.
 
   Everything else was used by at least one of the four plugins, or by core on their behalf. The credential broker's `DescribeAsync` has no plugin user yet, but stays: it's the one way to check a handle without connecting, which the broker's own tests rely on. The SDK froze as 1.0.0, and the built-in plugins declare `>=1.0.0 <2.0.0`.
+- *Plugin repositories (2026-11-16):* with the SDK frozen, each official plugin moves to a repository of its own, `NKeeper-Plugin-<Name>`, released on its own, so releasing one plugin isn't a release of NKeeper (architecture.md §9). Core publishes the SDK, the plugin build and the test helpers to GitHub Packages. Plugin releases are signed with the official key, so release signing moves forward from Phase 6, and the installer downloads pinned releases instead of building the plugins.
 
 ### Phase 4: Port the remaining features
 Each extension point is introduced with its first user (§4.2), and each plugin ports its 1.x tests. Suggested order, cheapest proofs first:

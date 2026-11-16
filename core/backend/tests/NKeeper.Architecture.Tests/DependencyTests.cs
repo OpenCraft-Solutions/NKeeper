@@ -31,7 +31,12 @@ public sealed class DependencyTests
             .Select(p => ((string?)p.Attribute("Path") ?? string.Empty).Replace('\\', '/'))
             .ToHashSet(StringComparer.Ordinal);
 
-        var missing = Repository.Projects.Where(p => !inSolution.Contains(p.RelativePath)).ToList();
+        // The package smoke test is built on purpose outside the solution, from packed packages only; CI runs it
+        // with its own script (testing/package-smoke/smoke.sh).
+        var missing = Repository.Projects
+            .Where(p => !p.RelativePath.StartsWith("testing/package-smoke/", StringComparison.Ordinal))
+            .Where(p => !inSolution.Contains(p.RelativePath))
+            .ToList();
 
         Assert.True(missing.Count == 0, $"Not in NKeeper.slnx, so CI wouldn't build or test them: {string.Join(", ", missing)}");
     }

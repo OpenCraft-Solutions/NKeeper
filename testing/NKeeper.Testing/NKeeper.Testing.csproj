@@ -1,30 +1,47 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- Shared test helpers: test plugin packages, a PostgreSQL fixture. Referenced only by test projects. -->
+  <!--
+    Shared test helpers: the test server, container fixtures (PostgreSQL, SSH, xrdp and guacd), test plugin packages.
+    Core's test projects reference it; it is also published as the NKeeper.Testing package, for plugin repositories'
+    tests (docs/architecture.md §9). The package carries a published server, the Packaging assembly this one is built
+    on, and the xrdp image's files, which its build targets copy beside the test assemblies.
+  -->
   <PropertyGroup>
-    <IsPackable>false</IsPackable>
+    <IsPackable>true</IsPackable>
+    <PackageId>NKeeper.Testing</PackageId>
+    <Description>Test helpers for NKeeper plugins: a real NKeeper server in its own process to load a plugin's .nkp into, and PostgreSQL, SSH, xrdp and guacd containers to test against.</Description>
+    <!-- NU5100: the published server's assemblies are meant to sit in server/, not to be referenced. -->
+    <NoWarn>$(NoWarn);NU5100</NoWarn>
+    <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);IncludeNKeeperTestServer;IncludeNKeeperPackaging</TargetsForTfmSpecificContentInPackage>
   </PropertyGroup>
 
+  <Import Project="../../core/packaging/Package.props" />
+
   <ItemGroup>
+    <PackageReference Include="Npgsql" />
     <PackageReference Include="Testcontainers.PostgreSql" />
     <PackageReference Include="xunit.v3.extensibility.core" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\core\backend\NKeeper.Plugins.Packaging\NKeeper.Plugins.Packaging.csproj" />
-    <ProjectReference Include="..\..\core\backend\NKeeper.Core.Persistence\NKeeper.Core.Persistence.csproj" />
+    <!-- Not dependencies of the package: its assembly goes in the package itself (IncludeNKeeperPackaging). -->
+    <ProjectReference Include="..\..\core\backend\NKeeper.Plugins.Packaging\NKeeper.Plugins.Packaging.csproj" PrivateAssets="all" />
+    <ProjectReference Include="..\..\core\backend\NKeeper.Core.Persistence\NKeeper.Core.Persistence.csproj" PrivateAssets="all" />
+    <!-- The server TestServer starts, from its build output here and from a published copy in the package. -->
+    <ProjectReference Include="..\..\core\backend\NKeeper.Server\NKeeper.Server.csproj" ReferenceOutputAssembly="false" PrivateAssets="all" />
     <!--
       Built first, but not referenced as an assembly: the test plugin must not be in the test process's
       trusted platform assemblies, or it would count as shared (§7.1) and load in the default context.
     -->
-    <ProjectReference Include="..\plugins\NKeeper.TestPlugins.Hello\NKeeper.TestPlugins.Hello.csproj" ReferenceOutputAssembly="false" />
-    <ProjectReference Include="..\..\plugins\ssh\backend\NKeeper.Plugins.Ssh.csproj" ReferenceOutputAssembly="false" />
-    <ProjectReference Include="..\..\plugins\wake-on-lan\backend\NKeeper.Plugins.WakeOnLan.csproj" ReferenceOutputAssembly="false" />
-    <ProjectReference Include="..\..\plugins\web\backend\NKeeper.Plugins.Web.csproj" ReferenceOutputAssembly="false" />
-    <ProjectReference Include="..\..\plugins\desktop\backend\NKeeper.Plugins.Desktop.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\plugins\NKeeper.TestPlugins.Hello\NKeeper.TestPlugins.Hello.csproj" ReferenceOutputAssembly="false" PrivateAssets="all" />
+    <ProjectReference Include="..\..\plugins\ssh\backend\NKeeper.Plugins.Ssh.csproj" ReferenceOutputAssembly="false" PrivateAssets="all" />
+    <ProjectReference Include="..\..\plugins\wake-on-lan\backend\NKeeper.Plugins.WakeOnLan.csproj" ReferenceOutputAssembly="false" PrivateAssets="all" />
+    <ProjectReference Include="..\..\plugins\web\backend\NKeeper.Plugins.Web.csproj" ReferenceOutputAssembly="false" PrivateAssets="all" />
+    <ProjectReference Include="..\..\plugins\desktop\backend\NKeeper.Plugins.Desktop.csproj" ReferenceOutputAssembly="false" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>
+    <AssemblyMetadata Include="NKeeperTestServer" Value="$(MSBuildThisFileDirectory)../../core/backend/NKeeper.Server/bin/$(Configuration)/$(TargetFramework)/NKeeper.Server.dll" />
     <AssemblyMetadata Include="HelloPluginPath" Value="$(MSBuildThisFileDirectory)../plugins/NKeeper.TestPlugins.Hello/bin/$(Configuration)/$(TargetFramework)/NKeeper.TestPlugins.Hello.dll" />
     <AssemblyMetadata Include="SshPluginPath" Value="$(MSBuildThisFileDirectory)../../plugins/ssh/backend/bin/$(Configuration)/$(TargetFramework)/NKeeper.Plugins.Ssh.dll" />
     <AssemblyMetadata Include="SshPluginManifest" Value="$(MSBuildThisFileDirectory)../../plugins/ssh/backend/nkeeper-plugin.json" />
@@ -42,6 +59,31 @@
   <ItemGroup>
     <!-- The xrdp image the desktop tests build, beside the test assemblies. -->
     <None Include="Rdp/xrdp/**" CopyToOutputDirectory="PreserveNewest" LinkBase="Rdp/xrdp" />
+    <!-- …and it ships in the package, for the build targets to copy the same way. -->
+    <None Include="Rdp/xrdp/**" Exclude="Rdp/xrdp/.gitattributes" Pack="true" PackagePath="build/Rdp/xrdp/%(RecursiveDir)" Visible="false" />
+    <None Include="build/**" Pack="true" PackagePath="build" />
   </ItemGroup>
+
+  <!-- A published, framework-dependent server, which the package's targets name for TestServer. -->
+  <Target Name="IncludeNKeeperTestServer">
+    <PropertyGroup>
+      <NKeeperServerDirectory>$(MSBuildProjectDirectory)/obj/server/</NKeeperServerDirectory>
+      <NKeeperServerProject>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '..', '..', 'core', 'backend', 'NKeeper.Server', 'NKeeper.Server.csproj'))</NKeeperServerProject>
+    </PropertyGroup>
+    <RemoveDir Directories="$(NKeeperServerDirectory)" />
+    <Exec Command="dotnet publish &quot;$(NKeeperServerProject)&quot; --configuration Release --output &quot;$(NKeeperServerDirectory).&quot; -p:UseAppHost=false -p:DebugType=None -p:DebugSymbols=false" />
+    <ItemGroup>
+      <NKeeperServerFile Include="$(NKeeperServerDirectory)**" />
+      <TfmSpecificPackageFile Include="@(NKeeperServerFile)" PackagePath="server/%(RecursiveDir)%(Filename)%(Extension)" />
+    </ItemGroup>
+  </Target>
+
+  <!-- The packaging library: its types appear in this assembly's API (test plugin packages). -->
+  <Target Name="IncludeNKeeperPackaging" DependsOnTargets="ResolveReferences">
+    <ItemGroup>
+      <NKeeperPackagingAssembly Include="@(ReferencePath)" Condition="'%(Filename)' == 'NKeeper.Plugins.Packaging'" />
+      <TfmSpecificPackageFile Include="@(NKeeperPackagingAssembly)" PackagePath="lib/$(TargetFramework)/" />
+    </ItemGroup>
+  </Target>
 
 </Project>

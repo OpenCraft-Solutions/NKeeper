@@ -1,0 +1,33 @@
+<Project>
+
+  <!--
+    What the four packages core publishes share (docs/architecture.md §9): NKeeper.Abstractions, NKeeper.Plugin.Build
+    and NKeeper.Testing, versioned with the SDK. The version is read from SdkVersion.Current, so there is one place to
+    change it. A project imports this file and sets IsPackable.
+  -->
+  <PropertyGroup>
+    <NKeeperSdkVersionFile>$([MSBuild]::NormalizePath('$(MSBuildThisFileDirectory)', '..', 'backend', 'NKeeper.Abstractions', 'SdkVersion.cs'))</NKeeperSdkVersionFile>
+    <NKeeperSdkVersion>$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText($(NKeeperSdkVersionFile))), 'Current\s*=\s*"([^"]+)"').Groups[1].Value)</NKeeperSdkVersion>
+    <!-- The package version is the SDK's; NKeeperPackageVersion overrides it for the smoke test's throwaway packages. -->
+    <Version Condition="'$(NKeeperPackageVersion)' == ''">$(NKeeperSdkVersion)</Version>
+    <Version Condition="'$(NKeeperPackageVersion)' != ''">$(NKeeperPackageVersion)</Version>
+    <Authors>OpenCraft-Solutions</Authors>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/OpenCraft-Solutions/NKeeper</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/OpenCraft-Solutions/NKeeper</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>nkeeper;plugin</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <!-- Local packing goes to the repository's artifacts folder; the release workflow and CI name their own. -->
+    <PackageOutputPath Condition="'$(PackageOutputPath)' == ''">$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', '..', '..', 'artifacts', 'packages'))</PackageOutputPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="/" Visible="false" />
+  </ItemGroup>
+
+  <Target Name="CheckNKeeperSdkVersion" BeforeTargets="Build;GenerateNuspec">
+    <Error Condition="'$(NKeeperSdkVersion)' == ''" Text="Couldn't read SdkVersion.Current from $(NKeeperSdkVersionFile)." />
+  </Target>
+
+</Project>

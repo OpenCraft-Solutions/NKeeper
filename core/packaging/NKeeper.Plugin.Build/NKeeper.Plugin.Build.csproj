@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    NKeeper.Plugin.Build: what a plugin's backend project imports to build, pack and sign the plugin
+    (docs/architecture.md §9). The package holds the build targets, which a PackageReference imports by itself, and the
+    packaging tool, published here, so nothing in it points into this repository's source.
+  -->
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>NKeeper.Plugin.Build</PackageId>
+    <Description>Builds, packs and signs an NKeeper plugin: its backend, its frontend (with npm) and the signed .nkp package, with a development key or the one a release workflow sets.</Description>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <DevelopmentDependency>true</DevelopmentDependency>
+    <!-- No assemblies in lib/: the package is build logic and a tool. -->
+    <NoWarn>$(NoWarn);NU5128</NoWarn>
+    <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);IncludeNKeeperPluginTool</TargetsForTfmSpecificContentInPackage>
+  </PropertyGroup>
+
+  <Import Project="../Package.props" />
+
+  <ItemGroup>
+    <!-- A plugin compiles against the SDK, so the package brings it, at the same version. -->
+    <ProjectReference Include="../../backend/NKeeper.Abstractions/NKeeper.Abstractions.csproj" />
+    <None Include="build/**" Pack="true" PackagePath="build" />
+  </ItemGroup>
+
+  <!-- The packaging tool, framework-dependent: it runs with `dotnet`, on the runtime the plugin builds with. -->
+  <Target Name="IncludeNKeeperPluginTool">
+    <PropertyGroup>
+      <NKeeperToolDirectory>$(MSBuildProjectDirectory)/obj/tool/</NKeeperToolDirectory>
+      <NKeeperToolProject>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '..', '..', '..', 'tools', 'NKeeper.PluginTool', 'NKeeper.PluginTool.csproj'))</NKeeperToolProject>
+    </PropertyGroup>
+    <RemoveDir Directories="$(NKeeperToolDirectory)" />
+    <Exec Command="dotnet publish &quot;$(NKeeperToolProject)&quot; --configuration Release --output &quot;$(NKeeperToolDirectory).&quot; -p:UseAppHost=false -p:DebugType=None -p:DebugSymbols=false -p:Version=$(NKeeperSdkVersion)" />
+    <ItemGroup>
+      <NKeeperToolFile Include="$(NKeeperToolDirectory)**" />
+      <TfmSpecificPackageFile Include="@(NKeeperToolFile)" PackagePath="tools/$(TargetFramework)/%(RecursiveDir)%(Filename)%(Extension)" />
+    </ItemGroup>
+  </Target>
+
+</Project>
