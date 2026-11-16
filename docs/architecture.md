@@ -839,7 +839,40 @@ It then upgrades in place and checks again.
 
 The rest of the installer is Phase 6: release-signed packages, guacd (D11), and install and upgrade tested end to end on both distribution families.
 
-## 9. Where to read more
+## 9. Plugin repositories and releases
+
+Each official plugin lives in a repository of its own and is released on its own, so releasing one plugin isn't a release of NKeeper. The SDK freeze at v1 (§4) is what makes this safe: a plugin builds against a published, versioned SDK, not against core's source.
+
+**Repositories,** all under `OpenCraft-Solutions`:
+- `NKeeper`, this one: the server, the shell, the SDK, the plugin tooling, the test helpers and the installer.
+- `NKeeper-Plugin-<Name>` for each official plugin: `NKeeper-Plugin-SSH`, `NKeeper-Plugin-Web`, `NKeeper-Plugin-Desktop`, `NKeeper-Plugin-WakeOnLan`, and each new one (`NKeeper-Plugin-Telnet`, `NKeeper-Plugin-iDRAC`…). A plugin's ID doesn't change when it moves.
+- A plugin repository holds the plugin's backend, frontend, manifest and tests, and its own CI and release workflow. It references nothing of core's but the published packages below.
+
+**What core publishes,** to GitHub Packages under `OpenCraft-Solutions`, versioned with the SDK (§4) and released from this repository by a tag, `sdk-v<version>`:
+- NuGet `NKeeper.Abstractions`: the backend SDK.
+- npm `@opencraft-solutions/nkeeper-sdk`: the frontend SDK. GitHub Packages names npm packages after their owner, so a plugin depends on it under its import name, `"@nkeeper/sdk": "npm:@opencraft-solutions/nkeeper-sdk@^1.0.0"`, and its code and the shell's import map keep `@nkeeper/sdk`.
+- NuGet `NKeeper.Plugin.Build`: what a plugin's project imports to build, pack and sign it. It's today's `plugins/NKeeperPlugin.targets` and the packaging tool (`nkeeper-plugin`), with no path into core's source.
+- NuGet `NKeeper.Testing`: the test server and fixtures (PostgreSQL, SSH, xrdp and guacd containers) that plugin tests run against, as core's own do.
+
+Restoring from GitHub Packages needs a GitHub token, even for public packages. A plugin's CI uses its workflow's own token; a developer uses their own.
+
+**Releasing a plugin.** A tag `v<version>` in a plugin repository runs its release workflow:
+1. it builds and tests the plugin;
+2. it packs `<id>-<version>.nkp` and signs it with the **official key** ([plugin-security.md §6.1](plugin-security.md#61-keys));
+3. it publishes a GitHub release with the package and its SHA-256.
+
+The official key's private half exists only as an organisation secret, available to release workflows alone, in a protected `release` environment that needs an owner's approval for each run. So no branch, pull request or ordinary workflow can sign with it, and every signed release is one an owner approved. Its public half is embedded in the server, as plugin-security.md §6.1 always said. A plugin's own version is its manifest's, and its SDK range says which servers it loads on.
+
+**The installer** gets the built-in plugins as releases, rather than building them:
+- `deploy/plugins.lock` lists them: each one's ID, version, release URL and SHA-256. A new plugin release reaches installs when the lock file is updated, which is an ordinary change to this repository, reviewed like any other.
+- `setup.sh` downloads each one, checks its SHA-256 against the lock file, and installs it. The server then verifies its official signature, as it does any package (plugin-security.md §5). A download that fails or doesn't match stops that plugin, not NKeeper.
+- Install keys (plugin-security.md §6.1) are retired: nothing is built and signed on the server any more.
+
+**Developing a plugin** still works against a local server: the plugin's build signs it with a development key, as core's build does today, and the server loads it in `Development` from `Plugins:Directory`.
+
+**Core's tests and CI** test core with core's own test plugins (`testing/plugins`). Each official plugin's tests move with it. The Install workflow installs from the lock file, so it tests the released plugins as users get them.
+
+## 10. Where to read more
 
 - [v2-plan.md](v2-plan.md): the audit of 1.x, the core/plugin boundary, the contribution catalogue, phases and decisions.
 - [plugin-authoring.md](plugin-authoring.md): writing a plugin against SDK v1, with ssh and wake-on-lan as worked examples.
