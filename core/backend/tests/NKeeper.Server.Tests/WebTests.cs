@@ -270,7 +270,7 @@ public sealed class WebTests(PostgresFixture postgres, SshServerFixture ssh) : I
             var port = 0;
             app.MapGet("/", (HttpContext context) =>
             {
-                context.Response.Cookies.Append("target", "1");
+                context.Response.Cookies.Append("target", "1", new CookieOptions { Secure = true, HttpOnly = true });
                 return Results.Text("hello from the target");
             });
             app.MapGet("/moved", (HttpContext context) => Results.Redirect($"https://127.0.0.1:{port}/"));
