@@ -1,0 +1,3 @@
+<Project>
+  <!-- Stops core's Directory.Build.props applying: this sample builds as a plugin repository would, outside core. -->
+</Project>

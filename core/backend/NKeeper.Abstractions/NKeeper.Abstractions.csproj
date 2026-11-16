@@ -6,8 +6,12 @@
     ASP.NET Core is a shared framework too, so its abstractions may appear in the contracts.
   -->
   <PropertyGroup>
-    <IsPackable>false</IsPackable>
+    <IsPackable>true</IsPackable>
+    <PackageId>NKeeper.Abstractions</PackageId>
+    <Description>The NKeeper plugin SDK for backends: the contracts a plugin implements and the services core gives it. A plugin references this package and nothing else of core's.</Description>
   </PropertyGroup>
+
+  <Import Project="../../packaging/Package.props" />
 
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />

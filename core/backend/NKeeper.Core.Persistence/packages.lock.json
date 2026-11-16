@@ -347,14 +347,6 @@
         "resolved": "13.0.4",
         "contentHash": "pdgNNMai3zv51W5aq268sujXUyx7SNdE2bj1wZcWjAQrKMFZV260lbqYop1d2GM67JI1huLRwxo9ZqnfF/lC6A=="
       },
-      "Npgsql": {
-        "type": "Transitive",
-        "resolved": "10.0.3",
-        "contentHash": "7nb5YzXuvWWJxB0J8DiyL3we+X4FOctZrt0fIBnucOIaIevFEEwGQVZKtiu9olXdlNAK1eNgqSral6r/jlhI4w==",
-        "dependencies": {
-          "Microsoft.Extensions.Logging.Abstractions": "10.0.0"
-        }
-      },
       "System.CodeDom": {
         "type": "Transitive",
         "resolved": "6.0.0",
@@ -427,7 +419,7 @@
       "nkeeper.plugins.host": {
         "type": "Project",
         "dependencies": {
-          "NKeeper.Abstractions": "[2.0.0-dev, )",
+          "NKeeper.Abstractions": "[1.0.0, )",
           "NKeeper.Plugins.Packaging": "[2.0.0-dev, )"
         }
       },
@@ -466,6 +458,15 @@
           "Microsoft.Extensions.Caching.Memory": "10.0.13",
           "Microsoft.Extensions.Configuration.Abstractions": "10.0.13",
           "Microsoft.Extensions.Logging": "10.0.13"
+        }
+      },
+      "Npgsql": {
+        "type": "CentralTransitive",
+        "requested": "[10.0.3, )",
+        "resolved": "10.0.3",
+        "contentHash": "7nb5YzXuvWWJxB0J8DiyL3we+X4FOctZrt0fIBnucOIaIevFEEwGQVZKtiu9olXdlNAK1eNgqSral6r/jlhI4w==",
+        "dependencies": {
+          "Microsoft.Extensions.Logging.Abstractions": "10.0.0"
         }
       }
     }

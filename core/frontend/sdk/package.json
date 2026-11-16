@@ -9,6 +9,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
+    "build": "vite build --config vite.build.config.ts && tsc -p tsconfig.build.json && node scripts/package.mjs",
     "typecheck": "tsc -b",
     "test": "vitest run"
   }
