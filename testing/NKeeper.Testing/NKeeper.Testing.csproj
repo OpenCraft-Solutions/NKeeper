@@ -39,4 +39,9 @@
     <AssemblyMetadata Include="WakeOnLanPluginManifest" Value="$(MSBuildThisFileDirectory)../../plugins/wake-on-lan/backend/nkeeper-plugin.json" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The xrdp image the desktop tests build, beside the test assemblies. -->
+    <None Include="Rdp/xrdp/**" CopyToOutputDirectory="PreserveNewest" LinkBase="Rdp/xrdp" />
+  </ItemGroup>
+
 </Project>

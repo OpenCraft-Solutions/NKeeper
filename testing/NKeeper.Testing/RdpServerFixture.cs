@@ -34,7 +34,8 @@ public sealed class RdpServerFixture : IAsyncLifetime
     {
         Port = FreeTcpPort();
         var image = new ImageFromDockerfileBuilder()
-            .WithDockerfileDirectory(CommonDirectoryPath.GetProjectDirectory(), "Rdp/xrdp")
+            // Copied beside the tests at build time: CI builds with deterministic paths, so the source tree can't be found from them.
+            .WithDockerfileDirectory(Path.Combine(AppContext.BaseDirectory, "Rdp", "xrdp"))
             .WithName("nkeeper-test-xrdp:latest")
             .WithCleanUp(false)
             .Build();
