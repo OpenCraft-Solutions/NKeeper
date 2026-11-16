@@ -21,9 +21,17 @@ public static class TestPlugins
     public static string HelloFrontend(string id = "hello") =>
         $"import {{ definePlugin }} from '@nkeeper/sdk'\nexport default definePlugin({{ id: '{id}' }})\n";
 
-    /// <summary>The compiled test plugin, read from its build output.</summary>
-    public static byte[] HelloAssembly { get; } = File.ReadAllBytes(
-        typeof(TestPlugins).Assembly.GetCustomAttributes<AssemblyMetadataAttribute>().Single(a => a.Key == "HelloPluginPath").Value!);
+    /// <summary>The compiled test plugin, embedded in this assembly when it's built.</summary>
+    public static byte[] HelloAssembly { get; } = ReadHelloAssembly();
+
+    private static byte[] ReadHelloAssembly()
+    {
+        using var stream = typeof(TestPlugins).Assembly.GetManifestResourceStream("NKeeper.TestPlugins.Hello.dll")
+            ?? throw new InvalidOperationException("The test plugin's assembly isn't embedded in NKeeper.Testing.");
+        using var copy = new MemoryStream();
+        stream.CopyTo(copy);
+        return copy.ToArray();
+    }
 
     /// <summary>A signed package of the test plugin.</summary>
     public static BuiltPackage Package(

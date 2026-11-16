@@ -1,5 +1,6 @@
 using System.Net.Http.Json;
 using System.Text.Json;
+using NKeeper.Plugins.Packaging;
 using NKeeper.Testing;
 
 namespace NKeeper.Smoke.Tests;
@@ -26,6 +27,15 @@ public sealed class SmokePluginTests(PostgresFixture postgres) : IClassFixture<P
         var ping = await client.Http.GetStringAsync(new Uri("/api/p/com.example.smoke/ping", UriKind.Relative), TestContext.Current.CancellationToken);
         Assert.EndsWith("/index.js", plugin.GetProperty("frontendEntry").GetString());
         Assert.Equal("pong from com.example.smoke 1.0.0", ping);
+    }
+
+    [Fact]
+    public void The_package_carries_the_test_plugin()
+    {
+        using var key = PluginSigningKey.Generate();
+        var package = TestPlugins.Package(key);
+        Assert.NotEmpty(TestPlugins.HelloAssembly);
+        Assert.NotEmpty(package.Content);
     }
 
     [Fact]
