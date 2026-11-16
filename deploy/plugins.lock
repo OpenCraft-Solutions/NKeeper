@@ -1,0 +1,7 @@
+# The built-in plugins the installer installs (docs/architecture.md §9): each one a signed release of its own
+# repository. One line per plugin, fields separated by spaces:
+#
+#   <id> <version> <release URL of the .nkp> <SHA-256 of the .nkp>
+#
+# setup.sh downloads each package and checks its SHA-256 against this file; the server then verifies its official
+# signature. A new plugin release reaches installs when this file is updated, reviewed like any other change.

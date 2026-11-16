@@ -792,8 +792,8 @@ RDP through guacd, as a proof that the SDK carries a third kind of session (v2-p
 3. **Builds NKeeper** from a copy of the checkout, so the checkout gets no root-owned files:
    - with the .NET 10 SDK and Node.js, fetched into `/var/cache/nkeeper-build`. Node.js is checked against its published SHA-256;
    - the server is published self-contained for the machine's architecture;
-   - the shell and the built-in plugins are built as in development.
-4. **Signs the built-in plugins** with a one-time install key (plugin-security.md §6.1), and deletes its private key.
+   - the shell is built as in development.
+4. **Fetches the built-in plugins** named in `deploy/plugins.lock`: each one a signed release of its own repository, checked against its SHA-256 there (§9). One that fails to download or doesn't match is skipped, with a warning. An earlier install's install key is removed (plugin-security.md §6.1).
 5. Lays out the files below, and writes the settings file (with `Origins:BaseDomain` when given `--web-domain`, §7.18), the key ring certificate (on a fresh install only), the systemd unit and nginx's site. nginx gets a self-signed certificate unless one is given (`--cert`, `--key`).
 6. **Starts NKeeper.** On a fresh install it creates the first administrator: the installer asks for a password, or generates one and prints it once. Once the server is up, it turns the bootstrap off and removes the password from the settings file.
 
@@ -802,7 +802,7 @@ RDP through guacd, as a proof that the SDK carries a third kind of session (v2-p
 | `/usr/lib/nkeeper/server/` | `root:root` `0755` | the server |
 | `/usr/lib/nkeeper/shell/` | `root:root` `0755` | the shell's files (`Frontend:Root`) |
 | `/usr/lib/nkeeper/plugins/` | `root:root` `0755` | the built-in plugin packages, `0644` |
-| `/etc/nkeeper/plugin-trust/` | `root:root` `0755` | the install key's public key file, `0644` |
+| `/etc/nkeeper/plugin-trust/` | `root:root` `0755` | keys an administrator adds for third-party plugins, `0644` (the official key is in the server) |
 | `/etc/nkeeper/nkeeper.env` | `root:root` `0600` | the settings, with the database password. systemd reads it as root |
 | `/etc/nkeeper/data-protection.pem` | `root:nkeeper` `0640` | the key ring certificate (§6.3). Back it up apart from the database |
 | `/etc/nkeeper/tls/` | `root:root` `0700` | nginx's certificate and key |
