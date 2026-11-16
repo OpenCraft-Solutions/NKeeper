@@ -89,6 +89,33 @@ jobs:
       - name: Build
         run: npm run build
 
+  # Packs the packages core publishes and builds a sample plugin from them alone, outside the solution, so a
+  # package that only works inside this repository fails here rather than in a plugin repository (architecture.md §9).
+  package-smoke:
+    name: Package smoke test
+    if: github.event_name == 'pull_request'
+    runs-on: [self-hosted, nkeeper]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: global.json
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install npm packages (from the lock file)
+        run: npm ci
+
+      - name: Pack the packages, then build and test the sample plugin from them
+        run: testing/package-smoke/smoke.sh
+
   dependency-review:
     name: Dependency review
     if: github.event_name == 'pull_request'
