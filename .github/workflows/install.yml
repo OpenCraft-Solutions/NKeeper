@@ -28,8 +28,12 @@ jobs:
         with:
           persist-credentials: false
 
+      # The runner is a plain Ubuntu, reset after every job: the job installs what it uses.
       - name: Check the installer
-        run: shellcheck deploy/setup.sh deploy/check-install.sh
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck >/dev/null
+          shellcheck deploy/setup.sh deploy/check-install.sh
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
