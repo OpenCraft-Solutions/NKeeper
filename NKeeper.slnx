@@ -8,6 +8,7 @@
     <Project Path="core/backend/NKeeper.Plugins.Host/NKeeper.Plugins.Host.csproj" />
     <Project Path="core/backend/NKeeper.Plugins.Packaging/NKeeper.Plugins.Packaging.csproj" />
     <Project Path="core/backend/NKeeper.Server/NKeeper.Server.csproj" />
+    <Project Path="core/packaging/NKeeper.Plugin.Build/NKeeper.Plugin.Build.csproj" />
   </Folder>
   <Folder Name="/core/tests/">
     <Project Path="core/backend/tests/NKeeper.Architecture.Tests/NKeeper.Architecture.Tests.csproj" />

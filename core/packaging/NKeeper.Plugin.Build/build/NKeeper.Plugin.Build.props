@@ -1,0 +1,10 @@
+<Project>
+
+  <!-- Imported early, so a plugin's project sees these before its own body. -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <!-- A plugin's NuGet dependencies travel in its package, so they must be in its output. -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+</Project>
