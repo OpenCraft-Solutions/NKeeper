@@ -71,6 +71,7 @@ public sealed class WakeOnLanPlugin : IPlugin
 - More contracts (plugin settings, scanners, reports) arrive with their first real users ([v2-plan.md §4.2](v2-plan.md#42-contribution-catalogue)), as additions to SDK v1.
 - **SDK versions.** A manifest declares the SDK range it supports, and a package outside the server's `SdkVersion` is refused. Within v0, an addition raises the patch number (`0.1.1` added the host scope, `0.1.2` service types, `0.1.3` the credential broker, `0.1.4` SSH connections, `0.1.5` stream sessions, `0.1.6` host actions, health probes and, in the frontend SDK, session views, `0.1.7` run actions and plugin audit events, `0.1.8` HTTPS connections, stateful sessions, session origins and, in the frontend SDK, `confirmTrust`, `0.1.9` desktop connections) and a breaking change raises the minor one.
 - **SDK v1 (1.0.0)** froze the SDK at the end of Phase 3, after a review of what Phases 1 and 2 used ([v2-plan.md, Phase 3](v2-plan.md#phase-3-freeze-sdk-v1)). From v1, a fix that changes no API raises the patch number, an addition the minor number, and a breaking change the major one, which the plan avoids. So a plugin built for `>=1.0.0 <2.0.0` keeps loading, and one that uses an addition declares the version that brought it. The frontend SDK, `@nkeeper/sdk`, is versioned with it. [plugin-authoring.md](plugin-authoring.md) shows how to write a plugin against it.
+- **Since v1:** `1.0.1` fixed `NKeeper.Testing`'s `TestPlugins` outside this repository; `1.1.0` adds Telnet connections (§7.22).
 
 ## 5. Frontend extension point
 
@@ -777,6 +778,33 @@ RDP through guacd, as a proof that the SDK carries a third kind of session (v2-p
 - **The session** relays Guacamole instructions between the browser and core's desktop connection (§7.20), as text frames: the browser's through `SendFromBrowserAsync`, so through core's allow-list.
 - `options`: the browser's size, DPI and time zone.
 - **Its frontend** is the `rdp` session view: Guacamole's own JavaScript client (`guacamole-common-js`, Apache 2.0), bundled with the plugin, drawing into the tab and scaling to it.
+
+### 7.22 Telnet connections
+
+Telnet has no sign-in of its own: the server asks for a user name and password in the terminal, and 1.x answered those prompts with the host's credential. Answering them means handling the password, which a plugin never sees (D13), so core opens Telnet connections, as it does SSH, HTTP and desktops (SDK 1.1).
+
+```csharp
+await using var telnet = await connectivity.OpenTelnetAsync(host, serviceId, handle, new TerminalSize(Columns: 120, Rows: 40));
+// telnet.Stream: the terminal's input and output; telnet.Resize(columns, rows)
+```
+
+- `IConnectivity.OpenTelnetAsync(host, serviceId, handle, size)`, for a service whose type uses Telnet:
+  - **the handle is optional.** Without one, the user signs in by typing at the server's prompts. With one, core checks it as for SSH (§7.9) and audits `credential.use`;
+  - connects over TCP to the service's effective address and port, through the host's jump host if it has one (§7.8, a forwarded port as for HTTP, §7.16), and gives up after 15 seconds. There is no server identity to check: Telnet has none;
+  - speaks the client side of the Telnet protocol (RFC 854), ported from 1.x's `TelnetProtocol`: it splits the server's output into terminal data and commands, agrees to send its terminal type (`xterm-256color`, RFC 1091) and window size (NAWS, RFC 1073), lets the server echo and suppress go-ahead, and declines every other option. It never offers options itself, so it can't start a negotiation loop, and a command split across reads is still understood;
+  - **signs in for the user, as 1.x did**, when the handle has a credential: it answers the first login prompt (`login:`, `username:`, `user:`) with the user name and the first password prompt (`password:`, `passcode:`) with the password, each once, followed by a carriage return, and only in the first 30 seconds after connecting. Prompts are matched on the end of what the server has sent so far. After that, or once both are answered, nothing more is typed for the user;
+  - returns an `ITelnetConnection`: `Stream`, the terminal's input (written as typed; core escapes it for Telnet) and its output (terminal data only), and `Resize(columns, rows)`, which tells the server the new size when it agreed to NAWS. A size runs from 1 × 1 to 1000 × 1000.
+- **Failures:** `ConnectException` with `Unreachable`, `TimedOut` or `JumpHostUnavailable`, and `CredentialDeniedException` for a handle that isn't valid here.
+- **Telnet isn't encrypted.** Everything crosses the network between NKeeper and the host in the clear, the password core types included. Core logs a warning with each connection it signs in on, and the `telnet` plugin's service type says so (§7.23).
+
+### 7.23 The `telnet` plugin
+
+Terminals over Telnet, ported from 1.x's `Telnet/`, in its own repository, `NKeeper-Plugin-Telnet` (§9). It is the SSH plugin's terminal (§7.11) on core's Telnet connection (§7.22):
+- **Service type** `telnet`, port 23, a TCP probe (§7.13), described as unencrypted.
+- **Session type** `telnet`, "Telnet", a stream session (§7.10) on `telnet` services, through jump hosts too, with or without a credential.
+- **Host action** `telnet.terminal`, "Telnet", with an optional credential.
+- **The session** relays the terminal's bytes and `resize` messages between the browser and the connection, as the SSH plugin does.
+- **Its frontend** is the terminal view, as the SSH plugin's.
 
 ## 8. The native install
 
