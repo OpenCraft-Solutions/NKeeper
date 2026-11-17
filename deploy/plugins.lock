@@ -5,3 +5,7 @@
 #
 # setup.sh downloads each package and checks its SHA-256 against this file; the server then verifies its official
 # signature. A new plugin release reaches installs when this file is updated, reviewed like any other change.
+ssh 1.0.0 https://github.com/OpenCraft-Solutions/NKeeper-Plugin-SSH/releases/download/v1.0.0/ssh-1.0.0.nkp f8b43ee0181feba84f5281a55f3589676a8b8df78a1bc311c15777e30d63e113
+web 1.0.1 https://github.com/OpenCraft-Solutions/NKeeper-Plugin-Web/releases/download/v1.0.1/web-1.0.1.nkp 5094d5a6ddea848ee4819726a68e4fa607409fd1ef048b25c4b3216647b15f55
+desktop 1.0.0 https://github.com/OpenCraft-Solutions/NKeeper-Plugin-Desktop/releases/download/v1.0.0/desktop-1.0.0.nkp ad6845246feea11f6341cc276d04b9bfc236f3b3640cdb5d1fce3caa821df7e8
+wake-on-lan 1.0.0 https://github.com/OpenCraft-Solutions/NKeeper-Plugin-WakeOnLan/releases/download/v1.0.0/wake-on-lan-1.0.0.nkp 2d0487c979b285885e81fe3161313e39252bddf002752fc47744b638ab34b49f
