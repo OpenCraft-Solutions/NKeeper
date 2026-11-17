@@ -213,22 +213,7 @@ fetch_toolchain() {
     ok "Ready."
 }
 
-# The built-in plugins: every plugins/<id>/backend project, with the ID its manifest declares.
-plugin_projects=() plugin_ids=()
-
-find_plugins() {
-    local manifest id
-    for manifest in "$REPO"/plugins/*/backend/nkeeper-plugin.json; do
-        [ -f "$manifest" ] || continue
-        id=$(sed -n 's/^[[:space:]]*"id":[[:space:]]*"\([^"]*\)".*/\1/p' "$manifest" | head -n 1)
-        [ -n "$id" ] || die "No plugin ID in $manifest."
-        plugin_ids+=("$id")
-        plugin_projects+=("$(dirname "$manifest")")
-    done
-}
-
 build() {
-    find_plugins
     step "Building NKeeper (a few minutes the first time)"
     # From a copy, so the checkout gets no root-owned build output.
     build_dir=$CACHE/src
@@ -240,30 +225,34 @@ build() {
     (cd "$build_dir" && npm ci --no-audit --no-fund --loglevel=error && npm run build --silent) >/dev/null
     "$dotnet_bin" publish "$build_dir/core/backend/NKeeper.Server/NKeeper.Server.csproj" \
         -c Release -r "$rid" --self-contained -o "$build_dir/out/server" -p:DebugType=none >/dev/null
+    ok "Built."
+}
 
-    # The built-in plugins, signed with a one-time install key (docs/plugin-security.md §6.1), whose private
-    # key is deleted as soon as they're signed.
-    local keys allow=() id project package
-    keys=$(mktemp -d)
-    chmod 700 "$keys"
-    "$dotnet_bin" build "$build_dir/tools/NKeeper.PluginTool/NKeeper.PluginTool.csproj" -c Release >/dev/null
-    for id in "${plugin_ids[@]}"; do allow+=(--allow "$id"); done
-    "$dotnet_bin" "$build_dir/tools/NKeeper.PluginTool/bin/Release/net10.0/nkeeper-plugin.dll" keygen --install \
-        --out "$keys" --name install "${allow[@]}" --comment "install key, $(date -u +%Y-%m-%d)" >/dev/null
+# The built-in plugins are releases of their own repositories, signed with the official key (docs/architecture.md
+# §9): deploy/plugins.lock names each one's package and SHA-256. A download that fails or doesn't match skips that
+# plugin, not NKeeper; the server verifies each package's signature when it loads it.
+fetch_plugins() {
+    step "Fetching the built-in plugins"
+    local id version url sha rest file fetched=() skipped=()
     mkdir -p "$build_dir/out/plugins"
-    for project in "${plugin_projects[@]}"; do
-        project=$build_dir/${project#"$REPO"/}
-        "$dotnet_bin" build "$project" -c Release -p:NKeeperSigningKey="$keys/install.private.pem" \
-            -p:NKeeperPluginPackages="$build_dir/out/plugins/" >/dev/null
-    done
-    rm -f "$keys/install.private.pem"
-    for package in "$build_dir"/out/plugins/*.nkp; do
-        "$dotnet_bin" "$build_dir/tools/NKeeper.PluginTool/bin/Release/net10.0/nkeeper-plugin.dll" verify "$package" \
-            --trust "$keys" >/dev/null || die "$(basename "$package") didn't verify against the install key."
-    done
-    mv "$keys/install.trust.json" "$build_dir/out/install.json"
-    rm -rf "$keys"
-    ok "Built ${#plugin_ids[@]} built-in plugin(s): ${plugin_ids[*]}."
+    while read -r id version url sha rest; do
+        case "$id" in ''|'#'*) continue ;; esac
+        if [ -z "$sha" ] || [ -n "$rest" ] || [[ ! "$sha" =~ ^[0-9a-f]{64}$ ]] || [[ "$url" != https://* ]]; then
+            die "deploy/plugins.lock has a malformed line for '$id'."
+        fi
+        file=$build_dir/out/plugins/$id-$version.nkp
+        if ! curl -fsSL --proto '=https' --tlsv1.2 --retry 3 "$url" -o "$file.part"; then
+            warn "Couldn't download the $id plugin $version; NKeeper is installed without it."
+            rm -f "$file.part"; skipped+=("$id"); continue
+        fi
+        if ! echo "$sha  $file.part" | sha256sum -c --quiet - >/dev/null 2>&1; then
+            warn "The $id plugin $version doesn't match its SHA-256 in deploy/plugins.lock; NKeeper is installed without it."
+            rm -f "$file.part"; skipped+=("$id"); continue
+        fi
+        mv "$file.part" "$file"
+        fetched+=("$id")
+    done <"$REPO/deploy/plugins.lock"
+    ok "Fetched ${#fetched[@]} built-in plugin(s)${fetched[*]:+: ${fetched[*]}}${skipped[*]:+; skipped: ${skipped[*]}}."
 }
 
 # --- Files ---------------------------------------------------------------------------------------
@@ -291,8 +280,8 @@ install_files() {
     replace_dir "$build_dir/core/frontend/app/dist" "$PREFIX/shell"
     replace_dir "$build_dir/out/plugins" "$PREFIX/plugins"
     find "$PREFIX/plugins" -type f -exec chmod 0644 {} +
-    # The previous install key goes, so packages it signed stop verifying.
-    install -o root -g root -m 0644 "$build_dir/out/install.json" "$TRUST/install.json"
+    # Install keys are retired (docs/plugin-security.md §6.1): an earlier install's goes, so what it signed stops verifying.
+    rm -f "$TRUST/install.json"
 
     if selinux; then
         semanage fcontext -a -t bin_t "$PREFIX/server/NKeeper\.Server" 2>/dev/null ||
@@ -618,6 +607,7 @@ do_install() {
     setup_postgres
     fetch_toolchain
     build
+    fetch_plugins
     install_files
     install_guacd
     configure
