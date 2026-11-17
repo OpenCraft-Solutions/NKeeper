@@ -50,7 +50,7 @@ export function terminalPlugin(overrides: Partial<PluginStatus> = {}): PluginSta
 }
 
 export function service(overrides: Partial<HostService> = {}): HostService {
-  return { id: 's1', type: 'term', label: null, port: null, address: null, settings: {}, available: true, ...overrides }
+  return { id: 's1', type: 'term', label: null, port: null, address: null, settings: {}, available: true, disabledTools: [], ...overrides }
 }
 
 export function credential(overrides: Partial<HostCredential> = {}): HostCredential {

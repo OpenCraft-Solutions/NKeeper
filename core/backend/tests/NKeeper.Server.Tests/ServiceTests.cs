@@ -55,6 +55,8 @@ public sealed class ServiceTests(PostgresFixture postgres) : IClassFixture<Postg
     [InlineData("""[{ "type": "hello", "port": 65536, "settings": { "greeting": "hi" } }]""", "services[0].port")]
     [InlineData("""[{ "type": "hello", "address": "not an address", "settings": { "greeting": "hi" } }]""", "services[0].address")]
     [InlineData("""[{ "id": "00000000-0000-0000-0000-000000000001", "type": "hello", "settings": { "greeting": "hi" } }]""", "services[0].id")]
+    [InlineData("""[{ "type": "hello", "settings": { "greeting": "hi" }, "disabledTools": ["Not An Id"] }]""", "services[0].disabledTools")]
+    [InlineData("""[{ "type": "hello", "settings": { "greeting": "hi" }, "disabledTools": [null] }]""", "services[0].disabledTools")]
     public async Task An_invalid_service_reports_the_field(string services, string field)
     {
         await using var server = await ServerWithHelloAsync();
@@ -78,6 +80,26 @@ public sealed class ServiceTests(PostgresFixture postgres) : IClassFixture<Postg
 
         Assert.Equal(HttpStatusCode.Created, fifty.StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, more.StatusCode);
+    }
+
+    [Fact]
+    public async Task A_service_keeps_the_tools_it_turns_off_without_repeats_and_none_by_default()
+    {
+        await using var server = await ServerWithHelloAsync();
+        using var admin = await server.SignedInClientAsync();
+
+        // Not checked against the loaded plugins, so a tool of a plugin that's disabled for now stays off.
+        var host = await CreateHostAsync(admin, """
+            [{ "type": "hello", "settings": { "greeting": "a" }, "disabledTools": ["hello", "linux-journal", "hello"] }, { "type": "hello", "settings": { "greeting": "b" } }]
+            """);
+
+        var services = host.GetProperty("services").EnumerateArray().ToList();
+        Assert.Equal(["hello", "linux-journal"], services[0].GetProperty("disabledTools").EnumerateArray().Select(t => t.GetString()));
+        Assert.Empty(services[1].GetProperty("disabledTools").EnumerateArray());
+
+        var tooMany = string.Join(", ", Enumerable.Range(0, 33).Select(i => $"\"tool-{i}\""));
+        using var refused = await SendRawAsync(admin, HttpMethod.Post, "/api/hosts", HostBody($$"""[{ "type": "hello", "settings": { "greeting": "a" }, "disabledTools": [{{tooMany}}] }]"""));
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
     }
 
     [Fact]

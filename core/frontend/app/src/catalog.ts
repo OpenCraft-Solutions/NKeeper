@@ -92,7 +92,7 @@ export function connectMenu(host: Host, catalog: Catalog): ConnectGroup[] {
       continue
     }
     host.services.forEach((service, index) => {
-      if (!service.available || !resolved.serviceTypes.includes(service.type)) {
+      if (!service.available || !resolved.serviceTypes.includes(service.type) || (resolved.target.kind === 'session' && service.disabledTools.includes(resolved.target.sessionType))) {
         return
       }
       const base = { target: resolved.target, serviceId: service.id }

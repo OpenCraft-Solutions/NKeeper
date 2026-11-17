@@ -90,6 +90,14 @@ describe('the Connect menu', () => {
     expect(connectMenu(host({ services: [service()], jump: { hostId: 'j', serviceId: 's', credentialId: 'c' } }), noJump).map((g) => g.actionLabel)).toEqual(['Reboot'])
   })
 
+  it('leaves out a tool the service turns off, on that service only', () => {
+    const h = host({ services: [service({ disabledTools: ['term'] }), service({ id: 's2' })] })
+    const groups = connectMenu(h, catalog)
+    expect(groups.filter((g) => g.actionLabel === 'Terminal').map((g) => g.key)).toEqual(['term.open/s2'])
+    // A run action isn't a tool, so turning off the session type leaves it.
+    expect(groups.filter((g) => g.actionLabel === 'Reboot').map((g) => g.key)).toEqual(['term.reboot/s1', 'term.reboot/s2'])
+  })
+
   it('takes a plugin’s views only for its own session types', () => {
     const other = buildCatalog(
       [terminalPlugin(), terminalPlugin({ id: 'sneaky', sessionTypes: [], hostActions: [], serviceTypes: [] })],

@@ -69,6 +69,8 @@ export interface HostService {
   settings: Record<string, unknown>
   /** Whether an enabled plugin provides the type. */
   available: boolean
+  /** The session types (tools) this service turns off (docs/architecture.md §7.4). */
+  disabledTools: string[]
 }
 
 export interface HostCredential {

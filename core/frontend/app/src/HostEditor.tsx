@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { api, ApiError } from '@nkeeper/sdk'
 import { credentialName, serviceName } from './hosts'
-import type { Host, HostCredential, HostService, ServiceSetting, ServiceTypeInfo } from './types'
+import type { Host, HostCredential, HostService, ServiceSetting, ServiceTypeInfo, SessionTypeInfo } from './types'
 import { Alert } from './ui/Alert'
 import { Button } from './ui/Button'
 import { Checkbox } from './ui/Checkbox'
@@ -27,6 +27,7 @@ interface ServiceDraft {
   address: string
   settings: Record<string, unknown>
   available: boolean
+  disabledTools: string[]
 }
 
 interface CredentialDraft {
@@ -74,6 +75,7 @@ function draftOf(host: Host | null): Draft {
       address: s.address ?? '',
       settings: { ...s.settings },
       available: s.available,
+      disabledTools: [...s.disabledTools],
     }),
   )
   return {
@@ -125,6 +127,7 @@ function requestOf(draft: Draft, version: number | null) {
       port: s.port.trim() === '' ? null : Number(s.port),
       address: orNull(s.address),
       settings: s.settings,
+      disabledTools: s.disabledTools,
     })),
     credentials: draft.credentials.map((c) => ({
       id: c.id,
@@ -151,13 +154,15 @@ export interface HostEditorProps {
   /** Every host the user can see, for the jump host. */
   hosts: Host[]
   serviceTypes: Map<string, ServiceTypeInfo>
+  /** The tools that can be turned off on each service. */
+  sessionTypes: Map<string, SessionTypeInfo>
   onSaved: (host: Host) => void
   onCancel: () => void
   /** Reloads the host after a conflict. */
   onReload: () => void
 }
 
-export function HostEditor({ host, hosts, serviceTypes, onSaved, onCancel, onReload }: HostEditorProps) {
+export function HostEditor({ host, hosts, serviceTypes, sessionTypes, onSaved, onCancel, onReload }: HostEditorProps) {
   const [draft, setDraft] = useState<Draft>(() => draftOf(host))
   const [errors, setErrors] = useState<Errors>({})
   const [message, setMessage] = useState<string | null>(null)
@@ -233,6 +238,7 @@ export function HostEditor({ host, hosts, serviceTypes, onSaved, onCancel, onRel
     // A required switch shows as off, so it starts as off rather than unset.
     settings: Object.fromEntries(type.settings.filter((s) => s.kind === 'switch' && s.required).map((s) => [s.key, false])),
     available: true,
+    disabledTools: [],
   })
 
   return (
@@ -442,7 +448,7 @@ export function HostEditor({ host, hosts, serviceTypes, onSaved, onCancel, onRel
                       onChange={(e) => {
                         const next = serviceTypes.get(e.target.value)
                         if (next) {
-                          updateService(service.key, { type: next.id, settings: newService(next).settings })
+                          updateService(service.key, { type: next.id, settings: newService(next).settings, disabledTools: [] })
                         }
                       }}
                       aria-label={`Type for ${position}`}
@@ -507,6 +513,12 @@ export function HostEditor({ host, hosts, serviceTypes, onSaved, onCancel, onRel
                           field={`services[${i}].settings`}
                           position={position}
                           onChange={(settings) => updateService(service.key, { settings })}
+                        />
+                        <ToolsField
+                          tools={[...sessionTypes.values()].filter((t) => t.serviceTypes.includes(service.type))}
+                          disabled={service.disabledTools}
+                          position={position}
+                          onChange={(disabledTools) => updateService(service.key, { disabledTools })}
                         />
                       </>
                     )}
@@ -698,6 +710,32 @@ export function HostEditor({ host, hosts, serviceTypes, onSaved, onCancel, onRel
         </Button>
       </footer>
     </form>
+  )
+}
+
+/**
+ * The tools a service offers, each on or off (docs/architecture.md §7.4), as 1.x's service tools: an SSH service on a
+ * Windows host turns off Journal and SELinux, say. Only when there's a choice: a type with one tool doesn't show it.
+ */
+function ToolsField({ tools, disabled, position, onChange }: { tools: SessionTypeInfo[]; disabled: string[]; position: string; onChange: (disabled: string[]) => void }) {
+  if (tools.length < 2) {
+    return null
+  }
+  return (
+    <div className={list.option}>
+      <span>Tools</span>
+      {tools.map((tool) => (
+        <label key={tool.id} className={list.toolOption}>
+          <input
+            type="checkbox"
+            checked={!disabled.includes(tool.id)}
+            onChange={(e) => onChange(e.target.checked ? disabled.filter((id) => id !== tool.id) : [...disabled, tool.id])}
+            aria-label={`${tool.label} for ${position}`}
+          />
+          {tool.label}
+        </label>
+      ))}
+    </div>
   )
 }
 
