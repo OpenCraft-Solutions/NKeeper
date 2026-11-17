@@ -475,7 +475,11 @@ public sealed class PluginHost(
                     continue;
                 }
 
-                if (comparison > 0 && v.KeyId != record.KeyId && !reSigned)
+                // §8: a built-in plugin signed by an install key (or a key no longer trusted, a retired install key) moves to
+                // the official key as an ordinary update. Install keys only ever stood in for it.
+                var fromInstallToOfficial = kind == TrustedKeyKind.Official && record.BuiltIn && trust.Find(record.KeyId) is null or { Kind: TrustedKeyKind.Install };
+
+                if (comparison > 0 && v.KeyId != record.KeyId && !reSigned && !fromInstallToOfficial)
                 {
                     result.Add(new PluginStatus(manifest.Id, version, PluginState.AwaitingSignerApproval, null, $"Signed by key {v.KeyId}; version {record.Version} was signed by {record.KeyId}. An administrator must approve the new signer.", v.PackageSha256, v.KeyId, builtIn, fileName));
                     result.Alert($"Plugin {manifest.Id} {version} is signed by a new key and awaits approval.");

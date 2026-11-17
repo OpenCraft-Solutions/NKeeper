@@ -260,6 +260,8 @@ At every start:
 
 **Packages signed by an install key** (§6.1) are rebuilt and re-signed with a new key on every install, often at the same version. So for them, the first two cases differ: a package signed by the trust directory's current install key loads, and updates the record, whether its hash or its key changed. That's audited as `plugin.updated`. A downgrade is still refused. This doesn't weaken tamper detection: only root can write the plugin and trust directories, and a package signed with any earlier install key no longer verifies.
 
+**From an install key to the official key.** Installs made before the built-in plugins were released (architecture.md §9) signed them with install keys, and the installer now retires those keys. A newer version of a built-in plugin, signed by an official key, replaces one signed by an install key, or by a key that's no longer trusted at all (a retired install key), as an ordinary update, audited as `plugin.updated` with both keys. An install key only ever stood in for the official key, and the official key is in the server binary root installed, so the move gives the package no authority it didn't have. It works in that direction only: any other change of signer still awaits an administrator's approval.
+
 Until administrators exist (Phase 1), nothing can enable a plugin or approve a signer, so only built-in plugins load. The `allow-downgrade` command arrives with the rest of the command line in Phase 6; until then a downgrade is always refused.
 
 Removing a package from the directory keeps the plugin's data. The plugin shows as missing until its package returns.
