@@ -422,7 +422,20 @@ Every connection opened is audited as `credential.use`: the host, service, plugi
 - `RunAsync(command)`: runs a command, and returns its exit status, output and error output;
 - `OpenShellAsync(terminal)`: an interactive shell with a terminal type and size, as a stream, which can be resized.
 
-SFTP and port forwards join with their first users. The connection doesn't need its handle once it's open; the plugin disposes it, which also closes its tunnel. Closing connections when the user's access changes arrives with sessions, in step 7.
+The connection doesn't need its handle once it's open; the plugin disposes it, which also closes its tunnel. Closing connections when the user's access changes arrives with sessions, in step 7.
+
+**Commands that stream (SDK 1.3).** `ISshConnection.StartAsync(command)` starts a command and returns at once, for output that never ends on its own, such as `journalctl --follow` (the `linux` plugin, §7.25):
+- `Output` is the command's standard output, read as it comes; it ends when the command does;
+- `WaitAsync` waits for the command to end and returns its exit status and error output (at most 64 KB of it);
+- disposing it before then stops the command: core closes its channel, which ends the remote process, even under `sudo`. The connection stays open.
+
+**SFTP (SDK 1.3).** `IConnectivity.OpenSftpAsync(host, serviceId, handle)` opens an SFTP connection to an SSH service, with every check of `OpenSshAsync`: the handle, the jump host, the server's key, the same sign-in and the same failures. It's audited as `credential.use`, as `sftp to service …`. A plugin gets an `ISftpConnection`, not SSH.NET's client:
+- `HomeDirectory`: where the login starts, as an absolute path;
+- `ListAsync(path)`: a folder's entries, without `.` and `..`, and `GetAsync(path)`: one entry. An entry has a name, an absolute path, a kind (`File`, `Directory`, `Link`, `Other`), a size, a modification time in UTC and its permissions as `rwxr-xr-x`;
+- `OpenReadAsync(path)` and `OpenWriteAsync(path, overwrite)`: streams. Without `overwrite`, writing to a file that exists is refused;
+- `CreateDirectoryAsync`, `DeleteFileAsync`, `DeleteDirectoryAsync` (an empty one) and `RenameAsync`.
+
+Paths are absolute: the plugin resolves anything relative against `HomeDirectory`. A failure is an `SftpException` with a reason the plugin can show: `NotFound`, `PermissionDenied`, `AlreadyExists`, `ConnectionLost` or `Failed`, with a message naming the path. A stream's own failures are `IOException`s. Port forwards join with their first user.
 
 **Failures.** Opening throws `ConnectException` with a `ConnectFailure` the plugin can show or act on. Every kind of connection core opens (SSH here, HTTP in §7.16, desktops in §7.20) throws the same exception, with the reasons that apply to it. For SSH:
 - `HostKeyUnknown`, with the presented identity, and `HostKeyChanged` (§7.7). A `PresentedIdentity` names the host and service that presented it, its kind (`SshHostKey` or `TlsCertificate`), algorithm and fingerprint, and for a certificate its subject and expiry. As JSON it's the frontend SDK's `TrustPrompt`, so a plugin endpoint can return it for its view to pass to `confirmTrust` (§7.14);
@@ -824,6 +837,32 @@ VNC desktops, ported from 1.x's VNC sessions (`Desktop/DesktopSession`), in its 
 - **Its frontend** is the `vnc` session view: the desktop plugin's view, with Guacamole's JavaScript client bundled with this plugin too, since plugins don't share code.
 - **Built in:** its releases are in `deploy/plugins.lock` (§9), from `1.0.0`.
 
+### 7.25 The `linux` plugin
+
+Tools for Linux hosts over their SSH service, ported from 1.x's `SftpController`, `Journal/` and `Selinux/`, in its own repository, `NKeeper-Plugin-Linux` (§9). It contributes no service type: its tools open on the `ssh` plugin's `ssh` services. It needs SDK 1.3 (`>=1.3.0 <2.0.0`) for SFTP and streaming commands (§7.9). Each tool is a stream session (§7.10), through jump hosts too, with a credential, so core resolves the credential, asks about an unknown key, counts it toward the user's sessions and ends it when access changes, as for a terminal. Once open, the browser and the plugin exchange JSON text frames: a request with an `id`, answered by a reply with the same `id`, or an `error` `{ id, message }`.
+
+- **Files** (session type `linux-files`, host action `linux.files`): one SFTP connection for the tab's life.
+  - `list` `{ path }`: a folder's entries, folders first, and its parent. An empty path is the login's home folder; a relative one is from there.
+  - `sizes` `{ paths }`: the bytes below each folder, as `size` messages, each as soon as it's known, as 1.x did: one queue for all of them, at most 16 SFTP requests at a time, skipping `/proc`, `/sys` and `/dev`. A folder part of which can't be read is reported as at least that big.
+  - `mkdir`, `delete` (a file, or an empty folder: never a folder's contents) and `rename`, each audited as `linux.files-mkdir`, `linux.files-delete`, `linux.files-rename` with the path.
+  - **Upload:** `upload` `{ path, size, overwrite }`, then the file's bytes in binary frames of at most 1 MB, each acknowledged, so a slow host slows the browser rather than filling the server's memory. At most 2 GB, as in 1.x. Without `overwrite`, a file that exists is refused. The upload is audited as `linux.files-upload` once complete; one that's cancelled or fails is deleted.
+  - **Download:** `download` `{ path }` answers a one-time link, `GET /api/p/linux/hosts/{hostId}/files/{token}`, valid for a minute, for the same user and host, on the same open session. The browser follows it, so the file streams from the host to the browser through the server without being held in memory. A folder downloads as a zip written as it streams, with what can't be read left out. Audited as `linux.files-download` with the path and its size.
+- **Journal** (session type `linux-journal`, host action `linux.journal`): `journalctl` over SSH, read only, as 1.x's `JournalHost`.
+  - `read` `{ since?, until?, maxPriority?, unit?, identifier?, search?, after? }`: up to 200 entries, newest first, and whether there are older ones; `after` is the last entry's cursor, for the next page. `search` is journalctl's `--grep`.
+  - `follow` `{ same filters, after? }` streams new entries as `entry` messages until `stop`. It runs `journalctl --follow` with `StartAsync` (§7.9), which `stop`, a new `read`, or the session's end stops.
+  - Values are passed to journalctl as single shell words, and a cursor must look like one.
+  - It reads as root when the login is root or may use `sudo` without a password. Otherwise it reads what the login may, and says the view is limited.
+  - Opening the journal is audited as `linux.journal-read`, and following as `linux.journal-follow`, as in 1.x; paging isn't.
+- **SELinux** (session type `linux-selinux`, host action `linux.selinux`): as 1.x's `SelinuxHost`, with the host's own tools.
+  - `status` `{ since?, until? }`: the mode (`getenforce`), the installed policy modules (`semodule -lfull`) and the denials in the audit log (`ausearch`, at most 1000 records), or why they can't be read.
+  - `generate` `{ name, eventIds }`: a policy's source for those denials, from `audit2allow`, for the user to read and edit before installing.
+  - `install` `{ name, source }`: compiles and installs it (`checkmodule`, `semodule_package`, `semodule -i`). The source must declare the module it's named as.
+  - `remove` `{ name, priority }`: removes one installed copy of a module (`semodule -X <priority> -r`). Modules at the distribution's priority (100) can't be removed here.
+  - Reading and changing need root, or `sudo` without a password. Installing and removing are audited as `linux.selinux-install` and `linux.selinux-remove`.
+- **Not only Linux.** An `ssh` service may be Windows' OpenSSH, or a switch's. Files works wherever the server offers SFTP, Windows included (its paths look like `/C:/Users/…`). Journal and SELinux first run `uname -s`, and refuse with a clear message on a host that doesn't answer `Linux`, rather than run their scripts there.
+- **Its frontend** has the three session views, ported from 1.x's `FileBrowser`, `JournalView` and `SelinuxView`.
+- **Not yet:** turning each tool on or off per service (1.x's service tools, so a Windows host's SSH service can hide Journal and SELinux), and the Linux internal scanner. Both arrive with the extension points they need (v2-plan.md §4.2: ServiceTool and Scanner).
+
 ## 8. The native install
 
 `deploy/setup.sh` installs NKeeper on a Linux server, from a checkout of the repository, as root. It's an early version of the Phase 6 installer (v2-plan.md §8). NKeeper installs natively only (D8): systemd, nginx and PostgreSQL, no containers.
@@ -891,7 +930,7 @@ Each official plugin lives in a repository of its own and is released on its own
 
 **Repositories,** all under `OpenCraft-Solutions`:
 - `NKeeper`, this one: the server, the shell, the SDK, the plugin tooling, the test helpers and the installer.
-- `NKeeper-Plugin-<Name>` for each official plugin: `NKeeper-Plugin-SSH`, `NKeeper-Plugin-Web`, `NKeeper-Plugin-Desktop`, `NKeeper-Plugin-WakeOnLan`, and each new one (`NKeeper-Plugin-Telnet`, `NKeeper-Plugin-VNC`, `NKeeper-Plugin-iDRAC`…). A plugin's ID doesn't change when it moves.
+- `NKeeper-Plugin-<Name>` for each official plugin: `NKeeper-Plugin-SSH`, `NKeeper-Plugin-Web`, `NKeeper-Plugin-Desktop`, `NKeeper-Plugin-WakeOnLan`, and each new one (`NKeeper-Plugin-Telnet`, `NKeeper-Plugin-VNC`, `NKeeper-Plugin-Linux`, `NKeeper-Plugin-iDRAC`…). A plugin's ID doesn't change when it moves.
 - A plugin repository holds the plugin's backend, frontend, manifest and tests, and its own CI and release workflow. It references nothing of core's but the published packages below.
 
 **What core publishes,** to GitHub Packages under `OpenCraft-Solutions`, versioned with the SDK (§4) and released from this repository by a tag, `sdk-v<version>`:

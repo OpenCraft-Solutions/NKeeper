@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -211,6 +212,87 @@ public sealed class SshConnectivityTests(PostgresFixture postgres, SshServerFixt
         Assert.Contains("40 120", output, StringComparison.Ordinal);
     }
 
+    // ---- SDK 1.3: commands that stream, and SFTP ----
+
+    [Fact]
+    public async Task A_started_command_streams_its_output_and_reports_how_it_ended()
+    {
+        await using var server = await ServerAsync();
+        using var admin = await server.SignedInClientAsync();
+        var host = await CreateTrustedHostAsync(admin, Credential(password: SshServerFixture.Password));
+
+        var ran = await SshAsync(admin, host, Stream(host, "echo one; sleep 2; echo two; echo oops >&2; exit 3"), endpoint: "stream");
+        var lines = ran.GetProperty("lines").EnumerateArray().Select(l => l.GetString()!.Split(" at ")).ToList();
+        Assert.Equal(["one", "two"], lines.Select(l => l[0]));
+        // The first line arrived before the command ended.
+        Assert.True(int.Parse(lines[0][1], CultureInfo.InvariantCulture) < 15, $"one at {lines[0][1]}");
+        Assert.True(int.Parse(lines[1][1], CultureInfo.InvariantCulture) >= 20, $"two at {lines[1][1]}");
+        Assert.Equal((3, "oops\n"), (ran.GetProperty("exitStatus").GetInt32(), ran.GetProperty("error").GetString()));
+    }
+
+    [Fact]
+    public async Task Disposing_a_started_command_stops_it_and_keeps_the_connection()
+    {
+        await using var server = await ServerAsync();
+        using var admin = await server.SignedInClientAsync();
+        var host = await CreateTrustedHostAsync(admin, Credential(password: SshServerFixture.Password));
+
+        var stopped = await SshAsync(admin, host, Stream(host, "echo ready; sleep 37; echo late", stopAfter: "ready"), endpoint: "stream");
+        Assert.Equal("ready", Assert.Single(stopped.GetProperty("lines").EnumerateArray()).GetString()!.Split(" at ")[0]);
+        Assert.Equal("gone\n", stopped.GetProperty("after").GetString());
+        Assert.True(stopped.GetProperty("seconds").GetDouble() < 15);
+    }
+
+    [Fact]
+    public async Task Sftp_works_with_files_and_folders_and_says_why_it_cannot()
+    {
+        await using var server = await ServerAsync();
+        using var admin = await server.SignedInClientAsync();
+        var host = await CreateTrustedHostAsync(admin, Credential(password: SshServerFixture.Password));
+
+        var steps = (await SshAsync(admin, host, Sftp(host), endpoint: "sftp")).EnumerateArray().Select(s => s.GetString()).ToList();
+        Assert.Equal(
+            [
+                "home: absolute",
+                "mkdir: ok",
+                "mkdir again: AlreadyExists",
+                "write: ok",
+                "write again: AlreadyExists",
+                "overwrite: ok",
+                "read: hello again",
+                "list: a.txt File 11 9 True",
+                "get: directory",
+                "delete full folder: Failed",
+                "rename: ok",
+                "rename over: AlreadyExists",
+                "delete: ok",
+                "delete folder: ok",
+                "missing: NotFound",
+                "forbidden: PermissionDenied",
+                "unreadable: PermissionDenied",
+            ],
+            steps);
+
+        var used = Assert.Single(await AuditAsync(server, AuditActions.CredentialUse), e => e.Detail.StartsWith("sftp to service", StringComparison.Ordinal));
+        Assert.Contains("plugin hello", used.Detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Sftp_checks_the_host_key_and_the_sign_in_like_ssh()
+    {
+        await using var server = await ServerAsync();
+        using var admin = await server.SignedInClientAsync();
+        var host = await CreateHostAsync(admin, [Credential(password: SshServerFixture.Password), Credential(password: WrongPassword)]);
+
+        var unknown = await SshAsync(admin, host, Sftp(host), HttpStatusCode.BadGateway, endpoint: "sftp");
+        Assert.Equal("HostKeyUnknown", unknown.GetProperty("reason").GetString());
+        await TrustAsync(admin, unknown.GetProperty("presentedKey"), HttpStatusCode.NoContent);
+
+        var refused = await SshAsync(admin, host, Sftp(host, credential: 1), HttpStatusCode.BadGateway, endpoint: "sftp");
+        Assert.Equal("AuthenticationFailed", refused.GetProperty("reason").GetString());
+        Assert.DoesNotContain(WrongPassword, refused.GetRawText(), StringComparison.Ordinal);
+    }
+
     // ---- Jump hosts (§7.8) ----
 
     [Fact]
@@ -349,6 +431,12 @@ public sealed class SshConnectivityTests(PostgresFixture postgres, SshServerFixt
     private static object Probe(JsonElement host, int credential = 0, string? command = null) =>
         new { serviceId = ServiceId(host), credentialId = CredentialId(host, credential), command };
 
+    private static object Stream(JsonElement host, string command, string? stopAfter = null) =>
+        new { serviceId = ServiceId(host), credentialId = CredentialId(host, 0), command, shell = stopAfter is not null, expect = stopAfter };
+
+    private static object Sftp(JsonElement host, int credential = 0) =>
+        new { serviceId = ServiceId(host), credentialId = CredentialId(host, credential), command = "probe-" + Guid.NewGuid().ToString("N")[..8] };
+
     private static Guid Id(JsonElement host) => host.GetProperty("id").GetGuid();
 
     private static Guid ServiceId(JsonElement host) => host.GetProperty("services")[0].GetProperty("id").GetGuid();
@@ -393,9 +481,9 @@ public sealed class SshConnectivityTests(PostgresFixture postgres, SshServerFixt
         await client.GetFromJsonAsync<JsonElement>(new Uri($"/api/hosts/{Id(host)}", UriKind.Relative), Token);
 
     /// <summary>Calls the test plugin's SSH endpoint, expecting <paramref name="status"/>.</summary>
-    private static async Task<JsonElement> SshAsync(HttpClient client, JsonElement host, object probe, HttpStatusCode status = HttpStatusCode.OK)
+    private static async Task<JsonElement> SshAsync(HttpClient client, JsonElement host, object probe, HttpStatusCode status = HttpStatusCode.OK, string endpoint = "ssh")
     {
-        using var response = await client.SendWithTokenAsync(HttpMethod.Post, $"/api/p/hello/hosts/{Id(host)}/ssh", probe);
+        using var response = await client.SendWithTokenAsync(HttpMethod.Post, $"/api/p/hello/hosts/{Id(host)}/{endpoint}", probe);
         var body = await response.Content.ReadAsStringAsync(Token);
         Assert.True(response.StatusCode == status, $"{response.StatusCode}: {body}");
         return JsonDocument.Parse(body).RootElement;

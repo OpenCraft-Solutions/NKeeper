@@ -26,6 +26,8 @@ public sealed class NamingTests
         // which happens to share it (docs/architecture.md §7.20).
         ["core/backend/NKeeper.Core/Connectivity/DesktopConnector.cs: rdp"] = "guacd's protocol name in the handshake",
         ["core/backend/NKeeper.Core/Connectivity/DesktopConnector.cs: vnc"] = "guacd's protocol name in the handshake (SDK 1.2)",
+        // The protocol core speaks in this project, named in the credential.use audit line beside "sftp" (SDK 1.3).
+        ["core/backend/NKeeper.Connectivity.Ssh/SshConnectivity.cs: ssh"] = "the SSH protocol, in the audit line",
     };
 
     public static IReadOnlySet<string> Ids { get; } = PlannedIds

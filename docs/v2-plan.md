@@ -589,6 +589,7 @@ Each phase ends in a state that builds, passes tests, **installs as a native Lin
 ### Phase 4: Port the remaining features
 Each extension point is introduced with its first user (§4.2), and each plugin ports its 1.x tests. Suggested order, cheapest proofs first:
 1. `desktop` parity (AD pass-through, clipboard), `vnc` (its own plugin, architecture.md §7.24), `telnet`, `linux` (Files, Journal, SELinux, plus **Scanner** and **ServiceTool**: the scan pipeline is built here), `storage`.
+   - *As built (2026-11-17):* `linux` starts with its three tools, as stream sessions on `ssh` services (architecture.md §7.25), on SDK 1.3: SFTP connections and commands that stream (§7.9). ServiceTool and Scanner follow as their own steps, so the tools ship first.
 2. `windows` (RPC, Event Log, WMI scanner), `idrac` (endpoint derivation for RACADM, optional `IWebSessionLauncher`).
 3. `db-core` (**sub-registry** pattern), then `db-mssql`, `db-oracle`, `db-ase`.
 4. `virt-core` (`IGuestProvider` registry, console relay), then `kvm`, `proxmox`, then `migration` (jobs).

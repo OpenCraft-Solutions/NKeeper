@@ -193,6 +193,124 @@ public sealed class HelloPlugin : IPlugin
             }
         });
 
+        // Opens an SFTP connection through core (SDK 1.3) and works through a folder of its own in the home folder,
+        // reporting each step: what it returned, or the failure's reason.
+        use.MapPost("/sftp", async (HostContext host, SshProbe? probe, ICredentialBroker broker, IConnectivity connectivity) =>
+        {
+            if (probe is null)
+            {
+                return Results.Text("no probe");
+            }
+
+            try
+            {
+                var handle = await broker.ResolveSavedAsync(host, probe.ServiceId, probe.CredentialId ?? Guid.Empty);
+                await using var sftp = await connectivity.OpenSftpAsync(host, probe.ServiceId, handle);
+                var steps = new List<string>();
+                async Task Step(string name, Func<Task<string>> step)
+                {
+                    try
+                    {
+                        steps.Add($"{name}: {await step()}");
+                    }
+                    catch (SftpException ex)
+                    {
+                        steps.Add($"{name}: {ex.Reason}");
+                    }
+                }
+
+                var folder = sftp.HomeDirectory.TrimEnd('/') + "/" + (probe.Command ?? "probe");
+                var file = folder + "/a.txt";
+                await Step("home", () => Task.FromResult(sftp.HomeDirectory.StartsWith('/') ? "absolute" : sftp.HomeDirectory));
+                await Step("mkdir", async () => { await sftp.CreateDirectoryAsync(folder); return "ok"; });
+                await Step("mkdir again", async () => { await sftp.CreateDirectoryAsync(folder); return "ok"; });
+                await Step("write", async () =>
+                {
+                    await using var stream = await sftp.OpenWriteAsync(file, overwrite: false);
+                    await stream.WriteAsync(System.Text.Encoding.UTF8.GetBytes("hello sftp"));
+                    return "ok";
+                });
+                await Step("write again", async () => { await using var stream = await sftp.OpenWriteAsync(file, overwrite: false); return "ok"; });
+                await Step("overwrite", async () =>
+                {
+                    await using var stream = await sftp.OpenWriteAsync(file, overwrite: true);
+                    await stream.WriteAsync(System.Text.Encoding.UTF8.GetBytes("hello again"));
+                    return "ok";
+                });
+                await Step("read", async () =>
+                {
+                    await using var stream = await sftp.OpenReadAsync(file);
+                    using var reader = new StreamReader(stream);
+                    return await reader.ReadToEndAsync();
+                });
+                await Step("list", async () => string.Join(',', (await sftp.ListAsync(folder)).Select(e => $"{e.Name} {e.Kind} {e.Size} {e.Permissions.Length} {e.Path == file}")));
+                await Step("get", async () => (await sftp.GetAsync(folder)) is { Kind: SftpEntryKind.Directory } entry && entry.Path == folder ? "directory" : "wrong");
+                await Step("delete full folder", async () => { await sftp.DeleteDirectoryAsync(folder); return "ok"; });
+                await Step("rename", async () => { await sftp.RenameAsync(file, folder + "/b.txt"); return "ok"; });
+                await Step("rename over", async () =>
+                {
+                    await using (await sftp.OpenWriteAsync(file, overwrite: false))
+                    {
+                    }
+
+                    await sftp.RenameAsync(file, folder + "/b.txt");
+                    return "ok";
+                });
+                await Step("delete", async () => { await sftp.DeleteFileAsync(file); await sftp.DeleteFileAsync(folder + "/b.txt"); return "ok"; });
+                await Step("delete folder", async () => { await sftp.DeleteDirectoryAsync(folder); return "ok"; });
+                await Step("missing", async () => (await sftp.GetAsync(folder)).Name);
+                await Step("forbidden", async () => { await using var stream = await sftp.OpenWriteAsync("/etc/nkeeper-probe", overwrite: false); return "ok"; });
+                await Step("unreadable", async () => string.Join(',', (await sftp.ListAsync("/root")).Select(e => e.Name)));
+                return Results.Json(steps);
+            }
+            catch (ConnectException ex)
+            {
+                return Results.Json(new { reason = ex.Reason.ToString(), message = ex.Message, presentedKey = ex.Presented }, statusCode: StatusCodes.Status502BadGateway);
+            }
+        });
+
+        // Streams a command's output through core (SDK 1.3): reads it all, or with Shell stops it after Expect arrives,
+        // then shows the connection still works and the command ended.
+        use.MapPost("/stream", async (HostContext host, SshProbe? probe, ICredentialBroker broker, IConnectivity connectivity) =>
+        {
+            if (probe is null)
+            {
+                return Results.Text("no probe");
+            }
+
+            var handle = await broker.ResolveSavedAsync(host, probe.ServiceId, probe.CredentialId ?? Guid.Empty);
+            await using var ssh = await connectivity.OpenSshAsync(host, probe.ServiceId, handle);
+            var started = System.Diagnostics.Stopwatch.StartNew();
+            var command = await ssh.StartAsync(probe.Command ?? "true");
+            using var reader = new StreamReader(command.Output);
+            var lines = new List<string>();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            while (await reader.ReadLineAsync(timeout.Token) is { } line)
+            {
+                lines.Add($"{line} at {started.ElapsedMilliseconds / 100}");
+                if (probe.Shell && line == probe.Expect)
+                {
+                    break;
+                }
+            }
+
+            SshCommandResult? result = null;
+            if (probe.Shell)
+            {
+                await command.DisposeAsync();
+            }
+            else
+            {
+                result = await command.WaitAsync(timeout.Token);
+                await command.DisposeAsync();
+            }
+
+            // The connection still works, and the command (a "sleep 37") is gone.
+            await Task.Delay(500);
+            var after = await ssh.RunAsync("pgrep -f 'sleep 3[7]' >/dev/null && echo running || echo gone");
+            return Results.Json(new { lines, exitStatus = result?.ExitStatus, error = result?.Error, after = after.Output, seconds = started.Elapsed.TotalSeconds });
+        });
+
         // Opens a Telnet terminal through core (SDK 1.1): follows the steps (wait for text, then type a line), then
         // returns what the terminal showed.
         use.MapPost("/telnet", async (HostContext host, TelnetProbe? probe, ICredentialBroker broker, IConnectivity connectivity) =>
