@@ -30,6 +30,10 @@ public sealed class SshConnectivity(SshConnectionPlanner planner, TrustStore tru
     public Task<IDesktopConnection> OpenDesktopAsync(HostContext host, Guid serviceId, CredentialHandle handle, DesktopOptions options, CancellationToken cancellationToken = default) =>
         services.GetRequiredService<DesktopConnector>().OpenAsync(host, serviceId, handle, options, cancellationToken);
 
+    /// <inheritdoc />
+    public Task<ITelnetConnection> OpenTelnetAsync(HostContext host, Guid serviceId, CredentialHandle? handle, TerminalSize size, CancellationToken cancellationToken = default) =>
+        services.GetRequiredService<NKeeper.Core.Connectivity.Telnet.TelnetConnector>().OpenAsync(host, serviceId, handle, size, cancellationToken);
+
     /// <summary>
     /// A loopback port forwarded through the host's jump host (§7.16). The jump host's key must already be trusted,
     /// since a request can't stop to ask; an SSH session to it asks once. Opening it is audited as credential.use.
