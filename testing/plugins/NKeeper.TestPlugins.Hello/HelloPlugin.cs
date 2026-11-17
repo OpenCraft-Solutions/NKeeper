@@ -193,6 +193,55 @@ public sealed class HelloPlugin : IPlugin
             }
         });
 
+        // Opens a Telnet terminal through core (SDK 1.1): follows the steps (wait for text, then type a line), then
+        // returns what the terminal showed.
+        use.MapPost("/telnet", async (HostContext host, TelnetProbe? probe, ICredentialBroker broker, IConnectivity connectivity) =>
+        {
+            if (probe is null)
+            {
+                return Results.Text("no probe");
+            }
+
+            try
+            {
+                var handle = probe.CredentialId is { } credentialId ? await broker.ResolveSavedAsync(host, probe.ServiceId, credentialId) : null;
+                await using var telnet = await connectivity.OpenTelnetAsync(host, probe.ServiceId, handle, new TerminalSize(100, 30));
+                telnet.Resize(120, 40);
+                var output = new System.Text.StringBuilder();
+                var buffer = new byte[4096];
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                foreach (var step in probe.Steps ?? [])
+                {
+                    var from = output.Length;
+                    while (!output.ToString(from, output.Length - from).Contains(step.Expect, StringComparison.Ordinal))
+                    {
+                        var read = await telnet.Stream.ReadAsync(buffer, timeout.Token);
+                        if (read == 0)
+                        {
+                            return Results.Json(new { output = output.ToString(), closed = true });
+                        }
+
+                        output.Append(System.Text.Encoding.UTF8.GetString(buffer, 0, read));
+                    }
+
+                    if (step.Send is { } send)
+                    {
+                        await telnet.Stream.WriteAsync(System.Text.Encoding.UTF8.GetBytes(send + "\r"));
+                    }
+                }
+
+                return Results.Json(new { output = output.ToString(), closed = false });
+            }
+            catch (ConnectException ex)
+            {
+                return Results.Json(new { reason = ex.Reason.ToString(), message = ex.Message }, statusCode: StatusCodes.Status502BadGateway);
+            }
+            catch (CredentialDeniedException ex)
+            {
+                return Results.Text($"denied {ex.Reason}", statusCode: StatusCodes.Status403Forbidden);
+            }
+        });
+
         var manage = endpoints.MapHostGroup(HostPermission.Manage);
         manage.Map("/raw", context => context.Response.WriteAsync($"managing {context.GetHostContext().Name}"));
     }
@@ -213,6 +262,11 @@ public sealed record CredentialProbe(
 
 /// <summary>What the SSH endpoint is asked to do.</summary>
 /// <param name="Shell">Run <paramref name="Command"/> in a shell, and read until <paramref name="Expect"/> appears.</param>
+public sealed record TelnetProbe(Guid ServiceId, Guid? CredentialId = null, IReadOnlyList<TelnetStep>? Steps = null);
+
+/// <summary>Waits for <paramref name="Expect"/> in the terminal, then types <paramref name="Send"/> and Enter.</summary>
+public sealed record TelnetStep(string Expect, string? Send = null);
+
 public sealed record SshProbe(
     Guid ServiceId,
     Guid? CredentialId = null,

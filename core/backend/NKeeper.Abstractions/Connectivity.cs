@@ -31,6 +31,33 @@ public interface IConnectivity
     /// <exception cref="DesktopConnectException">The certificate isn't trusted, guacd isn't running, or the server can't be reached.</exception>
     /// <exception cref="CredentialDeniedException">The handle isn't valid here.</exception>
     Task<IDesktopConnection> OpenDesktopAsync(HostContext host, Guid serviceId, CredentialHandle handle, DesktopOptions options, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// A Telnet terminal on one of the host's services (docs/architecture.md §7.22, SDK 1.1), through its jump host if
+    /// it has one. Core speaks the Telnet protocol, and with a <paramref name="handle"/> answers the server's first login
+    /// and password prompts with its credential, which the plugin never sees. Without one, the user types them.
+    /// Telnet isn't encrypted.
+    /// </summary>
+    /// <exception cref="ConnectException">The service can't be reached, or its jump host can't be used.</exception>
+    /// <exception cref="CredentialDeniedException">The handle isn't valid here.</exception>
+    Task<ITelnetConnection> OpenTelnetAsync(HostContext host, Guid serviceId, CredentialHandle? handle, TerminalSize size, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("This server doesn't open Telnet connections: it needs SDK 1.1.");
+}
+
+/// <summary>A terminal's size, from 1 × 1 to 1000 × 1000 (SDK 1.1).</summary>
+public sealed record TerminalSize(int Columns = 80, int Rows = 24);
+
+/// <summary>An open Telnet terminal (SDK 1.1). Disposing it closes the connection, and its jump host tunnel.</summary>
+public interface ITelnetConnection : IAsyncDisposable
+{
+    /// <summary>
+    /// The terminal's input (write what's typed: core escapes it for Telnet) and output (read: terminal data only,
+    /// the protocol's commands removed).
+    /// </summary>
+    Stream Stream { get; }
+
+    /// <summary>Tells the server the terminal's new size, when it asked to be told.</summary>
+    void Resize(int columns, int rows);
 }
 
 /// <summary>How an RDP connection secures itself.</summary>
