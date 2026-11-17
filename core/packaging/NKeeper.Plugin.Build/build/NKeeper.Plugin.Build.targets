@@ -2,7 +2,7 @@
 
   <!--
     Builds, packs and signs a plugin (docs/architecture.md §9, plugin-security.md §10), for a plugin repository
-    outside the NKeeper repository. It is what plugins/NKeeperPlugin.targets does for the built-in plugins, with no
+    outside the NKeeper repository. It is what plugins/NKeeperPlugin.targets did for the built-in plugins in this repository, with no
     path into NKeeper's source: the SDK is the NKeeper.Abstractions package, the packaging tool is in this package,
     and the frontend's own package.json names its dependencies, the frontend SDK among them.
 

@@ -1,6 +1,6 @@
 # Writing an NKeeper plugin
 
-This guide is for developers writing a plugin against **SDK v1** (`NKeeper.Abstractions` 1.0.0 and `@nkeeper/sdk` 1.0.0). It walks through two real plugins from this repository:
+This guide is for developers writing a plugin against **SDK v1** (`NKeeper.Abstractions` and `@nkeeper/sdk` 1.x, 1.1.0 at the time of writing). It walks through two real plugins, each in a repository of its own ([NKeeper-Plugin-WakeOnLan](https://github.com/OpenCraft-Solutions/NKeeper-Plugin-WakeOnLan) and [NKeeper-Plugin-SSH](https://github.com/OpenCraft-Solutions/NKeeper-Plugin-SSH)):
 - `wake-on-lan`, the smallest shape: a service type, a run action and one endpoint;
 - `ssh`, a session plugin: a terminal that core connects, with a frontend view.
 
@@ -13,7 +13,7 @@ A plugin is a signed package (`.nkp`) holding:
 - **a frontend**, optionally: one ES module that the shell imports;
 - **a manifest**, `nkeeper-plugin.json`: its ID, version, the SDK range it supports, and where its entry points are.
 
-It references **only the SDK**: `NKeeper.Abstractions` in the backend, `@nkeeper/sdk` in the frontend. Never core's own assemblies or modules; an architecture test enforces this for the built-in plugins.
+It references **only the SDK**: `NKeeper.Abstractions` in the backend, `@nkeeper/sdk` in the frontend. Never core's own assemblies or modules; `NKeeper.Plugin.Build` packs only the plugin's own assemblies, never the SDK.
 
 ### What core does for you, and what a plugin can't do
 
@@ -26,32 +26,33 @@ Core keeps the security-sensitive parts, so every plugin gets them the same way 
 
 ## 2. Layout and build
 
-A plugin in this repository:
+A plugin is a repository of its own, built against NKeeper's published packages (architecture.md §9). The official plugins' repositories are good templates:
 
 ```text
-plugins/<id>/
-  backend/
-    NKeeper.Plugins.<Name>.csproj   imports plugins/NKeeperPlugin.targets
-    nkeeper-plugin.json             the manifest
-    <Name>Plugin.cs                 the IPlugin
-  frontend/                         optional
-    package.json                    @nkeeper/plugin-<id>, depends on @nkeeper/sdk ^1.0.0
-    vite.config.ts                  builds dist/index.js, keeping the shared modules external
-    src/index.tsx                   default-exports definePlugin(...)
+backend/
+  NKeeper.Plugins.<Name>.csproj     references NKeeper.Abstractions and NKeeper.Plugin.Build
+  nkeeper-plugin.json               the manifest
+  <Name>Plugin.cs                   the IPlugin
+frontend/                           optional
+  package.json                      depends on "@nkeeper/sdk": "npm:@opencraft-solutions/nkeeper-sdk@^1.1.0"
+  vite.config.ts                    builds dist/index.js, keeping the shared modules external
+  src/index.tsx                     default-exports definePlugin(...)
+tests/                              references NKeeper.Testing: the test server loads the built package
+nuget.config, frontend/.npmrc       GitHub Packages, with a token from the environment
 ```
 
-The backend project is a few lines. With a frontend, it names the frontend's npm package:
+The backend project is a few lines:
 
 ```xml
 <Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-    <NKeeperPluginFrontendPackage>@nkeeper/plugin-ssh</NKeeperPluginFrontendPackage>
-  </PropertyGroup>
-  <Import Project="../../NKeeperPlugin.targets" />
+  <ItemGroup>
+    <PackageReference Include="NKeeper.Abstractions" />
+    <PackageReference Include="NKeeper.Plugin.Build" PrivateAssets="all" />
+  </ItemGroup>
 </Project>
 ```
 
-`NKeeperPlugin.targets` references the SDK without copying it, builds the frontend with npm, then packs and signs the plugin into `artifacts/plugins/`. In development it signs with a key it creates in `.dev/keys/`. To load your plugin, point `Plugins:Directory` at `artifacts/plugins` and `Plugins:DevelopmentTrustDirectory` at `.dev/keys` (see [CONTRIBUTING.md](../CONTRIBUTING.md)).
+`NKeeper.Plugin.Build` references the SDK without copying it, builds the frontend with npm when there is one, then packs and signs the plugin into `artifacts/plugins/`. In development it signs with a key it creates in `.dev/keys/`; a release workflow signs with the official key or yours (`NKeeperSigningKey`). To load your plugin, point `Plugins:Directory` at `artifacts/plugins` and `Plugins:DevelopmentTrustDirectory` at `.dev/keys` (see [CONTRIBUTING.md](../CONTRIBUTING.md)).
 
 The manifest:
 
@@ -60,7 +61,7 @@ The manifest:
   "formatVersion": 1,
   "id": "wake-on-lan",
   "name": "Wake-on-LAN",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "sdkVersion": ">=1.0.0 <2.0.0",
   "backend": {
     "entryAssembly": "backend/NKeeper.Plugins.WakeOnLan.dll",
@@ -88,7 +89,7 @@ public interface IPlugin
 
 ## 4. Worked example: wake-on-lan
 
-Wake-on-LAN wakes a host with a magic packet. It shows the minimum: one service type with a setting, a run action, one endpoint and one audit event (§7.15). Source: `plugins/wake-on-lan/backend/WakeOnLanPlugin.cs`.
+Wake-on-LAN wakes a host with a magic packet. It shows the minimum: one service type with a setting, a run action, one endpoint and one audit event (§7.15). Source: `backend/WakeOnLanPlugin.cs` in NKeeper-Plugin-WakeOnLan.
 
 ### The service type
 
@@ -146,7 +147,7 @@ That's the whole plugin. It needs no frontend: the shell draws the menu and show
 
 ## 5. Worked example: ssh
 
-The ssh plugin opens terminals. Core opens the SSH connection, checks the server's key, asks the user about a new one, and signs in with the credential; the plugin only carries the terminal's bytes (§7.11). Source: `plugins/ssh/`.
+The ssh plugin opens terminals. Core opens the SSH connection, checks the server's key, asks the user about a new one, and signs in with the credential; the plugin only carries the terminal's bytes (§7.11). Source: NKeeper-Plugin-SSH.
 
 ### Contributions
 

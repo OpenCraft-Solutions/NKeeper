@@ -180,7 +180,7 @@ The alternative: keep SSH, RDP and inventory inside the core app, and make stora
 | | A. Built into core code | B. Bundled plugins (recommended) |
 | --- | --- | --- |
 | What ships | inventory + SSH + RDP always | same: SSH, RDP/VNC, web, Telnet ship in every build and are marked `builtIn` (can't be disabled) |
-| Where the code lives | `core/` | `plugins/ssh`, `plugins/desktop`… written against the same SDK as add-ons |
+| Where the code lives | `core/` | `NKeeper-Plugin-SSH`, `NKeeper-Plugin-Desktop`…, each a repository of its own, written against the same SDK as add-ons |
 | Proves the SDK | only add-ons use it; the hardest cases (stream sessions, TOFU, recordings, credential prompts, sign-in pass-through) are never exercised through it | the hardest cases go through the SDK first, so add-ons inherit a tested path |
 | Drift risk | core keeps private shortcuts (as 1.x's RACADM-in-resolver or `NOT_THROUGH_JUMP`), and add-ons become second-class | everything uses one path; nothing in core names a service type |
 | Dependency direction | add-ons that need SSH (storage, journal, KVM, RACADM) depend on core internals | they depend on core *connectivity* (SSH transport), which is a public SDK service |
@@ -406,7 +406,7 @@ NKeeper_2/
 │  └─ setup.sh                       install / upgrade / uninstall on Debian/Ubuntu and RHEL-family
 │
 ├─ NKeeper.slnx                      all backend projects
-├─ package.json                      npm workspaces: core/frontend/*, plugins/*/frontend
+├─ package.json                      npm workspaces: core/frontend/* (each official plugin is a repository of its own)
 └─ Directory.Build.props             .NET 10, nullable, warnings-as-errors (from 1.x)
 ```
 
@@ -662,10 +662,10 @@ Decided on 2026-11-09 unless marked open. Changing one is a design change: updat
 | `Inventory/Import/` | `plugins/import-mremoteng` |
 | `RemoteSessions/` (protocol, resolver, limiter, socket, trusted keys, origin) | `NKeeper.Core` session framework + trust store |
 | `RemoteSessions/JumpTunnel`, `Ssh/SshCommandConnection`, `Ssh/SshScript`, `Ssh/SshAuthentication` | `NKeeper.Core` connectivity |
-| `Ssh/SshTerminalSession`, `Auditing/TerminalRecorder` / `terminal/SshTerminal` | `plugins/ssh` (recording storage stays core audit) |
-| `Telnet/` | `plugins/telnet` |
-| `Desktop/` / `DesktopSession`, vendored guacamole | `plugins/desktop` |
-| `Web/` / `WebSession` | `plugins/web` (`CertificateTrust` → core trust store) |
+| `Ssh/SshTerminalSession`, `Auditing/TerminalRecorder` / `terminal/SshTerminal` | `NKeeper-Plugin-SSH` (recording storage stays core audit) |
+| `Telnet/` | `NKeeper-Plugin-Telnet` |
+| `Desktop/` / `DesktopSession`, vendored guacamole | `NKeeper-Plugin-Desktop` |
+| `Web/` / `WebSession` | `NKeeper-Plugin-Web` (`CertificateTrust` → core trust store) |
 | `SftpController` / `FileBrowser` | `plugins/linux` (Files) |
 | `Journal/`, `Selinux/` + controllers / views | `plugins/linux` |
 | `Storage/` / `StorageView` | `plugins/storage` |
@@ -679,7 +679,7 @@ Decided on 2026-11-09 unless marked open. Changing one is a design change: updat
 | `SqlServer/`, `Oracle/`, `Ase/` | `plugins/db-mssql`, `db-oracle`, `db-ase` |
 | `Zabbix/`, `Infrastructure/Zabbix` / `features/zabbix` | `plugins/zabbix` |
 | `Health/HostHealth`, `HealthMonitor` / `HealthReport` | `NKeeper.Core` health scheduler + per-type probes |
-| `Health/WakeOnLan` | `plugins/wake-on-lan` |
+| `Health/WakeOnLan` | `NKeeper-Plugin-WakeOnLan` |
 | `Auditing/` / `features/audit` | `NKeeper.Core` audit |
 | `Diagnostics/` / `DiagnosticsPanel` | `NKeeper.Core` diagnostics |
 | `Transfer/` / `features/transfer` | `NKeeper.Core` transfer (generic bundle + coordinator) + `TransferParticipant`s (1.x import deferred, D10) |

@@ -158,7 +158,7 @@
       "nkeeper-plugin": {
         "type": "Project",
         "dependencies": {
-          "NKeeper.Abstractions": "[2.0.0-dev, )",
+          "NKeeper.Abstractions": "[1.1.0, )",
           "NKeeper.Plugins.Packaging": "[2.0.0-dev, )"
         }
       },

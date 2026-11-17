@@ -71,7 +71,7 @@ public sealed class WakeOnLanPlugin : IPlugin
 - More contracts (plugin settings, scanners, reports) arrive with their first real users ([v2-plan.md §4.2](v2-plan.md#42-contribution-catalogue)), as additions to SDK v1.
 - **SDK versions.** A manifest declares the SDK range it supports, and a package outside the server's `SdkVersion` is refused. Within v0, an addition raises the patch number (`0.1.1` added the host scope, `0.1.2` service types, `0.1.3` the credential broker, `0.1.4` SSH connections, `0.1.5` stream sessions, `0.1.6` host actions, health probes and, in the frontend SDK, session views, `0.1.7` run actions and plugin audit events, `0.1.8` HTTPS connections, stateful sessions, session origins and, in the frontend SDK, `confirmTrust`, `0.1.9` desktop connections) and a breaking change raises the minor one.
 - **SDK v1 (1.0.0)** froze the SDK at the end of Phase 3, after a review of what Phases 1 and 2 used ([v2-plan.md, Phase 3](v2-plan.md#phase-3-freeze-sdk-v1)). From v1, a fix that changes no API raises the patch number, an addition the minor number, and a breaking change the major one, which the plan avoids. So a plugin built for `>=1.0.0 <2.0.0` keeps loading, and one that uses an addition declares the version that brought it. The frontend SDK, `@nkeeper/sdk`, is versioned with it. [plugin-authoring.md](plugin-authoring.md) shows how to write a plugin against it.
-- **Since v1:** `1.0.1` fixed `NKeeper.Testing`'s `TestPlugins` outside this repository; `1.1.0` adds Telnet connections (§7.22).
+- **Since v1:** `1.0.1` fixed `NKeeper.Testing`'s `TestPlugins` outside this repository; `1.1.0` adds Telnet connections (§7.22). `NKeeper.Testing`'s helpers that packaged the built-in plugins from this repository's build (`TestPlugins.SshPackage` and the like) went with them: they only ever worked here.
 
 ## 5. Frontend extension point
 
@@ -516,7 +516,7 @@ This fixes a 1.x gap: 1.x ended sessions when a user was disabled, but not when 
 
 ### 7.11 The `ssh` plugin
 
-The first real plugin, in `plugins/ssh/`. It's a plugin like any other: it references only the SDK, and core doesn't name it.
+The first real plugin, now in its own repository, `NKeeper-Plugin-SSH` (§9). It's a plugin like any other: it references only the SDK, and core doesn't name it.
 - **Service type** `ssh`, port 22 by default, no settings yet, checked by a TCP probe (§7.13).
 - **Session type** `ssh`, "Terminal", on `ssh` services:
   - `options`: the terminal's `columns` and `rows`;
@@ -526,7 +526,7 @@ The first real plugin, in `plugins/ssh/`. It's a plugin like any other: it refer
 - **Its frontend** is the terminal view (§7.14): xterm.js, fitted to its tab, resizing the server's terminal as the tab resizes. When the shell exits it says so, and offers to reconnect.
 
 **Built and signed by the build.** Plugins are always signed, even in development (plugin-security.md §10):
-- building `plugins/ssh` builds its frontend (`npm run build` in `plugins/ssh/frontend`, so `npm ci` must have run at the root), packs both with `nkeeper-plugin`, and signs the package with the developer's development key. The build creates the key on first use, under `.dev/`, which git ignores;
+- building it builds its frontend (`npm ci` and `npm run build` in `frontend/`), packs both with `nkeeper-plugin` (through `NKeeper.Plugin.Build`), and signs the package with the developer's development key. The build creates the key on first use, under `.dev/`, which git ignores;
 - the package goes to `artifacts/plugins/`, the directory to point `Plugins:Directory` at in development;
 - CI verifies the package against that run's development key.
 
@@ -667,7 +667,7 @@ export default definePlugin({
 
 ### 7.15 The `wake-on-lan` plugin
 
-The smallest real plugin, in `plugins/wake-on-lan/`: it shows how little a plugin needs, and it changes no core file (v2-plan.md, Phase 2). Ported from 1.x's `Health/WakeOnLan`.
+The smallest real plugin, now in its own repository, `NKeeper-Plugin-WakeOnLan` (§9): it shows how little a plugin needs, and it changes no core file (v2-plan.md, Phase 2). Ported from 1.x's `Health/WakeOnLan`.
 - **Service type** `wake-on-lan`, "Wake-on-LAN", UDP port 9 by default, with one required setting: the MAC address. Hosts in 1.x had a MAC address field; in 2.0, a host gets Wake-on-LAN by having this service, so core keeps no field for it.
 - **Run action** `wake-on-lan.wake`, "Wake", on `wake-on-lan` services, with no credential (§7.12).
 - **Its endpoint** `POST /api/p/wake-on-lan/hosts/{hostId}/wake` needs Use. It sends the magic packet from the NKeeper server (six `0xFF` bytes, then the MAC address 16 times) over UDP to the service's port, to:
@@ -879,7 +879,7 @@ Each official plugin lives in a repository of its own and is released on its own
 **What core publishes,** to GitHub Packages under `OpenCraft-Solutions`, versioned with the SDK (§4) and released from this repository by a tag, `sdk-v<version>`:
 - NuGet `NKeeper.Abstractions`: the backend SDK.
 - npm `@opencraft-solutions/nkeeper-sdk`: the frontend SDK. GitHub Packages names npm packages after their owner, so a plugin depends on it under its import name, `"@nkeeper/sdk": "npm:@opencraft-solutions/nkeeper-sdk@^1.0.0"`, and its code and the shell's import map keep `@nkeeper/sdk`.
-- NuGet `NKeeper.Plugin.Build`: what a plugin's project imports to build, pack and sign it. It's today's `plugins/NKeeperPlugin.targets` and the packaging tool (`nkeeper-plugin`), with no path into core's source.
+- NuGet `NKeeper.Plugin.Build`: what a plugin's project imports to build, pack and sign it. It's what `plugins/NKeeperPlugin.targets` was, before the built-in plugins left this repository, and the packaging tool (`nkeeper-plugin`), with no path into core's source.
 - NuGet `NKeeper.Testing`: the test server and fixtures (PostgreSQL, SSH, xrdp and guacd containers) that plugin tests run against, as core's own do.
 
 Restoring from GitHub Packages needs a GitHub token, even for public packages. A plugin's CI uses its workflow's own token; a developer uses their own.
