@@ -242,6 +242,44 @@ public sealed class HelloPlugin : IPlugin
             }
         });
 
+        // Opens a remote desktop through core (SDK 1.2 for VNC), and returns the opcodes guacd sent until it drew
+        // something or reported an error.
+        use.MapPost("/desktop", async (HostContext host, DesktopProbe? probe, ICredentialBroker broker, IConnectivity connectivity) =>
+        {
+            if (probe is null)
+            {
+                return Results.Text("no probe");
+            }
+
+            try
+            {
+                var handle = await broker.ResolveSavedAsync(host, probe.ServiceId, probe.CredentialId);
+                var options = new DesktopOptions(1024, 768) { Protocol = probe.Protocol, Security = probe.Security };
+                await using var desktop = await connectivity.OpenDesktopAsync(host, probe.ServiceId, handle, options);
+                var opcodes = new List<string>();
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                while (!opcodes.Contains("img") && !opcodes.Contains("error") && await desktop.ReceiveAsync(timeout.Token) is { } text)
+                {
+                    opcodes.AddRange(System.Text.RegularExpressions.Regex.Matches(text, @"(?:^|;)\d+\.([a-z-]+)").Select(m => m.Groups[1].Value));
+                    if (opcodes.Count == 1)
+                    {
+                        // The browser's size, through core's allow-list, as the Guacamole client sends it.
+                        await desktop.SendFromBrowserAsync("4.size,4.1024,3.768,2.96;", timeout.Token);
+                    }
+                }
+
+                return Results.Json(new { opcodes });
+            }
+            catch (ConnectException ex)
+            {
+                return Results.Json(new { reason = ex.Reason.ToString(), message = ex.Message }, statusCode: StatusCodes.Status502BadGateway);
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.Text(ex.Message, statusCode: StatusCodes.Status400BadRequest);
+            }
+        });
+
         var manage = endpoints.MapHostGroup(HostPermission.Manage);
         manage.Map("/raw", context => context.Response.WriteAsync($"managing {context.GetHostContext().Name}"));
     }
@@ -263,6 +301,9 @@ public sealed record CredentialProbe(
 /// <summary>What the SSH endpoint is asked to do.</summary>
 /// <param name="Shell">Run <paramref name="Command"/> in a shell, and read until <paramref name="Expect"/> appears.</param>
 public sealed record TelnetProbe(Guid ServiceId, Guid? CredentialId = null, IReadOnlyList<TelnetStep>? Steps = null);
+
+/// <summary>What the desktop endpoint opens.</summary>
+public sealed record DesktopProbe(Guid ServiceId, Guid CredentialId, DesktopProtocol Protocol = DesktopProtocol.Rdp, DesktopSecurity Security = DesktopSecurity.Any);
 
 /// <summary>Waits for <paramref name="Expect"/> in the terminal, then types <paramref name="Send"/> and Enter.</summary>
 public sealed record TelnetStep(string Expect, string? Send = null);

@@ -588,7 +588,7 @@ Each phase ends in a state that builds, passes tests, **installs as a native Lin
 
 ### Phase 4: Port the remaining features
 Each extension point is introduced with its first user (§4.2), and each plugin ports its 1.x tests. Suggested order, cheapest proofs first:
-1. `desktop` parity (VNC, AD pass-through, clipboard), `telnet`, `linux` (Files, Journal, SELinux, plus **Scanner** and **ServiceTool**: the scan pipeline is built here), `storage`.
+1. `desktop` parity (AD pass-through, clipboard), `vnc` (its own plugin, architecture.md §7.24), `telnet`, `linux` (Files, Journal, SELinux, plus **Scanner** and **ServiceTool**: the scan pipeline is built here), `storage`.
 2. `windows` (RPC, Event Log, WMI scanner), `idrac` (endpoint derivation for RACADM, optional `IWebSessionLauncher`).
 3. `db-core` (**sub-registry** pattern), then `db-mssql`, `db-oracle`, `db-ase`.
 4. `virt-core` (`IGuestProvider` registry, console relay), then `kvm`, `proxmox`, then `migration` (jobs).
@@ -664,7 +664,7 @@ Decided on 2026-11-09 unless marked open. Changing one is a design change: updat
 | `RemoteSessions/JumpTunnel`, `Ssh/SshCommandConnection`, `Ssh/SshScript`, `Ssh/SshAuthentication` | `NKeeper.Core` connectivity |
 | `Ssh/SshTerminalSession`, `Auditing/TerminalRecorder` / `terminal/SshTerminal` | `NKeeper-Plugin-SSH` (recording storage stays core audit) |
 | `Telnet/` | `NKeeper-Plugin-Telnet` |
-| `Desktop/` / `DesktopSession`, vendored guacamole | `NKeeper-Plugin-Desktop` |
+| `Desktop/` / `DesktopSession`, vendored guacamole | `NKeeper-Plugin-Desktop` (RDP), `NKeeper-Plugin-VNC` (VNC) |
 | `Web/` / `WebSession` | `NKeeper-Plugin-Web` (`CertificateTrust` → core trust store) |
 | `SftpController` / `FileBrowser` | `plugins/linux` (Files) |
 | `Journal/`, `Selinux/` + controllers / views | `plugins/linux` |

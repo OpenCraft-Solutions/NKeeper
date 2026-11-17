@@ -25,6 +25,7 @@ public sealed class NamingTests
         // guacd's own protocol name in the Guacamole handshake ("select rdp"), not the desktop plugin's service type,
         // which happens to share it (docs/architecture.md §7.20).
         ["core/backend/NKeeper.Core/Connectivity/DesktopConnector.cs: rdp"] = "guacd's protocol name in the handshake",
+        ["core/backend/NKeeper.Core/Connectivity/DesktopConnector.cs: vnc"] = "guacd's protocol name in the handshake (SDK 1.2)",
     };
 
     public static IReadOnlySet<string> Ids { get; } = PlannedIds

@@ -12,7 +12,7 @@ using NKeeper.Core.Trust;
 namespace NKeeper.Core.Connectivity;
 
 /// <summary>
-/// Remote desktops through guacd (docs/architecture.md §7.20). Core checks the handle and the server's certificate,
+/// Remote desktops through guacd (docs/architecture.md §7.20), RDP and VNC. Core checks the handle and, for RDP, the server's certificate,
 /// and does the Guacamole handshake itself with the credential, so a plugin never sees it and the browser can never
 /// choose the protocol, target or parameters. The browser's instructions then pass core's allow-list.
 /// </summary>
@@ -34,11 +34,14 @@ public sealed class DesktopConnector(
     public async Task<IDesktopConnection> OpenAsync(HostContext host, Guid serviceId, CredentialHandle handle, DesktopOptions options, CancellationToken cancellationToken)
     {
         Check(options);
+        var vnc = options.Protocol == DesktopProtocol.Vnc;
         var (pluginId, _, entry) = await broker.UseAsync(host, serviceId, handle, cancellationToken);
         var material = entry.Material;
-        if (string.IsNullOrEmpty(material.Username) || material.Password is null)
+        if (vnc ? material.Password is null : string.IsNullOrEmpty(material.Username) || material.Password is null)
         {
-            throw new ConnectException(ConnectFailure.NoSecret, "Remote desktops need a username and a password. Edit the credential, or type one.");
+            throw new ConnectException(
+                ConnectFailure.NoSecret,
+                vnc ? "VNC needs a password. Edit the credential, or type one." : "Remote desktops need a username and a password. Edit the credential, or type one.");
         }
 
         var service = host.Services.First(s => s.Id == serviceId);
@@ -62,32 +65,55 @@ public sealed class DesktopConnector(
         try
         {
             var dial = tunnel is null ? null : new HttpConnector.DialTo("127.0.0.1", tunnel.LocalPort);
-            var identity = await RdpCertificateProbe.ProbeAsync(service.Address, port, options.Security, cancellationToken, dial);
-            await CheckTrustAsync(host, serviceId, new TrustEndpoint(host.Id, serviceId, TrustedKeyKind.TlsCertificate, stored.Address ?? string.Empty, port), identity, cancellationToken);
+            var address = dial?.Address ?? service.Address;
+            var portText = (dial?.Port ?? port).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            Dictionary<string, string> values;
+            if (vnc)
+            {
+                // Classic VNC has no server identity to check (1.x's VncValues). Everything not listed stays off: no
+                // SFTP, audio, repeater, reverse connection, recording or Wake-on-LAN.
+                values = new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["hostname"] = address,
+                    ["port"] = portText,
+                    ["username"] = material.Username ?? string.Empty,
+                    ["password"] = material.Password!.Reveal(),
+
+                    // The pointer is drawn by the browser: smoother than waiting for the server to repaint it.
+                    ["cursor"] = "local",
+                    ["color-depth"] = "24",
+                };
+            }
+            else
+            {
+                var identity = await RdpCertificateProbe.ProbeAsync(service.Address, port, options.Security, cancellationToken, dial);
+                await CheckTrustAsync(host, serviceId, new TrustEndpoint(host.Id, serviceId, TrustedKeyKind.TlsCertificate, stored.Address ?? string.Empty, port), identity, cancellationToken);
+                values = new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["hostname"] = address,
+                    ["port"] = portText,
+                    ["username"] = material.Username!,
+                    ["password"] = material.Password!.Reveal(),
+                    ["domain"] = material.Domain ?? string.Empty,
+                    ["security"] = identity.GuacdSecurity,
+
+                    // guacd accepts exactly the certificate just checked against the trust store.
+                    ["cert-fingerprints"] = identity.PinnedFingerprint,
+                    ["resize-method"] = "display-update",
+                };
+            }
 
             var (guacdHost, guacdPort) = GuacdAddress();
             guacd = await GuacdConnection.OpenAsync(guacdHost, guacdPort, cancellationToken);
-            var values = new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["hostname"] = dial?.Address ?? service.Address,
-                ["port"] = (dial?.Port ?? port).ToString(System.Globalization.CultureInfo.InvariantCulture),
-                ["username"] = material.Username,
-                ["password"] = material.Password.Reveal(),
-                ["domain"] = material.Domain ?? string.Empty,
-                ["security"] = identity.GuacdSecurity,
-
-                // guacd accepts exactly the certificate just checked against the trust store.
-                ["cert-fingerprints"] = identity.PinnedFingerprint,
-                ["resize-method"] = "display-update",
-            };
+            var protocol = vnc ? "vnc" : "rdp";
             var ready = await guacd.HandshakeAsync(
-                "rdp",
+                protocol,
                 new GuacdClientInfo(options.Width, options.Height, options.Dpi, options.AudioMimetypes, options.ImageMimetypes, options.Timezone),
                 values,
                 cancellationToken);
             var credential = material.Source == CredentialSource.Saved ? $"credential {material.CredentialId}" : "a typed credential";
-            await audit.RecordAsync(new AuditEntry(AuditActions.CredentialUse, host.Id.ToString(), $"rdp to service {serviceId}, plugin {pluginId}, {credential}"), cancellationToken);
-            return new DesktopConnection(guacd, ready, tunnel);
+            await audit.RecordAsync(new AuditEntry(AuditActions.CredentialUse, host.Id.ToString(), $"{protocol} to service {serviceId}, plugin {pluginId}, {credential}"), cancellationToken);
+            return new DesktopConnection(guacd, ready, tunnel, holdSizeUntilConnected: vnc);
         }
         catch
         {
@@ -140,17 +166,30 @@ public sealed class DesktopConnector(
         {
             throw new ArgumentException("The desktop's size must be between 200 × 200 and 8192 × 8192, at 48 to 480 DPI, with at most 8 plain media types and a time zone name.", nameof(options));
         }
+
+        if (!Enum.IsDefined(options.Protocol) || !Enum.IsDefined(options.Security) || (options.Protocol == DesktopProtocol.Vnc && options.Security != DesktopSecurity.Any))
+        {
+            throw new ArgumentException("A desktop is RDP or VNC, and only RDP takes a security setting.", nameof(options));
+        }
     }
 
     /// <summary>
     /// After the handshake: guacd's instructions out, and the browser's in through 1.x's allow-list
     /// (<see cref="GuacamoleInstructionFilter"/>), so no plugin can pass the browser anything else.
     /// </summary>
-    private sealed class DesktopConnection(GuacdConnection guacd, GuacamoleInstruction ready, IJumpTunnel? tunnel) : IDesktopConnection
+    /// <param name="holdSizeUntilConnected">
+    /// VNC: guacd 1.6.0 crashes on a <c>size</c> from the browser before its VNC client has connected (it resizes a
+    /// display that doesn't exist yet). So the browser's latest size waits for guacd's first <c>sync</c>, which it
+    /// sends only once connected, and goes then (docs/architecture.md §7.20).
+    /// </param>
+    private sealed class DesktopConnection(GuacdConnection guacd, GuacamoleInstruction ready, IJumpTunnel? tunnel, bool holdSizeUntilConnected) : IDesktopConnection
     {
         private readonly GuacamoleInstructionFilter _filter = new();
         private readonly GuacamoleParser _browser = new(1024 * 1024);
+        private readonly Lock _sizeLock = new();
         private GuacamoleInstruction? _ready = ready;
+        private bool _holdingSize = holdSizeUntilConnected;
+        private string? _heldSize;
 
         public async Task<string?> ReceiveAsync(CancellationToken cancellationToken)
         {
@@ -167,9 +206,27 @@ public sealed class DesktopConnector(
 
             // Whatever else already arrived goes with it, in one message.
             var text = new StringBuilder(next.Raw);
+            var synced = next.Opcode == "sync";
             foreach (var buffered in guacd.DrainBuffered())
             {
                 text.Append(buffered.Raw);
+                synced |= buffered.Opcode == "sync";
+            }
+
+            if (synced && Volatile.Read(ref _holdingSize))
+            {
+                string? held;
+                lock (_sizeLock)
+                {
+                    _holdingSize = false;
+                    held = _heldSize;
+                    _heldSize = null;
+                }
+
+                if (held is not null)
+                {
+                    await guacd.WriteAsync(held, cancellationToken);
+                }
             }
 
             return text.ToString();
@@ -181,10 +238,24 @@ public sealed class DesktopConnector(
             var allowed = new StringBuilder();
             while (_browser.TryRead(out var instruction))
             {
-                if (_filter.IsAllowed(instruction))
+                if (!_filter.IsAllowed(instruction))
                 {
-                    allowed.Append(instruction.Raw);
+                    continue;
                 }
+
+                if (instruction.Opcode == "size" && Volatile.Read(ref _holdingSize))
+                {
+                    lock (_sizeLock)
+                    {
+                        if (_holdingSize)
+                        {
+                            _heldSize = instruction.Raw;
+                            continue;
+                        }
+                    }
+                }
+
+                allowed.Append(instruction.Raw);
             }
 
             if (allowed.Length > 0)

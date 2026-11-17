@@ -25,8 +25,9 @@ public interface IConnectivity
     Task<IHttpConnection> OpenHttpAsync(HostContext host, Guid serviceId, bool tls, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// A remote desktop through guacd (docs/architecture.md §7.20, SDK 0.1.9), RDP so far. Core checks the handle and
-    /// the server's certificate, and does the Guacamole handshake with the credential, which the plugin never sees.
+    /// A remote desktop through guacd (docs/architecture.md §7.20, SDK 0.1.9): RDP, or VNC with
+    /// <see cref="DesktopOptions.Protocol"/> (SDK 1.2). Core checks the handle and, for RDP, the server's certificate,
+    /// and does the Guacamole handshake with the credential, which the plugin never sees.
     /// </summary>
     /// <exception cref="DesktopConnectException">The certificate isn't trusted, guacd isn't running, or the server can't be reached.</exception>
     /// <exception cref="CredentialDeniedException">The handle isn't valid here.</exception>
@@ -60,6 +61,15 @@ public interface ITelnetConnection : IAsyncDisposable
     void Resize(int columns, int rows);
 }
 
+/// <summary>The protocol guacd speaks to the server (SDK 1.2).</summary>
+public enum DesktopProtocol
+{
+    Rdp,
+
+    /// <summary>VNC: no server identity to check, and usually a password without a user name.</summary>
+    Vnc,
+}
+
 /// <summary>How an RDP connection secures itself.</summary>
 public enum DesktopSecurity
 {
@@ -76,6 +86,10 @@ public enum DesktopSecurity
 /// <summary>What the browser shows a desktop on, checked by core: a size from 200 × 200 to 8192 × 8192.</summary>
 public sealed record DesktopOptions(int Width, int Height, int Dpi = 96)
 {
+    /// <summary>RDP by default; VNC needs SDK 1.2.</summary>
+    public DesktopProtocol Protocol { get; init; } = DesktopProtocol.Rdp;
+
+    /// <summary>RDP only: VNC takes <see cref="DesktopSecurity.Any"/>.</summary>
     public DesktopSecurity Security { get; init; } = DesktopSecurity.Any;
 
     /// <summary>Audio the browser plays, such as <c>audio/L16</c>; none by default.</summary>
