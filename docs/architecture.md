@@ -802,7 +802,7 @@ await using var telnet = await connectivity.OpenTelnetAsync(host, serviceId, han
 Terminals over Telnet, ported from 1.x's `Telnet/`, in its own repository, `NKeeper-Plugin-Telnet` (§9). It is the SSH plugin's terminal (§7.11) on core's Telnet connection (§7.22):
 - **Service type** `telnet`, port 23, a TCP probe (§7.13), described as unencrypted.
 - **Session type** `telnet`, "Telnet", a stream session (§7.10) on `telnet` services, through jump hosts too, with or without a credential.
-- **Host action** `telnet.terminal`, "Telnet", with an optional credential.
+- **Host actions** `telnet.terminal`, "Telnet", with a credential that core signs in with, and `telnet.typed`, "Telnet (sign in yourself)", without one, for the user to type at the server's prompts.
 - **The session** relays the terminal's bytes and `resize` messages between the browser and the connection, as the SSH plugin does.
 - **Its frontend** is the terminal view, as the SSH plugin's.
 
