@@ -822,7 +822,7 @@ VNC desktops, ported from 1.x's VNC sessions (`Desktop/DesktopSession`), in its 
 - **Host action** `vnc.desktop`, "VNC", with a credential: usually a password only.
 - **The session** relays Guacamole instructions between the browser and the connection, as the desktop plugin does; `options` are the browser's size, DPI and time zone.
 - **Its frontend** is the `vnc` session view: the desktop plugin's view, with Guacamole's JavaScript client bundled with this plugin too, since plugins don't share code.
-- **It isn't built in** until its first release is in `deploy/plugins.lock` (§9).
+- **Built in:** its releases are in `deploy/plugins.lock` (§9), from `1.0.0`.
 
 ## 8. The native install
 

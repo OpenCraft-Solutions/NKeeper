@@ -9,3 +9,5 @@ ssh 1.0.0 https://github.com/OpenCraft-Solutions/NKeeper-Plugin-SSH/releases/dow
 web 1.0.1 https://github.com/OpenCraft-Solutions/NKeeper-Plugin-Web/releases/download/v1.0.1/web-1.0.1.nkp 5094d5a6ddea848ee4819726a68e4fa607409fd1ef048b25c4b3216647b15f55
 desktop 1.0.0 https://github.com/OpenCraft-Solutions/NKeeper-Plugin-Desktop/releases/download/v1.0.0/desktop-1.0.0.nkp ad6845246feea11f6341cc276d04b9bfc236f3b3640cdb5d1fce3caa821df7e8
 wake-on-lan 1.0.0 https://github.com/OpenCraft-Solutions/NKeeper-Plugin-WakeOnLan/releases/download/v1.0.0/wake-on-lan-1.0.0.nkp 2d0487c979b285885e81fe3161313e39252bddf002752fc47744b638ab34b49f
+telnet 1.0.0 https://github.com/OpenCraft-Solutions/NKeeper-Plugin-Telnet/releases/download/v1.0.0/telnet-1.0.0.nkp 0347a56de03a0cf98d2052c77feac001f1e93cc7e81dd44bbf4bace5a7f3ee0e
+vnc 1.0.0 https://github.com/OpenCraft-Solutions/NKeeper-Plugin-VNC/releases/download/v1.0.0/vnc-1.0.0.nkp 730d9a4cca33b79c06374bb51d461fc73bd898ffdce8586b30ac174a00e10e3d
