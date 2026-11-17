@@ -61,7 +61,7 @@ public sealed class SshConnectivity(SshConnectionPlanner planner, TrustStore tru
             SshClient? jump = null;
             try
             {
-                jump = await ConnectAsync(jumpEnd, jumpEnd.Address, jumpEnd.Port, plan, isJump: true, cancellationToken);
+                jump = await ConnectAsync(jumpEnd, jumpEnd.Address, jumpEnd.Port, plan, isJump: true, info => new SshClient(info), cancellationToken);
                 var forward = Forward(jump, jumpEnd, address, port);
                 await audit.RecordAsync(
                     new AuditEntry(AuditActions.CredentialUse, host.Id.ToString(), $"tunnel to {address}:{port}, plugin {plan.PluginId}, {plan.Credential}"),
@@ -90,6 +90,21 @@ public sealed class SshConnectivity(SshConnectionPlanner planner, TrustStore tru
 
     public async Task<ISshConnection> OpenSshAsync(HostContext host, Guid serviceId, CredentialHandle handle, CancellationToken cancellationToken = default)
     {
+        var (client, forward, jump) = await OpenAsync(host, serviceId, handle, "ssh", info => new SshClient(info), cancellationToken);
+        return new SshConnection(client, forward, jump);
+    }
+
+    public async Task<ISftpConnection> OpenSftpAsync(HostContext host, Guid serviceId, CredentialHandle handle, CancellationToken cancellationToken = default)
+    {
+        var (client, forward, jump) = await OpenAsync(host, serviceId, handle, "sftp", info => new SftpClient(info), cancellationToken);
+        return new SftpConnection(client, forward, jump);
+    }
+
+    /// <summary>Plans, connects through the jump host if there is one, signs in and audits the credential's use.</summary>
+    private async Task<(T Client, ForwardedPortLocal? Forward, SshClient? Jump)> OpenAsync<T>(
+        HostContext host, Guid serviceId, CredentialHandle handle, string kind, Func<ConnectionInfo, T> create, CancellationToken cancellationToken)
+        where T : BaseClient
+    {
         using var plan = await planner.PlanAsync(host, serviceId, handle, cancellationToken);
         SshClient? jump = null;
         ForwardedPortLocal? forward = null;
@@ -98,17 +113,17 @@ public sealed class SshConnectivity(SshConnectionPlanner planner, TrustStore tru
             var (address, port) = (plan.Target.Address, plan.Target.Port);
             if (plan.Jump is { } jumpEnd)
             {
-                jump = await ConnectAsync(jumpEnd, jumpEnd.Address, jumpEnd.Port, plan, isJump: true, cancellationToken);
+                jump = await ConnectAsync(jumpEnd, jumpEnd.Address, jumpEnd.Port, plan, isJump: true, info => new SshClient(info), cancellationToken);
                 forward = Forward(jump, jumpEnd, address, port);
                 (address, port) = ("127.0.0.1", (int)forward.BoundPort);
             }
 
             // The target's own key is checked against the target, even through the tunnel.
-            var client = await ConnectAsync(plan.Target, address, port, plan, isJump: false, cancellationToken);
+            var client = await ConnectAsync(plan.Target, address, port, plan, isJump: false, create, cancellationToken);
             await audit.RecordAsync(
-                new AuditEntry(AuditActions.CredentialUse, host.Id.ToString(), $"ssh to service {serviceId}, plugin {plan.PluginId}, {plan.Credential}"),
+                new AuditEntry(AuditActions.CredentialUse, host.Id.ToString(), $"{kind} to service {serviceId}, plugin {plan.PluginId}, {plan.Credential}"),
                 cancellationToken);
-            return new SshConnection(client, forward, jump);
+            return (client, forward, jump);
         }
         catch
         {
@@ -119,13 +134,12 @@ public sealed class SshConnectivity(SshConnectionPlanner planner, TrustStore tru
 
     /// <summary>Connects to one end and signs in, checking its key first.</summary>
     /// <param name="address">Where to dial: the end itself, or the tunnel's local end.</param>
-    private async Task<SshClient> ConnectAsync(SshEndpoint end, string address, int port, SshPlan plan, bool isJump, CancellationToken cancellationToken)
+    private async Task<T> ConnectAsync<T>(SshEndpoint end, string address, int port, SshPlan plan, bool isJump, Func<ConnectionInfo, T> create, CancellationToken cancellationToken)
+        where T : BaseClient
     {
         var methods = Methods(end, isJump);
-        var client = new SshClient(new ConnectionInfo(address, port, end.Username, [.. methods]) { Timeout = ConnectTimeout })
-        {
-            KeepAliveInterval = KeepAliveInterval,
-        };
+        var client = create(new ConnectionInfo(address, port, end.Username, [.. methods]) { Timeout = ConnectTimeout });
+        client.KeepAliveInterval = KeepAliveInterval;
 
         (string Algorithm, string Fingerprint, TrustVerdict Verdict)? presented = null;
         client.HostKeyReceived += (_, e) =>
@@ -295,11 +309,63 @@ internal sealed class SshConnection(SshClient client, ForwardedPortLocal? forwar
         return Task.FromResult<ISshShell>(new SshShell(stream));
     }
 
+    public Task<ISshCommand> StartAsync(string command, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(command);
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult<ISshCommand>(new StreamingCommand(client.CreateCommand(command)));
+    }
+
     public ValueTask DisposeAsync()
     {
         client.Dispose();
         SshConnectivity.Close(forward, jump);
         return ValueTask.CompletedTask;
+    }
+}
+
+/// <summary>A command whose output is read as it comes (SDK 1.3). Disposing it cancels it, which closes its channel.</summary>
+internal sealed class StreamingCommand : ISshCommand
+{
+    private const int MaxError = 64 * 1024;
+
+    private readonly SshCommand _command;
+    private readonly CancellationTokenSource _stop = new();
+    private readonly Task _run;
+
+    public StreamingCommand(SshCommand command)
+    {
+        _command = command;
+        _run = command.ExecuteAsync(_stop.Token);
+    }
+
+    public Stream Output => _command.OutputStream;
+
+    public async Task<SshCommandResult> WaitAsync(CancellationToken cancellationToken = default)
+    {
+        await _run.WaitAsync(cancellationToken);
+        var error = _command.Error;
+        return new SshCommandResult(_command.ExitStatus, string.Empty, error.Length > MaxError ? error[..MaxError] : error);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (!_run.IsCompleted)
+        {
+            await _stop.CancelAsync();
+        }
+
+        try
+        {
+            await _run;
+        }
+        catch (Exception ex) when (ex is OperationCanceledException or SshException or ObjectDisposedException)
+        {
+            // Stopped, or the connection went: either way it's over.
+        }
+
+        _command.Dispose();
+        _stop.Dispose();
     }
 }
 

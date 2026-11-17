@@ -43,6 +43,15 @@ public interface IConnectivity
     /// <exception cref="CredentialDeniedException">The handle isn't valid here.</exception>
     Task<ITelnetConnection> OpenTelnetAsync(HostContext host, Guid serviceId, CredentialHandle? handle, TerminalSize size, CancellationToken cancellationToken = default)
         => throw new NotSupportedException("This server doesn't open Telnet connections: it needs SDK 1.1.");
+
+    /// <summary>
+    /// An SFTP connection to one SSH service of the host (docs/architecture.md §7.9, SDK 1.3), with every check of
+    /// <see cref="OpenSshAsync"/>: the handle, the jump host, the server's key and the sign-in.
+    /// </summary>
+    /// <exception cref="CredentialDeniedException">The handle isn't valid here.</exception>
+    /// <exception cref="ConnectException">The connection couldn't be opened; <see cref="ConnectException.Reason"/> says why.</exception>
+    Task<ISftpConnection> OpenSftpAsync(HostContext host, Guid serviceId, CredentialHandle handle, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("This server doesn't open SFTP connections: it needs SDK 1.3.");
 }
 
 /// <summary>A terminal's size, from 1 × 1 to 1000 × 1000 (SDK 1.1).</summary>
@@ -133,6 +142,84 @@ public interface ISshConnection : IAsyncDisposable
 
     /// <summary>Starts an interactive shell on a pseudo-terminal.</summary>
     Task<ISshShell> OpenShellAsync(SshTerminal terminal, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Starts a command and returns at once, for output read as it comes, such as <c>journalctl --follow</c>
+    /// (docs/architecture.md §7.9, SDK 1.3). Disposing it before it ends stops it.
+    /// </summary>
+    Task<ISshCommand> StartAsync(string command, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("This server doesn't stream commands: it needs SDK 1.3.");
+}
+
+/// <summary>A running command (SDK 1.3). Disposing it stops it if it's still running; the connection stays open.</summary>
+public interface ISshCommand : IAsyncDisposable
+{
+    /// <summary>The command's standard output, as it comes. It ends when the command does.</summary>
+    Stream Output { get; }
+
+    /// <summary>Waits for the command to end: its exit status and error output (at most 64 KB), with no output (that was <see cref="Output"/>).</summary>
+    Task<SshCommandResult> WaitAsync(CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// An open, authenticated SFTP connection (docs/architecture.md §7.9, SDK 1.3). Paths are absolute. Disposing it
+/// closes it, and its jump host tunnel.
+/// </summary>
+public interface ISftpConnection : IAsyncDisposable
+{
+    /// <summary>Where the login starts, as an absolute path.</summary>
+    string HomeDirectory { get; }
+
+    /// <summary>A folder's entries, without <c>.</c> and <c>..</c>.</summary>
+    Task<IReadOnlyList<SftpEntry>> ListAsync(string path, CancellationToken cancellationToken = default);
+
+    /// <summary>One entry. A link is reported as the link, not what it points to.</summary>
+    Task<SftpEntry> GetAsync(string path, CancellationToken cancellationToken = default);
+
+    Task<Stream> OpenReadAsync(string path, CancellationToken cancellationToken = default);
+
+    /// <summary>Creates the file, or with <paramref name="overwrite"/> replaces it; without, a file that exists is refused (<see cref="SftpFailure.AlreadyExists"/>).</summary>
+    Task<Stream> OpenWriteAsync(string path, bool overwrite, CancellationToken cancellationToken = default);
+
+    Task CreateDirectoryAsync(string path, CancellationToken cancellationToken = default);
+
+    Task DeleteFileAsync(string path, CancellationToken cancellationToken = default);
+
+    /// <summary>Deletes an empty folder.</summary>
+    Task DeleteDirectoryAsync(string path, CancellationToken cancellationToken = default);
+
+    Task RenameAsync(string path, string newPath, CancellationToken cancellationToken = default);
+}
+
+public enum SftpEntryKind
+{
+    File,
+    Directory,
+    Link,
+    Other,
+}
+
+/// <param name="Path">Absolute.</param>
+/// <param name="Size">In bytes; 0 for a folder.</param>
+/// <param name="Permissions">Like <c>rwxr-xr-x</c>.</param>
+public sealed record SftpEntry(string Name, string Path, SftpEntryKind Kind, long Size, DateTimeOffset ModifiedUtc, string Permissions);
+
+/// <summary>Why an SFTP operation failed (SDK 1.3).</summary>
+public enum SftpFailure
+{
+    NotFound,
+    PermissionDenied,
+    AlreadyExists,
+    /// <summary>The connection closed.</summary>
+    ConnectionLost,
+    /// <summary>The server refused for another reason; the message has it.</summary>
+    Failed,
+}
+
+/// <summary>An SFTP operation failed; the message names the path, and is fit to show the user.</summary>
+public sealed class SftpException(SftpFailure reason, string message) : Exception(message)
+{
+    public SftpFailure Reason { get; } = reason;
 }
 
 /// <summary>What a command left behind.</summary>
