@@ -257,7 +257,7 @@
       "nkeeper.plugins.host": {
         "type": "Project",
         "dependencies": {
-          "NKeeper.Abstractions": "[1.0.0, )",
+          "NKeeper.Abstractions": "[1.1.0, )",
           "NKeeper.Plugins.Packaging": "[2.0.0-dev, )"
         }
       },

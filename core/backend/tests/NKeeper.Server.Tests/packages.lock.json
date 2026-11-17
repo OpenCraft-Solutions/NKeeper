@@ -645,7 +645,7 @@
       "nkeeper.connectivity.ssh": {
         "type": "Project",
         "dependencies": {
-          "NKeeper.Abstractions": "[1.0.0, )",
+          "NKeeper.Abstractions": "[1.1.0, )",
           "NKeeper.Core": "[2.0.0-dev, )",
           "SSH.NET": "[2026.0.0, )"
         }
@@ -675,7 +675,7 @@
       "nkeeper.plugins.host": {
         "type": "Project",
         "dependencies": {
-          "NKeeper.Abstractions": "[1.0.0, )",
+          "NKeeper.Abstractions": "[1.1.0, )",
           "NKeeper.Plugins.Packaging": "[2.0.0-dev, )"
         }
       },
@@ -685,7 +685,7 @@
       "nkeeper.server": {
         "type": "Project",
         "dependencies": {
-          "NKeeper.Abstractions": "[1.0.0, )",
+          "NKeeper.Abstractions": "[1.1.0, )",
           "NKeeper.Connectivity.Ssh": "[2.0.0-dev, )",
           "NKeeper.Core": "[2.0.0-dev, )",
           "NKeeper.Core.Persistence": "[2.0.0-dev, )",

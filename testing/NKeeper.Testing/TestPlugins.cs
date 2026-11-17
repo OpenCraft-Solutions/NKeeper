@@ -62,58 +62,6 @@ public static class TestPlugins
         return PackageBuilder.Build(Encoding.UTF8.GetBytes(manifest), files, key);
     }
 
-    /// <summary>
-    /// The ssh plugin (plugins/ssh), packaged from its own manifest and build output, its frontend
-    /// included, signed with <paramref name="key"/>. Building the plugin builds its frontend.
-    /// </summary>
-    public static BuiltPackage SshPackage(PluginSigningKey key)
-    {
-        string Metadata(string name) => typeof(TestPlugins).Assembly.GetCustomAttributes<AssemblyMetadataAttribute>().Single(a => a.Key == name).Value!;
-        var files = new Dictionary<string, byte[]> { ["backend/NKeeper.Plugins.Ssh.dll"] = File.ReadAllBytes(Metadata("SshPluginPath")) };
-        var frontend = Metadata("SshPluginFrontend");
-        foreach (var path in Directory.EnumerateFiles(frontend, "*", SearchOption.AllDirectories))
-        {
-            files["frontend/" + Path.GetRelativePath(frontend, path).Replace(Path.DirectorySeparatorChar, '/')] = File.ReadAllBytes(path);
-        }
-
-        return PackageBuilder.Build(File.ReadAllBytes(Metadata("SshPluginManifest")), files, key);
-    }
-
-    /// <summary>The wake-on-lan plugin (plugins/wake-on-lan), packaged from its own manifest and build output, signed with <paramref name="key"/>.</summary>
-    public static BuiltPackage WakeOnLanPackage(PluginSigningKey key)
-    {
-        string Metadata(string name) => typeof(TestPlugins).Assembly.GetCustomAttributes<AssemblyMetadataAttribute>().Single(a => a.Key == name).Value!;
-        return PackageBuilder.Build(
-            File.ReadAllBytes(Metadata("WakeOnLanPluginManifest")),
-            new Dictionary<string, byte[]> { ["backend/NKeeper.Plugins.WakeOnLan.dll"] = File.ReadAllBytes(Metadata("WakeOnLanPluginPath")) },
-            key);
-    }
-
-    /// <summary>
-    /// The web plugin (plugins/web), packaged from its own manifest, the backend files its build staged for packing
-    /// (YARP included), and its frontend, signed with <paramref name="key"/>.
-    /// </summary>
-    public static BuiltPackage WebPackage(PluginSigningKey key) => StagedPackage(key, "Web");
-
-    /// <summary>The desktop plugin (plugins/desktop), packaged like <see cref="WebPackage"/>.</summary>
-    public static BuiltPackage DesktopPackage(PluginSigningKey key) => StagedPackage(key, "Desktop");
-
-    /// <summary>A plugin packaged from its manifest, the backend files its build staged for packing, and its frontend.</summary>
-    private static BuiltPackage StagedPackage(PluginSigningKey key, string name)
-    {
-        string Metadata(string item) => typeof(TestPlugins).Assembly.GetCustomAttributes<AssemblyMetadataAttribute>().Single(a => a.Key == $"{name}Plugin{item}").Value!;
-        var files = new Dictionary<string, byte[]>();
-        foreach (var (folder, prefix) in new[] { (Metadata("Output"), "backend/"), (Metadata("Frontend"), "frontend/") })
-        {
-            foreach (var path in Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories))
-            {
-                files[prefix + Path.GetRelativePath(folder, path).Replace(Path.DirectorySeparatorChar, '/')] = File.ReadAllBytes(path);
-            }
-        }
-
-        return PackageBuilder.Build(File.ReadAllBytes(Metadata("Manifest")), files, key);
-    }
-
     /// <summary>Writes a package into <paramref name="directory"/> and returns its path.</summary>
     public static string WriteTo(this BuiltPackage package, string directory)
     {
