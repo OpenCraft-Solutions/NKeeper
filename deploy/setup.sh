@@ -31,7 +31,7 @@ readonly GUACD_PREFIX=/usr/lib/nkeeper/guacd
 readonly FREERDP_VERSION=2.11.7
 readonly FREERDP_SHA256=5a2d54e1ca0f1facd1632bcc94c73b9f071a80c5fdbbb3f26e79f02aaa586ca3
 # Bumped when the build itself changes, so upgrades rebuild it.
-readonly GUACD_BUILD="guacd-$GUACD_VERSION+freerdp-$FREERDP_VERSION-2"
+readonly GUACD_BUILD="guacd-$GUACD_VERSION+freerdp-$FREERDP_VERSION-3"
 
 usage() {
     cat <<'EOF'
@@ -357,10 +357,12 @@ configure() {
 # --- guacd -----------------------------------------------------------------------------------------
 
 # The packages guacd and FreeRDP build against. FreeRDP itself is built from source (below), not the distribution's.
+# VNC uses the distribution's libvncclient; without it guacd is built with RDP only (docs/architecture.md §8).
 guacd_build_packages() {
     if [ "$pm" = apt ]; then
         apt-get install -y -qq build-essential cmake pkg-config libtool-bin libcairo2-dev libjpeg-dev libpng-dev uuid-dev \
             libssl-dev libwebp-dev zlib1g-dev >/dev/null
+        apt-get install -y -qq libvncserver-dev >/dev/null 2>&1 || true
     else
         # A few of these are in CRB on the RHEL family.
         if [ -f /etc/os-release ] && ! grep -qi '^ID="\?fedora' /etc/os-release; then
@@ -369,6 +371,7 @@ guacd_build_packages() {
         fi
         dnf install -y -q gcc gcc-c++ make cmake pkgconf libtool cairo-devel libjpeg-turbo-devel libpng-devel libuuid-devel \
             openssl-devel libwebp-devel zlib-devel >/dev/null
+        dnf install -y -q libvncserver-devel >/dev/null 2>&1 || true
     fi
 }
 
@@ -412,10 +415,11 @@ build_guacd() {
         cmake --install "$work/freerdp/build" >>"$work/freerdp.log" 2>&1) ||
         { tail -n 30 "$work/freerdp.log" >&2; die "Building FreeRDP failed (above)."; }
 
-    # guacd against that FreeRDP, RDP only. It builds with warnings as errors, which FreeRDP's deprecations aren't.
+    # guacd against that FreeRDP, with RDP and VNC only. It builds with warnings as errors, which FreeRDP's
+    # deprecations aren't.
     (cd "$work/guacd" && PKG_CONFIG_PATH="$GUACD_PREFIX/lib/pkgconfig" CFLAGS="-O2 -Wno-error=deprecated-declarations" \
         LDFLAGS="-Wl,-rpath,$GUACD_PREFIX/lib" ./configure --prefix="$GUACD_PREFIX" \
-        --with-freerdp-plugin-dir="$GUACD_PREFIX/lib/freerdp2" --without-vnc --without-ssh --without-telnet \
+        --with-freerdp-plugin-dir="$GUACD_PREFIX/lib/freerdp2" --without-ssh --without-telnet --without-pulse \
         --without-websockets --without-pango --without-terminal --disable-guacenc --disable-guaclog --disable-kubernetes \
         >"$work/guacd.log" 2>&1) ||
         { tail -n 30 "$work/guacd.log" >&2; die "guacamole-server's configure failed (above)."; }
@@ -423,6 +427,8 @@ build_guacd() {
         { grep -A12 'Protocol support' "$work/guacd.log" >&2; die "guacamole-server would build without RDP support."; }
     grep -q "$GUACD_PREFIX/include/freerdp2" "$work/guacd/config.log" ||
         die "guacamole-server didn't pick the FreeRDP built for it."
+    grep -q 'VNC .*\.\.\. yes' "$work/guacd.log" ||
+        warn "This distribution has no libvncclient to build against: guacd is built with RDP only, and VNC desktops won't work."
     (cd "$work/guacd" && make -j"$(nproc)" >>"$work/guacd.log" 2>&1 && make install >>"$work/guacd.log" 2>&1) ||
         { tail -n 30 "$work/guacd.log" >&2; die "Building guacd failed (above)."; }
     chown -R root:root "$GUACD_PREFIX"

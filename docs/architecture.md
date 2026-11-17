@@ -71,7 +71,7 @@ public sealed class WakeOnLanPlugin : IPlugin
 - More contracts (plugin settings, scanners, reports) arrive with their first real users ([v2-plan.md §4.2](v2-plan.md#42-contribution-catalogue)), as additions to SDK v1.
 - **SDK versions.** A manifest declares the SDK range it supports, and a package outside the server's `SdkVersion` is refused. Within v0, an addition raises the patch number (`0.1.1` added the host scope, `0.1.2` service types, `0.1.3` the credential broker, `0.1.4` SSH connections, `0.1.5` stream sessions, `0.1.6` host actions, health probes and, in the frontend SDK, session views, `0.1.7` run actions and plugin audit events, `0.1.8` HTTPS connections, stateful sessions, session origins and, in the frontend SDK, `confirmTrust`, `0.1.9` desktop connections) and a breaking change raises the minor one.
 - **SDK v1 (1.0.0)** froze the SDK at the end of Phase 3, after a review of what Phases 1 and 2 used ([v2-plan.md, Phase 3](v2-plan.md#phase-3-freeze-sdk-v1)). From v1, a fix that changes no API raises the patch number, an addition the minor number, and a breaking change the major one, which the plan avoids. So a plugin built for `>=1.0.0 <2.0.0` keeps loading, and one that uses an addition declares the version that brought it. The frontend SDK, `@nkeeper/sdk`, is versioned with it. [plugin-authoring.md](plugin-authoring.md) shows how to write a plugin against it.
-- **Since v1:** `1.0.1` fixed `NKeeper.Testing`'s `TestPlugins` outside this repository; `1.1.0` adds Telnet connections (§7.22). `NKeeper.Testing`'s helpers that packaged the built-in plugins from this repository's build (`TestPlugins.SshPackage` and the like) went with them: they only ever worked here.
+- **Since v1:** `1.0.1` fixed `NKeeper.Testing`'s `TestPlugins` outside this repository; `1.1.0` adds Telnet connections (§7.22); `1.2.0` adds VNC desktops (§7.20). `NKeeper.Testing`'s helpers that packaged the built-in plugins from this repository's build (`TestPlugins.SshPackage` and the like) went with them: they only ever worked here.
 
 ## 5. Frontend extension point
 
@@ -753,7 +753,7 @@ await using var desktop = await connectivity.OpenDesktopAsync(host, serviceId, h
 // desktop.ReceiveAsync: guacd's instructions for the browser; desktop.SendFromBrowserAsync: the browser's, filtered
 ```
 
-- `IConnectivity.OpenDesktopAsync(host, serviceId, handle, options)`, for an RDP service, so far:
+- `IConnectivity.OpenDesktopAsync(host, serviceId, handle, options)`, for an RDP service, or a VNC one when `options.Protocol` is `Vnc` (SDK 1.2, below):
   - checks the handle, as for SSH (§7.9), and audits `credential.use`;
   - **checks the server's certificate first.** It reads the certificate RDP offers (an X.224 negotiation, then a TLS handshake), and checks it like an HTTPS one (§7.16): publicly valid, or the one trusted for the host. An unknown one fails with `ConnectException` and `HostKeyUnknown`, carrying the certificate, which core remembers it presented. A changed one fails with `HostKeyChanged`, audited as `trust.mismatch`;
   - through a jump host, opens a tunnel (§7.16), and guacd connects to its loopback end;
@@ -767,11 +767,19 @@ await using var desktop = await connectivity.OpenDesktopAsync(host, serviceId, h
       - text that doesn't parse as instructions throws, and the session ends.
 - **Options** come from the plugin, and are checked: the size (between 200 × 200 and 8192 × 8192), DPI, the audio and image types the browser takes, and its time zone.
 - guacd that isn't running fails with `GatewayUnavailable`.
+- **VNC** (SDK 1.2): `DesktopOptions.Protocol` is `Rdp` by default, so plugins built before it are unchanged. With `Vnc`, core:
+  - checks the handle, as for RDP, and audits `credential.use` as `vnc to service …`. VNC servers usually ask for a password only, so the credential needs a password, and its user name is optional (sent for servers that ask for one). A credential without a password fails with `NoSecret`: core doesn't open servers that need no password at all;
+  - **checks no server identity:** classic VNC has none to check, so there is no trust prompt, as 1.x did. The connection between guacd and the server is unencrypted unless the server offers VeNCrypt, and even then guacd doesn't verify its certificate;
+  - through a jump host, opens a tunnel, as for RDP. 1.x refused jump hosts for VNC; core's tunnels make them work;
+  - selects `vnc` in the handshake, with the address, port, user name, password, `color-depth` 24 and the pointer drawn by the browser (`cursor` `local`), as 1.x did. Everything else stays off: no SFTP, audio, repeater, reverse connection, recording or Wake-on-LAN;
+  - refuses `Security` other than `Any`, which only means something for RDP;
+  - relays through the same allow-list as RDP. A wrong password arrives from guacd as an `error` instruction, after `ready`, as with RDP;
+  - **holds the browser's `size` until guacd is connected.** guacd 1.6.0 crashes on a `size` that arrives before its VNC client has connected to the server: it resizes a display that doesn't exist yet, and the session hangs with no error. So core keeps the browser's latest `size` until guacd's first `sync`, which it sends only once connected, then passes it on.
 - **The Guacamole protocol code** (parser, encoder, handshake) is core's, ported from 1.x's `GuacamoleProtocol` and `GuacdConnection`.
 
 ### 7.21 The `desktop` plugin
 
-RDP through guacd, as a proof that the SDK carries a third kind of session (v2-plan.md, Phase 2): ported from 1.x's `Desktop/`. VNC, sign-in pass-through and clipboard settings follow in Phase 4.
+RDP through guacd, as a proof that the SDK carries a third kind of session (v2-plan.md, Phase 2): ported from 1.x's `Desktop/`. Sign-in pass-through and clipboard settings follow in Phase 4. VNC is a plugin of its own (§7.24).
 - **Service type** `rdp`, port 3389, TLS probe (§7.13).
 - **Session type** `rdp`, "Desktop", a stream session (§7.10) on `rdp` services, through jump hosts too.
 - **Host action** `rdp.desktop`, "Desktop", with a credential.
@@ -805,6 +813,16 @@ Terminals over Telnet, ported from 1.x's `Telnet/`, in its own repository, `NKee
 - **Host actions** `telnet.terminal`, "Telnet", with a credential that core signs in with, and `telnet.typed`, "Telnet (sign in yourself)", without one, for the user to type at the server's prompts.
 - **The session** relays the terminal's bytes and `resize` messages between the browser and the connection, as the SSH plugin does.
 - **Its frontend** is the terminal view, as the SSH plugin's.
+
+### 7.24 The `vnc` plugin
+
+VNC desktops, ported from 1.x's VNC sessions (`Desktop/DesktopSession`), in its own repository, `NKeeper-Plugin-VNC` (§9). It is the desktop plugin (§7.21) on core's desktop connection with `Protocol` `Vnc` (§7.20), so it needs SDK 1.2 (`>=1.2.0 <2.0.0`):
+- **Service type** `vnc`, "VNC", port 5900, a TCP probe (§7.13).
+- **Session type** `vnc`, "VNC", a stream session (§7.10) on `vnc` services, through jump hosts too.
+- **Host action** `vnc.desktop`, "VNC", with a credential: usually a password only.
+- **The session** relays Guacamole instructions between the browser and the connection, as the desktop plugin does; `options` are the browser's size, DPI and time zone.
+- **Its frontend** is the `vnc` session view: the desktop plugin's view, with Guacamole's JavaScript client bundled with this plugin too, since plugins don't share code.
+- **It isn't built in** until its first release is in `deploy/plugins.lock` (§9).
 
 ## 8. The native install
 
@@ -847,7 +865,7 @@ Terminals over Telnet, ported from 1.x's `Telnet/`, in its own repository, `NKee
 
 **guacd, as a native service** (D11). Remote desktops need guacd (§7.20). Distributions don't ship guacd 1.6, so the installer builds it, with the FreeRDP it runs on:
 - **FreeRDP 2.11.7**, built first, the version Apache's own guacd images use. It's built with its own MD4, which NLA's NTLM sign-in needs and OpenSSL 3 leaves out by default. guacd 1.6.0 crashes on FreeRDP 3.31 and newer, a known upstream bug ([FreeRDP#13342](https://github.com/FreeRDP/FreeRDP/issues/13342)), and the RHEL 10 family ships 3.32. Building it everywhere gives guacd the same, known-good FreeRDP on every distribution, and the distribution's own FreeRDP is left alone;
-- **guacamole-server 1.6.0**, against that FreeRDP, with RDP only: no SSH, telnet, VNC or Kubernetes (VNC comes with Phase 4);
+- **guacamole-server 1.6.0**, against that FreeRDP, with RDP and VNC only: no SSH, telnet or Kubernetes. VNC uses the distribution's libvncclient (`libvncserver-dev`, `libvncserver-devel`). Where that package isn't available, guacd is built with RDP only, the installer says so, and VNC desktops end with an error from guacd;
 - both from their source releases, checked against SHA-256 hashes pinned in the installer. guacamole-server's was checked against its release signature by Apache's code-signing key when it was pinned. FreeRDP's was checked against two separately hosted copies, pub.freerdp.com and its GitHub release, which were identical;
 - into `/usr/lib/nkeeper/guacd/`, root-owned, rebuilt only when either version changes;
 - on the RHEL family, a few build packages come from CRB, which the installer enables;
@@ -873,14 +891,14 @@ Each official plugin lives in a repository of its own and is released on its own
 
 **Repositories,** all under `OpenCraft-Solutions`:
 - `NKeeper`, this one: the server, the shell, the SDK, the plugin tooling, the test helpers and the installer.
-- `NKeeper-Plugin-<Name>` for each official plugin: `NKeeper-Plugin-SSH`, `NKeeper-Plugin-Web`, `NKeeper-Plugin-Desktop`, `NKeeper-Plugin-WakeOnLan`, and each new one (`NKeeper-Plugin-Telnet`, `NKeeper-Plugin-iDRAC`…). A plugin's ID doesn't change when it moves.
+- `NKeeper-Plugin-<Name>` for each official plugin: `NKeeper-Plugin-SSH`, `NKeeper-Plugin-Web`, `NKeeper-Plugin-Desktop`, `NKeeper-Plugin-WakeOnLan`, and each new one (`NKeeper-Plugin-Telnet`, `NKeeper-Plugin-VNC`, `NKeeper-Plugin-iDRAC`…). A plugin's ID doesn't change when it moves.
 - A plugin repository holds the plugin's backend, frontend, manifest and tests, and its own CI and release workflow. It references nothing of core's but the published packages below.
 
 **What core publishes,** to GitHub Packages under `OpenCraft-Solutions`, versioned with the SDK (§4) and released from this repository by a tag, `sdk-v<version>`:
 - NuGet `NKeeper.Abstractions`: the backend SDK.
 - npm `@opencraft-solutions/nkeeper-sdk`: the frontend SDK. GitHub Packages names npm packages after their owner, so a plugin depends on it under its import name, `"@nkeeper/sdk": "npm:@opencraft-solutions/nkeeper-sdk@^1.0.0"`, and its code and the shell's import map keep `@nkeeper/sdk`.
 - NuGet `NKeeper.Plugin.Build`: what a plugin's project imports to build, pack and sign it. It's what `plugins/NKeeperPlugin.targets` was, before the built-in plugins left this repository, and the packaging tool (`nkeeper-plugin`), with no path into core's source.
-- NuGet `NKeeper.Testing`: the test server and fixtures (PostgreSQL, SSH, xrdp and guacd containers) that plugin tests run against, as core's own do.
+- NuGet `NKeeper.Testing`: the test server and fixtures (PostgreSQL, SSH, xrdp, TigerVNC and guacd containers) that plugin tests run against, as core's own do.
 
 Restoring from GitHub Packages needs a GitHub token, even for public packages. A plugin's CI uses its workflow's own token; a developer uses their own.
 
@@ -899,7 +917,7 @@ The official key's private half exists only as an organisation secret, available
 **How each package is built** (decisions for the first release of them):
 - **The frontend SDK** is built from `core/frontend/sdk`, which stays `@nkeeper/sdk` and private to this repository's workspaces. Its build writes a publishable package to `core/frontend/sdk/dist`: the modules bundled into one `index.js` (React stays external, a peer dependency), the type declarations, and a `package.json` named `@opencraft-solutions/nkeeper-sdk` with the workspace's version. The release publishes that folder.
 - **`NKeeper.Plugin.Build`** carries the packaging tool, published framework-dependent, under `tools/`, and imports the build targets automatically (a `PackageReference` with `PrivateAssets="all"` is all a plugin's project needs). It depends on `NKeeper.Abstractions` of the same version, so a plugin needs no reference of its own to the SDK. The targets assume this layout of a plugin repository, each part overridable by a property: the project in `backend/` with `nkeeper-plugin.json`, the frontend in `frontend/`, development keys in `.dev/keys/`, and packages written to `artifacts/plugins/`. The frontend is built by running `npm ci` (`npm install` when there is no lock file) and `npm run build` in `frontend/`, when `NKeeperPluginFrontend` is set; the plugin's own `package.json` names its dependencies, the SDK among them. It signs with a development key it creates on first use, or with `NKeeperSigningKey` when a release workflow sets it.
-- **`NKeeper.Testing`** carries the test server as a real server process, not an in-process host: the package holds a published copy of the server, started with `dotnet`, in `Development`, with its own database, plugin and trust directories, and the packages and development key it is given. A plugin's tests, in another repository, can therefore start it without core's source or any of its other dependencies. `TestServer` starts it, signs in as a first administrator and returns an `HttpClient`. The package's build targets copy the xrdp image beside the test assemblies. Core's own server tests keep their in-process host, which they need for replacing services.
+- **`NKeeper.Testing`** carries the test server as a real server process, not an in-process host: the package holds a published copy of the server, started with `dotnet`, in `Development`, with its own database, plugin and trust directories, and the packages and development key it is given. A plugin's tests, in another repository, can therefore start it without core's source or any of its other dependencies. `TestServer` starts it, signs in as a first administrator and returns an `HttpClient`. The package's build targets copy the xrdp and TigerVNC images beside the test assemblies. Core's own server tests keep their in-process host, which they need for replacing services.
 - **The release** is a tag `sdk-v<version>`; the workflow refuses a version that isn't `SdkVersion.Current`. A pull request's CI packs the four packages to a folder and builds and tests a sample plugin (`testing/package-smoke`) restoring from that folder and nuget.org only, so a package that only works inside this repository fails before a release.
 
 **Developing a plugin** still works against a local server: the plugin's build signs it with a development key, as core's build does today, and the server loads it in `Development` from `Plugins:Directory`.

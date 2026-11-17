@@ -2,12 +2,13 @@
 
   <!--
     Imported into a test project that references NKeeper.Testing (docs/architecture.md §9): tells TestServer where the
-    package's published server is, and copies the xrdp image's files beside the test assemblies, where RdpServerFixture
-    builds it from.
+    package's published server is, and copies the xrdp and TigerVNC images' files beside the test assemblies, where
+    RdpServerFixture and VncServerFixture build them from.
   -->
   <ItemGroup>
     <RuntimeHostConfigurationOption Include="NKeeper.TestServer" Value="$(MSBuildThisFileDirectory)../server/NKeeper.Server.dll" />
     <None Include="$(MSBuildThisFileDirectory)Rdp/xrdp/**" CopyToOutputDirectory="PreserveNewest" Link="Rdp/xrdp/%(RecursiveDir)%(Filename)%(Extension)" Visible="false" />
+    <None Include="$(MSBuildThisFileDirectory)Vnc/tigervnc/**" CopyToOutputDirectory="PreserveNewest" Link="Vnc/tigervnc/%(RecursiveDir)%(Filename)%(Extension)" Visible="false" />
   </ItemGroup>
 
 </Project>

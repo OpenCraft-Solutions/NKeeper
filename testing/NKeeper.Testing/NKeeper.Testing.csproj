@@ -1,15 +1,15 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!--
-    Shared test helpers: the test server, container fixtures (PostgreSQL, SSH, xrdp and guacd), test plugin packages.
+    Shared test helpers: the test server, container fixtures (PostgreSQL, SSH, xrdp, TigerVNC and guacd), test plugin packages.
     Core's test projects reference it; it is also published as the NKeeper.Testing package, for plugin repositories'
     tests (docs/architecture.md §9). The package carries a published server, the Packaging assembly this one is built
-    on, and the xrdp image's files, which its build targets copy beside the test assemblies.
+    on, and the xrdp and TigerVNC images' files, which its build targets copy beside the test assemblies.
   -->
   <PropertyGroup>
     <IsPackable>true</IsPackable>
     <PackageId>NKeeper.Testing</PackageId>
-    <Description>Test helpers for NKeeper plugins: a real NKeeper server in its own process to load a plugin's .nkp into, PostgreSQL, SSH, xrdp and guacd containers, and a fake Telnet device to test against.</Description>
+    <Description>Test helpers for NKeeper plugins: a real NKeeper server in its own process to load a plugin's .nkp into, PostgreSQL, SSH, xrdp, TigerVNC and guacd containers, and a fake Telnet device to test against.</Description>
     <!-- NU5100: the published server's assemblies are meant to sit in server/, not to be referenced. -->
     <NoWarn>$(NoWarn);NU5100</NoWarn>
     <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);IncludeNKeeperTestServer;IncludeNKeeperPackaging</TargetsForTfmSpecificContentInPackage>
@@ -50,6 +50,9 @@
     <None Include="Rdp/xrdp/**" CopyToOutputDirectory="PreserveNewest" LinkBase="Rdp/xrdp" />
     <!-- …and it ships in the package, for the build targets to copy the same way. -->
     <None Include="Rdp/xrdp/**" Exclude="Rdp/xrdp/.gitattributes" Pack="true" PackagePath="build/Rdp/xrdp/%(RecursiveDir)" Visible="false" />
+    <!-- The TigerVNC image the VNC tests build, the same way. -->
+    <None Include="Vnc/tigervnc/**" CopyToOutputDirectory="PreserveNewest" LinkBase="Vnc/tigervnc" />
+    <None Include="Vnc/tigervnc/**" Exclude="Vnc/tigervnc/.gitattributes" Pack="true" PackagePath="build/Vnc/tigervnc/%(RecursiveDir)" Visible="false" />
     <None Include="build/**" Pack="true" PackagePath="build" />
   </ItemGroup>
 
