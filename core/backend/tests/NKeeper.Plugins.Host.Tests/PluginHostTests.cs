@@ -165,6 +165,41 @@ public sealed class PluginHostTests : IDisposable
         AssertRefused(await _scenario.LoadAsync(), "hello", HostReasonCodes.Downgrade);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task A_built_in_plugin_moves_from_an_install_key_to_the_official_key_as_an_update(bool installKeyRetired)
+    {
+        using var installKey = PluginSigningKey.Generate();
+        var installTrust = Path.Combine(_scenario.Options.TrustDirectory, "install.json");
+        File.WriteAllBytes(installTrust, TrustedKey.Install(installKey.PublicKey.Span, ["hello"]).ToKeyFile());
+        var path = _scenario.Install(TestPlugins.Package(installKey));
+        Assert.Equal(PluginState.Loaded, Assert.Single((await _scenario.LoadAsync()).Statuses).State);
+        File.Delete(path);
+        if (installKeyRetired)
+        {
+            File.Delete(installTrust);
+        }
+
+        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, version: "1.1.0"));
+
+        var status = Assert.Single((await _scenario.LoadAsync()).Statuses);
+        Assert.Equal((PluginState.Loaded, "1.1.0"), (status.State, status.Version));
+        Assert.Equal(_scenario.Store.Records["hello"].KeyId, status.KeyId);
+        Assert.Contains(_scenario.Audit.Events, e => e.Action == "plugin.updated" && e.Detail.Contains("(was ", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Only_an_install_key_moves_to_the_official_key_without_approval()
+    {
+        var path = _scenario.Install(TestPlugins.Package(_scenario.ThirdPartyKey, id: "com.example.hello", builtIn: false));
+        await _scenario.LoadAsync();
+        File.Delete(path);
+        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "com.example.hello", version: "1.1.0", builtIn: false));
+
+        Assert.Equal(PluginState.AwaitingSignerApproval, Assert.Single((await _scenario.LoadAsync()).Statuses).State);
+    }
+
     [Fact]
     public async Task A_newer_version_from_a_new_signer_awaits_approval()
     {
