@@ -2,12 +2,17 @@ import type { ComponentType } from 'react'
 import type { StreamConnection, TrustPrompt } from './sessions'
 
 /** The SDK version this build of the shell implements; plugin manifests declare a compatible range. */
-export const SDK_VERSION = '1.7.0'
+export const SDK_VERSION = '1.8.0'
 
 /** What a plugin's frontend knows about itself. Its identity comes from the server's verified manifest. */
 export interface PluginContext {
   readonly id: string
   readonly version: string
+  /**
+   * What a plugin this one depends on shares (its `exports`, SDK 1.8). Throws for a plugin that isn't in this
+   * plugin's `dependsOn`, or whose frontend isn't active.
+   */
+  readonly use: (pluginId: string) => Readonly<Record<string, unknown>>
 }
 
 /** What a session view is given (docs/architecture.md §7.14, SDK 0.1.6). */
@@ -44,6 +49,8 @@ export interface PluginDefinition {
   activate?(context: PluginContext): void | Promise<void>
   /** The tabs of the plugin's session types, by session type ID (SDK 0.1.6). */
   readonly sessionViews?: Readonly<Record<string, ComponentType<SessionViewProps>>>
+  /** What the plugins that depend on this one may use, through `context.use` (SDK 1.8). */
+  readonly exports?: Readonly<Record<string, unknown>>
 }
 
 const ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*(?:\.[a-z0-9]+(?:-[a-z0-9]+)*)*$/
@@ -52,10 +59,14 @@ const ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*(?:\.[a-z0-9]+(?:-[a-z0-9]+)*)*$/
 export function definePlugin<T extends PluginDefinition>(definition: T): Readonly<T> {
   if (!isPluginDefinition(definition)) {
     throw new TypeError(
-      'definePlugin needs an object with a valid plugin id; activate (if any) must be a function, and sessionViews (if any) an object of components.',
+      'definePlugin needs an object with a valid plugin id; activate (if any) must be a function, sessionViews (if any) an object of components, and exports (if any) an object.',
     )
   }
-  return Object.freeze({ ...definition, ...(definition.sessionViews ? { sessionViews: Object.freeze({ ...definition.sessionViews }) } : {}) })
+  return Object.freeze({
+    ...definition,
+    ...(definition.sessionViews ? { sessionViews: Object.freeze({ ...definition.sessionViews }) } : {}),
+    ...(definition.exports ? { exports: Object.freeze({ ...definition.exports }) } : {}),
+  })
 }
 
 /** Whether a value has the shape of a plugin definition, e.g. a module's default export. */
@@ -63,13 +74,14 @@ export function isPluginDefinition(value: unknown): value is PluginDefinition {
   if (typeof value !== 'object' || value === null) {
     return false
   }
-  const candidate = value as { id?: unknown; activate?: unknown; sessionViews?: unknown }
+  const candidate = value as { id?: unknown; activate?: unknown; sessionViews?: unknown; exports?: unknown }
   return (
     typeof candidate.id === 'string' &&
     candidate.id.length <= 100 &&
     ID_PATTERN.test(candidate.id) &&
     (candidate.activate === undefined || typeof candidate.activate === 'function') &&
-    (candidate.sessionViews === undefined || isViewMap(candidate.sessionViews))
+    (candidate.sessionViews === undefined || isViewMap(candidate.sessionViews)) &&
+    (candidate.exports === undefined || (typeof candidate.exports === 'object' && candidate.exports !== null && !Array.isArray(candidate.exports)))
   )
 }
 

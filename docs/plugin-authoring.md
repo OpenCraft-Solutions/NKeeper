@@ -274,6 +274,7 @@ export function TerminalView({ connect, visible }: SessionViewProps) {
 | `SessionOrigin`, `ISessionOriginHandler`, `ISessionOrigins` | a session served on its own origin, as web pages are | §7.18 |
 | `IPluginAudit` | your own audit events | §7.12.1 |
 | `definePlugin`, `sessionViews`, `SessionViewProps` | the frontend entry and session tabs | §5, §7.14 |
+| `exports`, `PluginContext.use` | frontend code a plugin shares with the plugins that depend on it (SDK 1.8) | §5 |
 | `api`, `openStreamSession`, `adoptStyles`, `mirrorInjectedStyles` | frontend helpers | §7.14 |
 
 **Versions.** Declare the SDK range you support in the manifest. SDK v1 is frozen: an addition raises the minor version (1.1.0), and a breaking change would raise the major one. So `>=1.0.0 <2.0.0` keeps loading on every v1 server. If you use something added later, raise the lower bound to the version that brought it.

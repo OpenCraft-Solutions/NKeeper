@@ -92,6 +92,25 @@ export default definePlugin({
 
 The definition also declares what the plugin draws: so far, its session types' tabs (`sessionViews`, §7.14).
 
+**What a plugin shares with its dependants (SDK 1.8).** A plugin that others depend on (`dependsOn`) can share frontend code with them, as `db-core` shares its query window with the database engines:
+- It lists what it shares in `exports`, an object of anything: components, functions, constants.
+- A dependant gets that object with `context.use('<id>')` in its `activate`, and keeps what it needs. `use` throws for a plugin that isn't in the dependant's `dependsOn`, or whose frontend isn't active, so the dependant fails to load as it would on the server.
+- The shell activates a plugin's dependencies before it, in the order `GET /api/plugins` gives with each plugin's `dependsOn`.
+- A dependant still draws only its own session types: it wraps the shared component in its own `sessionViews`.
+
+```ts
+let shared: { QueryView: ComponentType<QueryViewProps> }
+export default definePlugin({
+  id: 'db-mssql',
+  activate(context) {
+    shared = context.use('db-core') as typeof shared
+  },
+  sessionViews: { mssql: (props) => <shared.QueryView {...props} engine="mssql" /> },
+})
+```
+
+The two plugins share one copy of React and the SDK (above), so a shared component draws in the dependant's tab like the dependant's own. The backend half is the same idea with assemblies: the dependency lists the ones dependants may use in `exportedAssemblies` (plugin-security.md §7.1).
+
 **Loading.**
 1. The shell asks `GET /api/plugins`. For each loaded plugin with a frontend, the answer includes its entry URL, `/plugins/<id>/<version>/<hash tag>/<path>`, and the entry file's SHA-256.
 2. The shell imports only same-origin URLs under `/plugins/<that id>/`.

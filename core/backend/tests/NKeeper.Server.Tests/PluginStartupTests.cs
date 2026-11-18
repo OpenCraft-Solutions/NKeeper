@@ -33,6 +33,20 @@ public sealed class PluginStartupTests(PostgresFixture postgres) : IClassFixture
     }
 
     [Fact]
+    public async Task The_plugin_list_says_what_each_loaded_plugin_depends_on()
+    {
+        await using var server = new ServerScenario(await postgres.CreateDatabaseAsync());
+        server.Install(TestPlugins.Package(server.DevelopmentKey));
+        server.Install(TestPlugins.Package(server.DevelopmentKey, id: "hello-quiet", entryType: TestPlugins.QuietType, dependsOn: ("hello", ">=1.0.0")));
+        using var client = await server.SignedInClientAsync();
+
+        var plugins = await client.GetFromJsonAsync<List<PluginStatusResponse>>("/api/plugins", Json, TestContext.Current.CancellationToken);
+
+        Assert.Equal(["hello"], plugins!.Single(p => p.Id == "hello-quiet").DependsOn);
+        Assert.Empty(plugins!.Single(p => p.Id == "hello").DependsOn!);
+    }
+
+    [Fact]
     public async Task Plugin_records_and_audit_events_are_kept_in_the_core_schema()
     {
         await using var server = new ServerScenario(await postgres.CreateDatabaseAsync());

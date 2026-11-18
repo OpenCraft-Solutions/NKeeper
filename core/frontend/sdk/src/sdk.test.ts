@@ -88,5 +88,8 @@ describe('session views', () => {
     expect(isPluginDefinition({ id: 'term', sessionViews: { a: [] } })).toBe(false)
     expect(isPluginDefinition({ id: 'term', sessionViews: [] })).toBe(false)
     expect(isPluginDefinition({ id: 'term', sessionViews: { a: 'TerminalView' } })).toBe(false)
+    expect(isPluginDefinition({ id: 'core', exports: { QueryView: () => null, limit: 3 } })).toBe(true)
+    expect(isPluginDefinition({ id: 'core', exports: [] })).toBe(false)
+    expect(isPluginDefinition({ id: 'core', exports: null })).toBe(false)
   })
 })

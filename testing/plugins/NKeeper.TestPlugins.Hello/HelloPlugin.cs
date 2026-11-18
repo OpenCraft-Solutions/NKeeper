@@ -881,3 +881,15 @@ public sealed class HelloOriginHandler : ISessionOriginHandler
 {
     public Task HandleAsync(HttpContext context, string label) => context.Response.WriteAsync($"hello origin {label}");
 }
+
+/// <summary>A plugin that contributes nothing: a dependant of hello, for the plugin list's <c>dependsOn</c> (SDK 1.8).</summary>
+public sealed class QuietPlugin : IPlugin
+{
+    public void ConfigureServices(IServiceCollection services, PluginContext context)
+    {
+    }
+
+    public void MapEndpoints(IEndpointRouteBuilder endpoints, PluginContext context)
+    {
+    }
+}
