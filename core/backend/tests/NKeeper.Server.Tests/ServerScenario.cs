@@ -95,6 +95,8 @@ internal sealed class ServerScenario : IAsyncDisposable
             web.UseSetting("BootstrapAdmin:UserName", AdminUserName);
             web.UseSetting("BootstrapAdmin:Email", AdminEmail);
             web.UseSetting("BootstrapAdmin:Password", AdminPassword);
+            // No catalog unless a test sets one: tests never reach GitHub.
+            web.UseSetting("Plugins:Catalog:Url", string.Empty);
             foreach (var (key, value) in Settings)
             {
                 web.UseSetting(key, value);

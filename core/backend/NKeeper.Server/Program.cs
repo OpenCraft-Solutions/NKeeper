@@ -10,6 +10,7 @@ using NKeeper.Core.Persistence;
 using NKeeper.Core.Sessions;
 using NKeeper.Identity;
 using NKeeper.Plugins.Host;
+using NKeeper.Plugins.Host.Store;
 using NKeeper.Plugins.Packaging;
 using NKeeper.Server;
 
@@ -18,6 +19,12 @@ CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
 CultureInfo.DefaultThreadCurrentUICulture = CultureInfo.InvariantCulture;
 CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;
 CultureInfo.CurrentUICulture = CultureInfo.InvariantCulture;
+
+// The plugin command line (docs/plugin-security.md §9) runs instead of the server.
+if (args is ["plugin", .. var pluginArgs])
+{
+    return await PluginCommand.RunAsync(pluginArgs, CancellationToken.None);
+}
 
 var builder = WebApplication.CreateBuilder(args);
 var isDevelopment = builder.Environment.IsDevelopment();
@@ -86,6 +93,34 @@ builder.Services.AddSingleton<ISessionOrigins>(provider => provider.GetRequiredS
 builder.Services.AddSingleton(plugins);
 builder.Services.AddSingleton<NKeeper.Core.Credentials.IPluginDeclarations>(new LoadedPluginDeclarations(plugins));
 builder.Services.AddSingleton(TimeProvider.System);
+
+// The plugin catalog (architecture.md §9.1): refreshed and verified here, installed only by root's helper. It verifies
+// with the same trust as the plugin host; a trust directory that can't be read turns it off.
+var catalogOptions = builder.Configuration.GetSection(PluginCatalogOptions.SectionName).Get<PluginCatalogOptions>() ?? new PluginCatalogOptions();
+VerificationContext? catalogContext = null;
+try
+{
+    var hostOptions = builder.Configuration.GetSection(PluginHostOptions.SectionName).Get<PluginHostOptions>() ?? new PluginHostOptions();
+    catalogContext = new VerificationContext(
+        TrustLoader.Load(OfficialKeys.All, OfficialKeys.Revocations, hostOptions.TrustDirectory, hostOptions.DevelopmentTrustDirectory, isDevelopment),
+        isDevelopment,
+        SemanticVersion.Parse(SdkVersion.Current),
+        SharedAssemblies.OfCurrentProcess(),
+        TimeProvider.System);
+}
+catch (TrustConfigurationException ex)
+{
+    pluginLogger.LogWarning("The plugin catalog is off: the trust directory can't be used ({Message}).", ex.Message);
+}
+
+builder.Services.AddSingleton(provider => new PluginCatalogService(
+    catalogOptions,
+    plugins,
+    catalogContext,
+    provider.GetRequiredService<IServiceScopeFactory>(),
+    provider.GetRequiredService<ILogger<PluginCatalogService>>(),
+    TimeProvider.System));
+builder.Services.AddHostedService(provider => provider.GetRequiredService<PluginCatalogService>());
 builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase, allowIntegerValues: false)));
 
@@ -120,6 +155,7 @@ api.MapInventoryEndpoints();
 api.MapStreamSessions();
 api.MapHealthEndpoints();
 api.MapPluginStatus();
+api.MapPluginCatalog();
 app.MapPluginFrontends();
 PluginHost.MapEndpoints(plugins, api, builder.Configuration, (group, id) => group.WithMetadata(new NKeeper.Core.Credentials.PluginEndpointMetadata(id)));
 if (shell is not null)
@@ -128,6 +164,7 @@ if (shell is not null)
 }
 
 await app.RunAsync();
+return 0;
 
 /// <summary>Entry point marker for <c>WebApplicationFactory</c> in the integration tests.</summary>
 public partial class Program;

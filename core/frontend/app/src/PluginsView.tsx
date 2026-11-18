@@ -1,3 +1,4 @@
+import { PluginCatalog } from './PluginCatalog'
 import type { FrontendState, PluginStatus } from './plugins'
 import page from './ui/Page.module.css'
 import report from './ui/Reports.module.css'
@@ -12,7 +13,8 @@ const STATE_LABELS: Record<PluginStatus['state'], string> = {
 
 /**
  * 1.x's Settings page, for administrators (docs/architecture.md §7.14). Its one section so far is the plugins the
- * server knows, with their states and whether their frontends loaded here (Phase 0's list).
+ * server knows, with their states and whether their frontends loaded here (Phase 0's list), and the plugin catalog
+ * (§9.1).
  */
 export function PluginsView({ plugins, frontends }: { plugins: PluginStatus[]; frontends: Map<string, FrontendState> }) {
   return (
@@ -62,6 +64,7 @@ export function PluginsView({ plugins, frontends }: { plugins: PluginStatus[]; f
           </table>
         )}
       </section>
+      <PluginCatalog />
     </div>
   )
 }
