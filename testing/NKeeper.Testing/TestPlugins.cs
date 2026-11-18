@@ -14,6 +14,7 @@ public static class TestPlugins
     public const string ThrowingContributeType = "NKeeper.TestPlugins.Hello.ThrowingContributePlugin";
     public const string DuplicateServiceTypeType = "NKeeper.TestPlugins.Hello.DuplicateServiceTypePlugin";
     public const string InvalidServiceTypeType = "NKeeper.TestPlugins.Hello.InvalidServiceTypePlugin";
+    public const string QuietType = "NKeeper.TestPlugins.Hello.QuietPlugin";
     public const string EntryAssembly = "backend/NKeeper.TestPlugins.Hello.dll";
     public const string FrontendEntry = "frontend/index.js";
 

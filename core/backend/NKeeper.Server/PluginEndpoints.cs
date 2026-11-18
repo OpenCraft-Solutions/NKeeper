@@ -14,6 +14,7 @@ namespace NKeeper.Server;
 /// <param name="ServiceTypes">For a loaded plugin, the service types it contributed (docs/architecture.md §7.4).</param>
 /// <param name="SessionTypes">For a loaded plugin, the session types it contributed (§7.10).</param>
 /// <param name="HostActions">For a loaded plugin, the host actions it contributed (§7.12).</param>
+/// <param name="DependsOn">For a loaded plugin, the plugins it depends on, whose frontends the shell activates first (§5, SDK 1.8).</param>
 public sealed record PluginStatusResponse(
     string Id,
     string? Version,
@@ -26,7 +27,8 @@ public sealed record PluginStatusResponse(
     string? FrontendEntrySha256 = null,
     IReadOnlyList<ServiceTypeResponse>? ServiceTypes = null,
     IReadOnlyList<SessionTypeResponse>? SessionTypes = null,
-    IReadOnlyList<HostActionResponse>? HostActions = null);
+    IReadOnlyList<HostActionResponse>? HostActions = null,
+    IReadOnlyList<string>? DependsOn = null);
 
 /// <summary>A host menu entry: the session type it opens, or the endpoint it runs (§7.12), and whether it needs a credential.</summary>
 /// <param name="SessionType">For an action that opens a session; null for a run action.</param>
@@ -115,7 +117,8 @@ internal static class PluginEndpoints
                     entry is null ? null : Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(loaded!.Files[entry].Span)),
                     loaded is null ? null : [.. plugins.ServiceTypes.Where(t => t.PluginId == s.Id).Select(t => ServiceTypeResponse.From(t.Type))],
                     loaded is null ? null : [.. plugins.SessionTypes.Where(t => t.PluginId == s.Id).Select(t => new SessionTypeResponse(t.Type.Id, t.Type.Label, t.Type.ServiceTypes, t.Type.SupportsJumpHost))],
-                    loaded is null ? null : [.. plugins.HostActions.Where(a => a.PluginId == s.Id).Select(a => new HostActionResponse(a.Action.Id, a.Action.Label, a.Action.SessionType, a.Action.Endpoint, a.Action.ServiceTypes, a.Action.Credential, a.Action.Scan))]);
+                    loaded is null ? null : [.. plugins.HostActions.Where(a => a.PluginId == s.Id).Select(a => new HostActionResponse(a.Action.Id, a.Action.Label, a.Action.SessionType, a.Action.Endpoint, a.Action.ServiceTypes, a.Action.Credential, a.Action.Scan))],
+                    loaded is null ? null : [.. loaded.Manifest.DependsOn.Select(d => d.Id)]);
             })
             .ToList());
 

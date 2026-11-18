@@ -92,6 +92,25 @@ export default definePlugin({
 
 The definition also declares what the plugin draws: so far, its session types' tabs (`sessionViews`, §7.14).
 
+**What a plugin shares with its dependants (SDK 1.8).** A plugin that others depend on (`dependsOn`) can share frontend code with them, as `db-core` shares its query window with the database engines:
+- It lists what it shares in `exports`, an object of anything: components, functions, constants.
+- A dependant gets that object with `context.use('<id>')` in its `activate`, and keeps what it needs. `use` throws for a plugin that isn't in the dependant's `dependsOn`, or whose frontend isn't active, so the dependant fails to load as it would on the server.
+- The shell activates a plugin's dependencies before it, in the order `GET /api/plugins` gives with each plugin's `dependsOn`.
+- A dependant still draws only its own session types: it wraps the shared component in its own `sessionViews`.
+
+```ts
+let shared: { QueryView: ComponentType<QueryViewProps> }
+export default definePlugin({
+  id: 'db-mssql',
+  activate(context) {
+    shared = context.use('db-core') as typeof shared
+  },
+  sessionViews: { mssql: (props) => <shared.QueryView {...props} engine="mssql" /> },
+})
+```
+
+The two plugins share one copy of React and the SDK (above), so a shared component draws in the dependant's tab like the dependant's own. The backend half is the same idea with assemblies: the dependency lists the ones dependants may use in `exportedAssemblies` (plugin-security.md §7.1).
+
 **Loading.**
 1. The shell asks `GET /api/plugins`. For each loaded plugin with a frontend, the answer includes its entry URL, `/plugins/<id>/<version>/<hash tag>/<path>`, and the entry file's SHA-256.
 2. The shell imports only same-origin URLs under `/plugins/<that id>/`.
@@ -1038,6 +1057,25 @@ DbConnection connection = login.Connection;
   - a changed one throws `HostKeyChanged`, audited as `trust.mismatch`.
 - The plugin then pins its driver to exactly that certificate, as 1.x's SQL Server connector did. Core can't check that it does: the plugin's own driver makes the TLS connection. A plugin that skips the check, or pins nothing, is a plugin bug core can't catch, as for any code in process (plugin-security.md §12.4).
 
+### 7.32 The `db-core` plugin
+
+What the database engine plugins (SQL Server, Oracle, SAP ASE) share, ported from 1.x's `Databases/` and `features/databases`, in its own repository, `NKeeper-Plugin-DbCore` (§9), on SDK 1.8 (`>=1.8.0 <2.0.0`). It's v2-plan.md's sub-registry: db-core contributes nothing itself, and each engine plugin depends on it (`dependsOn`, v2-plan.md §4.5) and brings its own driver.
+
+**Who owns what.**
+- **An engine plugin** (`mssql`, say) contributes its service type, a session type, and a host action that opens it. Its session type's handler is db-core's `DatabaseSessionHandler<TEngine>`, registered with `services.AddDatabaseEngine<TEngine>()`. Its `IDatabaseEngine` opens the login with its driver, through core (§7.31), checks the server's certificate when its protocol carries one, and gives an `IDatabaseDialect`: the server's SQL for the explorer, scripts, blocking and kill, and its query runner.
+- **db-core** runs the session, its query windows and its tools, and draws the tab. Its one assembly, `NKeeper.Plugins.Databases`, is exported (plugin-security.md §7.1), so every engine uses db-core's copy. It's also published as a NuGet package of the same name, which engines build against without copying it (`ExcludeAssets="runtime"`). Its frontend exports `DatabaseView` (§5), which the engine wraps in its session view with what it says about itself: the product's name, whether the toolbar chooses a database or a schema, and how a name is quoted.
+
+**The session.** A database tab is one stream session (§7.10), so core prompts for a typed credential, asks about a new certificate, counts the session and ends it when access changes, as for any other. The session speaks the linux plugin's request protocol (§7.25):
+- `info`: the server, its version and edition, and the login;
+- `window.open` `{ database }`, `window.close`: a query window, on a connection of its own with the same login (`IDatabaseLogin.OpenAnotherAsync`), so it keeps its own session on the server, current database, temporary tables and transactions, as in SSMS. A tab has at most 20;
+- `query` `{ window, sql, lineOffset }`: runs a script, up to a million characters, as 1.x did. The results come back as result sets (up to 10,000 rows each and 50,000 in all, for SQL Server), row counts, messages and errors, with each error's line in the editor. A window runs one query at a time; `cancel` `{ window }` stops it. A window whose connection broke is closed, and opens another when it runs again;
+- `use` `{ window, name }`: another database (Oracle: schema);
+- on one more connection, so they work while a query runs: `databases`, `explore` `{ node }` (the object explorer, loaded a level at a time), `script` `{ node, action }` (Select Top 1000 Rows, Script as CREATE, Script as EXECUTE: the scripts each node offers), `blocking` (the blocking chains under their lead blockers) and `kill` `{ sessionId, serial }`, audited as `<engine>.kill`.
+
+**The tab** is 1.x's: the object explorer on the left, query windows and the blocking manager as tabs on the right, results as grids or text with messages beside them, and F5 or Ctrl+Enter to run the selection or everything.
+
+**Not yet:** the Management reports, the insurance survey, orphaned users and Copy Database. They come with the engines that have them.
+
 ## 8. The native install
 
 `deploy/setup.sh` installs NKeeper on a Linux server, from a checkout of the repository, as root. It's an early version of the Phase 6 installer (v2-plan.md §8). NKeeper installs natively only (D8): systemd, nginx and PostgreSQL, no containers.
@@ -1105,7 +1143,7 @@ Each official plugin lives in a repository of its own and is released on its own
 
 **Repositories,** all under `OpenCraft-Solutions`:
 - `NKeeper`, this one: the server, the shell, the SDK, the plugin tooling, the test helpers and the installer.
-- `NKeeper-Plugin-<Name>` for each official plugin: `NKeeper-Plugin-SSH`, `NKeeper-Plugin-Web`, `NKeeper-Plugin-Desktop`, `NKeeper-Plugin-WakeOnLan`, and each new one (`NKeeper-Plugin-Telnet`, `NKeeper-Plugin-VNC`, `NKeeper-Plugin-Linux`, `NKeeper-Plugin-Storage`, `NKeeper-Plugin-Windows`, `NKeeper-Plugin-iDRAC`…). A plugin's ID doesn't change when it moves.
+- `NKeeper-Plugin-<Name>` for each official plugin: `NKeeper-Plugin-SSH`, `NKeeper-Plugin-Web`, `NKeeper-Plugin-Desktop`, `NKeeper-Plugin-WakeOnLan`, and each new one (`NKeeper-Plugin-Telnet`, `NKeeper-Plugin-VNC`, `NKeeper-Plugin-Linux`, `NKeeper-Plugin-Storage`, `NKeeper-Plugin-Windows`, `NKeeper-Plugin-iDRAC`, `NKeeper-Plugin-DbCore`…). A plugin's ID doesn't change when it moves.
 - A plugin repository holds the plugin's backend, frontend, manifest and tests, and its own CI and release workflow. It references nothing of core's but the published packages below.
 
 **What core publishes,** to GitHub Packages under `OpenCraft-Solutions`, versioned with the SDK (§4) and released from this repository by a tag, `sdk-v<version>`:

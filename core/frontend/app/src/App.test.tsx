@@ -15,7 +15,7 @@ describe('loadPluginFrontends', () => {
     const states = await loadPluginFrontends([status()], importer)
 
     expect(importer).toHaveBeenCalledWith('/plugins/hello/1.0.0/aaaaaaaaaaaa/index.js')
-    expect(activate).toHaveBeenCalledWith({ id: 'hello', version: '1.0.0' })
+    expect(activate).toHaveBeenCalledWith(expect.objectContaining({ id: 'hello', version: '1.0.0' }))
     expect(states.get('hello')?.kind).toBe('active')
   })
 
@@ -54,6 +54,54 @@ describe('loadPluginFrontends', () => {
 
     expect(states.get('hello')?.kind).toBe('failed')
     expect(states.get('second')?.kind).toBe('active')
+  })
+
+  it('activates a dependency first, and gives a dependant only what its dependencies export', async () => {
+    const used: unknown[] = []
+    const modules: Record<string, unknown> = {
+      core: definePlugin({ id: 'core', exports: { answer: 42 } }),
+      engine: definePlugin({
+        id: 'engine',
+        activate(context) {
+          used.push(context.use('core').answer)
+          expect(() => context.use('other')).toThrow(/doesn't depend on 'other'/)
+        },
+      }),
+      other: definePlugin({ id: 'other' }),
+    }
+    const importer = vi.fn(async (url: string) => ({ default: modules[url.split('/')[2] ?? ''] }))
+    const entry = (id: string) => `/plugins/${id}/1.0.0/aaaaaaaaaaaa/index.js`
+
+    const states = await loadPluginFrontends(
+      [
+        status({ id: 'engine', frontendEntry: entry('engine'), dependsOn: ['core'] }),
+        status({ id: 'core', frontendEntry: entry('core') }),
+        status({ id: 'other', frontendEntry: entry('other') }),
+      ],
+      importer,
+    )
+
+    expect(importer.mock.calls.map(([url]) => url.split('/')[2])).toEqual(['core', 'engine', 'other'])
+    expect(used).toEqual([42])
+    expect(states.get('engine')?.kind).toBe('active')
+  })
+
+  it('fails a dependant whose dependency has no active frontend', async () => {
+    const importer = vi.fn(async (url: string) =>
+      url.includes('/core/')
+        ? { default: { notAPlugin: true } }
+        : { default: definePlugin({ id: 'engine', activate: (context) => void context.use('core') }) },
+    )
+
+    const states = await loadPluginFrontends(
+      [
+        status({ id: 'core', frontendEntry: '/plugins/core/1.0.0/aaaaaaaaaaaa/index.js' }),
+        status({ id: 'engine', frontendEntry: '/plugins/engine/1.0.0/aaaaaaaaaaaa/index.js', dependsOn: ['core'] }),
+      ],
+      importer,
+    )
+
+    expect(states.get('engine')).toEqual({ kind: 'failed', reason: "'core', which 'engine' depends on, has no active frontend." })
   })
 
   it('fails a plugin whose import or activation throws', async () => {
