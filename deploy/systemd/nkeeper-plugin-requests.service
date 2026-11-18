@@ -1,0 +1,31 @@
+# Root's helper for the plugins page (docs/architecture.md §9.1), started by nkeeper-plugin-requests.path. It fetches
+# the catalog and each requested package itself, verifies them with root's trust configuration, installs them into
+# the plugin directory, and restarts NKeeper. It can write only the plugin directory and the requests' directory.
+
+[Unit]
+Description=Apply NKeeper plugin install requests
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/nkeeper plugin apply-requests
+TimeoutStartSec=15min
+UMask=0022
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/usr/lib/nkeeper/plugins /var/lib/nkeeper/plugin-requests
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+SystemCallArchitectures=native

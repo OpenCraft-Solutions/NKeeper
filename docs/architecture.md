@@ -1153,6 +1153,8 @@ SAP (Sybase) ASE, ported from 1.x's `Ase/`, in its own repository, `NKeeper-Plug
 | `/etc/nkeeper/data-protection.pem` | `root:nkeeper` `0640` | the key ring certificate (§6.3). Back it up apart from the database |
 | `/etc/nkeeper/tls/` | `root:root` `0700` | nginx's certificate and key |
 | `/var/lib/nkeeper/` | `nkeeper:nkeeper` `0750` | the only place the service writes |
+| `/var/lib/nkeeper/plugin-requests/` | `nkeeper:nkeeper` `0750` | the plugins page's install requests, and root's helper's results (§9.1) |
+| `/usr/bin/nkeeper` | `root:root` `0755` | the command line: `nkeeper plugin …` (§9.1, plugin-security.md §9) |
 
 **The service** (`deploy/systemd/nkeeper.service`) runs the server as the unprivileged `nkeeper` user, listening on `127.0.0.1:5080` only. It has the hardening of plugin-security.md §4: `ProtectSystem=strict` with only `/var/lib/nkeeper` writable, `NoNewPrivileges`, `PrivateTmp`, `ProtectHome` and an empty `CapabilityBoundingSet`. It also has `PrivateDevices`, the kernel protections, `RestrictSUIDSGID`, `LockPersonality`, and network families limited to IPv4, IPv6 and Unix sockets.
 
@@ -1248,10 +1250,12 @@ The installer installs the plugins in `deploy/plugins.lock`. The **catalog** say
 1. fetches the catalog file;
 2. lists each catalogued repository's releases through GitHub's API, without a token, with ETags so an unchanged repository costs nothing against GitHub's rate limit;
 3. picks, for each plugin, the newest release this server can load: its SDK range includes the server's (§4) and it is newer than the installed version, if any. It looks back at most ten releases;
-4. downloads that package to `/var/lib/nkeeper/plugin-store/` (the service's own directory), checks its SHA-256 file, and verifies it exactly as at load: structure, signature, key and ID scope, revocation, SDK range and dependencies (plugin-security.md §5);
-5. records what it found in `core.plugin_catalog`: each plugin's newest installable version and its dependencies, or why none can be installed (`sdk_incompatible`, `untrusted_key`, `revoked`, a download that failed…).
+4. downloads that package into memory, checks it against its SHA-256 file, and verifies it exactly as at load: structure, signature, key and ID scope, revocation and SDK range (plugin-security.md §5). The release's package must be the plugin and version its tag says (`wrong_package`);
+5. keeps what it found until the next refresh: each plugin's newest installable version, its package's SHA-256, signer and dependencies, or why none can be installed (`sdk_incompatible`, `key_scope`, `untrusted_key`, `checksum_mismatch`, `download_failed`…). It's kept in memory: a restart refreshes again a minute later.
 
 A refresh installs nothing and changes nothing about loaded plugins. A refresh that can't reach GitHub keeps the last result and says when it was taken.
+
+Only administrators see the catalog: `GET /api/plugins/catalog`, `POST /api/plugins/catalog/refresh` and `POST /api/plugins/catalog/requests`.
 
 **The plugins page** gains two lists beside the installed plugins: **Updates** (installed plugins with a newer installable version) and **Available** (catalogued plugins that aren't installed), each with its summary, version, signer and repository. An administrator can install or upgrade from them (below), or read the command that does it.
 
@@ -1269,9 +1273,9 @@ Either way, root's side trusts nothing the service wrote:
 - it copies each package into `/usr/lib/nkeeper/plugins/` as `root:root 0644` with an atomic rename, replacing the plugin's older package;
 - it restarts NKeeper once, after all the requests, so open sessions end. The page asks first and says so.
 
-It takes at most ten requests per run, ignores malformed or unknown ones, and writes each one's result beside it, which the server reports on the plugins page and in the audit (`plugin.installed`, `plugin.upgraded`, or `plugin.install_failed` with the reason). A newly installed plugin is enabled when it is built in, as at first sight (plugin-security.md §8); any other waits for an administrator to enable it.
+It takes at most ten requests per run, refuses malformed ones and any beyond ten, and replaces each request with its result (`<id>.result`, created exclusively, so never through a link the service left), which the server reports on the plugins page and in the audit (`plugin.installed`, `plugin.upgraded`, or `plugin.install_failed` with the reason). A newly installed plugin is enabled when it is built in, as at first sight (plugin-security.md §8); any other waits for an administrator to enable it.
 
-`setup.sh install --no-store-requests` leaves the path unit out. The plugins page then shows the command for root instead of the buttons.
+The helper's unit can write only the plugin directory and the requests' directory (`ProtectSystem=strict`). `setup.sh install --no-store-requests` leaves the path unit and the requests' directory out, and is kept on upgrade. The plugins page then shows the command for root instead of the buttons.
 
 **What this changes about security** (plugin-security.md §1, principle 2): an administrator, or code running as the service, can now *ask* root to install or upgrade a plugin. It can ask only for a catalogued plugin, at a version newer than the installed one, in a package that root's own verification accepts. So it gains no code that root's trust doesn't already allow, and the service still can't write the plugin or trust directories (principle 4). The catalog's repository is a new thing to protect, as each plugin repository already is: whoever controls it can point an ID at another repository, but that repository's packages still need a key allowed to sign the ID.
 

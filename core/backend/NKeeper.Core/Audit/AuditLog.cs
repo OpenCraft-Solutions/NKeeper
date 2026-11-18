@@ -32,6 +32,18 @@ public static class AuditActions
     public const string TrustMismatch = "trust.mismatch";
     public const string SessionOpen = "session.open";
     public const string SessionClose = "session.close";
+
+    /// <summary>An administrator asked root's helper to install or upgrade a catalogued plugin (architecture.md §9.1).</summary>
+    public const string PluginInstallRequested = "plugin.install_requested";
+
+    /// <summary>Root's helper installed a plugin from the catalog.</summary>
+    public const string PluginInstalled = "plugin.installed";
+
+    /// <summary>Root's helper upgraded a plugin from the catalog.</summary>
+    public const string PluginUpgraded = "plugin.upgraded";
+
+    /// <summary>Root's helper didn't install a requested plugin.</summary>
+    public const string PluginInstallFailed = "plugin.install_failed";
 }
 
 /// <summary>

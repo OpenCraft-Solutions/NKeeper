@@ -1,0 +1,15 @@
+#!/bin/sh
+# NKeeper's command line (docs/plugin-security.md §9), installed by deploy/setup.sh as /usr/bin/nkeeper: the server
+# binary's commands, such as `nkeeper plugin upgrade`, with the plugin settings from the server's settings file.
+set -eu
+if [ -r /etc/nkeeper/nkeeper.env ]; then
+    while IFS='=' read -r name value; do
+        case $name in
+            Plugins__* | ASPNETCORE_ENVIRONMENT)
+                value=${value#\"}
+                export "$name=${value%\"}"
+                ;;
+        esac
+    done </etc/nkeeper/nkeeper.env
+fi
+exec /usr/lib/nkeeper/server/NKeeper.Server "$@"

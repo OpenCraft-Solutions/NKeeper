@@ -1,0 +1,11 @@
+# The plugins page's install requests (docs/architecture.md §9.1), installed by deploy/setup.sh: when NKeeper leaves
+# one, root's helper applies it. The service can only ask; the helper checks everything again itself.
+
+[Unit]
+Description=NKeeper plugin install requests
+
+[Path]
+PathExistsGlob=/var/lib/nkeeper/plugin-requests/*.json
+
+[Install]
+WantedBy=multi-user.target
