@@ -1151,10 +1151,11 @@ What the hypervisor plugins (KVM, later Proxmox) share, ported from 1.x's `Kvm/`
 
 KVM hypervisors, the way virt-manager reaches them, ported from 1.x's `KvmHost`, in its own repository, `NKeeper-Plugin-KVM` (§9), on SDK 1.11 (`>=1.11.0 <2.0.0`). It's a guest provider for virt-core (§7.36), which it depends on.
 
-- **The guests tab** (session type `kvm`, host action `kvm.guests`) opens on the host's SSH service (the `ssh` plugin's service type), with the service's credential (§7.9). It runs `virsh -c qemu:///system`, so the SSH user needs access to it (the `libvirt` group, say).
+- **Service type `kvm`** ("KVM"): the hypervisor's SSH, default port 22, health by TCP, as 1.x's KVM service. A host offers its guests only when it has one.
+- **The guests tab** (session type `kvm`, host action `kvm.guests`) opens SSH to that service, with its credential (§7.9). It runs `virsh -c qemu:///system`, so the SSH user needs access to it (the `libvirt` group, say).
 - **Guests:** `virsh list --all`, with each one's name, state and display. Power: start, shut down, reboot, pause, resume, hibernate (a managed save), force off (`destroy`) and reset, as 1.x offered.
 - **Consoles:** `virsh domdisplay` gives the display's address on the hypervisor, usually its loopback; the plugin reaches it through an SSH port forward (§7.9, SDK 1.11). A display on every address is reached on the loopback too. A SPICE display that only takes TLS isn't supported, as in 1.x.
-- **Not yet:** SPICE consoles (virt-core), and Proxmox nodes, which 1.x detected on the same SSH service: they come with the `proxmox` plugin.
+- **Not yet:** SPICE consoles (virt-core), and Proxmox nodes, which 1.x detected on the same service: they come with the `proxmox` plugin.
 
 ## 8. The native install
 
