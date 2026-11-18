@@ -352,7 +352,7 @@ Decision D13 ([v2-plan.md §4.6](v2-plan.md#46-credentials-core-uses-them-plugin
 1. **Authenticated connection.** Core opens the connection, checks the host key or certificate against the trust store, authenticates, and returns the connected object:
    - `IConnectivity.OpenSshAsync` (exec, shell, SFTP, forwards, through jump hosts);
    - an authenticated `HttpClient`. Core's handler sends a **private copy** of each request with the credential added, and the plugin's own request is never changed. The response the plugin gets refers back to the plugin's request (`RequestMessage`), so neither carries the credential. Redirects to another origin don't keep it, and error messages are built without it;
-   - later, a database connection opened by core with `Persist Security Info=false`.
+   - a database connection opened by core with `Persist Security Info=false`, with the plugin's own driver, and refused when the driver kept the password (SDK 1.7, [architecture.md §7.31](architecture.md#731-database-connections)).
 2. **Secret on the wire.** The plugin builds the outgoing message with a typed placeholder, not a string. Core's writer replaces the placeholder with the secret as it writes to the socket. The message the plugin holds, logs or keeps never contains it.
 3. **Released plaintext** (a last resort). Rules:
    - Only a plugin whose manifest declares it may ask. The declaration is added to the manifest format with the first plugin that needs it; until then, no plugin can obtain a plaintext secret.

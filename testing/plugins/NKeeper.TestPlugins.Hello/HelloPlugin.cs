@@ -272,6 +272,63 @@ public sealed class HelloPlugin : IPlugin
             }
         });
 
+        // Opens a database connection through core with Npgsql (SDK 1.7), and a second one, and says who they signed in as.
+        // With Keep, the driver is a fake that keeps the password, which core must refuse.
+        use.MapPost("/db", async (HostContext host, DatabaseProbe? probe, ICredentialBroker broker, IConnectivity connectivity) =>
+        {
+            if (probe is null)
+            {
+                return Results.Text("no probe");
+            }
+
+            try
+            {
+                var handle = await broker.ResolveSavedAsync(host, probe.ServiceId, probe.CredentialId ?? Guid.Empty);
+                var request = new DatabaseConnectRequest(
+                    probe.Keep ? KeepingFactory.Instance : Npgsql.NpgsqlFactory.Instance,
+                    endpoint => new Npgsql.NpgsqlConnectionStringBuilder { Host = endpoint.Address, Port = endpoint.Port, Database = probe.Database, Pooling = false, PersistSecurityInfo = true },
+                    "Username",
+                    "Password");
+                await using var login = await connectivity.OpenDatabaseAsync(host, probe.ServiceId, handle, request);
+                await using var command = login.Connection.CreateCommand();
+                command.CommandText = "SELECT current_user";
+                var first = (string?)await command.ExecuteScalarAsync();
+                var another = await login.OpenAnotherAsync();
+                await using var second = another.CreateCommand();
+                second.CommandText = "SELECT current_user";
+                return Results.Json(new
+                {
+                    first,
+                    second = (string?)await second.ExecuteScalarAsync(),
+                    passwordInConnectionString = login.Connection.ConnectionString.Contains("Password", StringComparison.OrdinalIgnoreCase),
+                });
+            }
+            catch (ConnectException ex)
+            {
+                return Results.Json(new { reason = ex.Reason.ToString(), message = ex.Message }, statusCode: StatusCodes.Status502BadGateway);
+            }
+        });
+
+        // Checks a made-up certificate against the trust store, as a plugin does with one it read in its own protocol (SDK 1.7).
+        use.MapPost("/identity", async (HostContext host, IdentityProbe? probe, IConnectivity connectivity) =>
+        {
+            if (probe is null)
+            {
+                return Results.Text("no probe");
+            }
+
+            try
+            {
+                var identity = PresentedIdentity.Certificate(host.Id, probe.ServiceId, probe.Fingerprint, "CN=sql.test", DateTimeOffset.UtcNow.AddDays(30));
+                await connectivity.CheckIdentityAsync(host, probe.ServiceId, identity, probe.PubliclyValid);
+                return Results.Json(new { ok = true });
+            }
+            catch (ConnectException ex)
+            {
+                return Results.Json(new { reason = ex.Reason.ToString(), message = ex.Message, presented = ex.Presented }, statusCode: StatusCodes.Status502BadGateway);
+            }
+        });
+
         // Opens an HTTPS connection core signs in to (SDK 1.6) and GETs a path, answering the status and body.
         use.MapPost("/https", async (HostContext host, SshProbe? probe, ICredentialBroker broker, IConnectivity connectivity) =>
         {
@@ -520,6 +577,46 @@ public sealed record DesktopProbe(Guid ServiceId, Guid CredentialId, DesktopProt
 
 /// <summary>Waits for <paramref name="Expect"/> in the terminal, then types <paramref name="Send"/> and Enter.</summary>
 public sealed record TelnetStep(string Expect, string? Send = null);
+
+public sealed record DatabaseProbe(Guid ServiceId, Guid? CredentialId = null, string? Database = null, bool Keep = false);
+
+public sealed record IdentityProbe(Guid ServiceId, string Fingerprint, bool PubliclyValid = false);
+
+/// <summary>A driver that keeps the password in its connection string after opening, as core must refuse (SDK 1.7).</summary>
+public sealed class KeepingFactory : System.Data.Common.DbProviderFactory
+{
+    public static readonly KeepingFactory Instance = new();
+
+    public override System.Data.Common.DbConnection CreateConnection() => new KeepingConnection();
+
+    private sealed class KeepingConnection : System.Data.Common.DbConnection
+    {
+        private System.Data.ConnectionState _state = System.Data.ConnectionState.Closed;
+
+        [System.Diagnostics.CodeAnalysis.AllowNull]
+        public override string ConnectionString { get; set; } = string.Empty;
+
+        public override string Database => string.Empty;
+
+        public override string DataSource => string.Empty;
+
+        public override string ServerVersion => string.Empty;
+
+        public override System.Data.ConnectionState State => _state;
+
+        public override void ChangeDatabase(string databaseName)
+        {
+        }
+
+        public override void Close() => _state = System.Data.ConnectionState.Closed;
+
+        public override void Open() => _state = System.Data.ConnectionState.Open;
+
+        protected override System.Data.Common.DbTransaction BeginDbTransaction(System.Data.IsolationLevel isolationLevel) => throw new NotSupportedException();
+
+        protected override System.Data.Common.DbCommand CreateDbCommand() => throw new NotSupportedException();
+    }
+}
 
 /// <summary>WMI: the queries to run. RPC: the calls to make, each <c>opnum:hex stub</c>.</summary>
 public sealed record WindowsProbe(Guid ServiceId, Guid? CredentialId = null, string? PromptReference = null, IReadOnlyList<string>? Queries = null, int? Limit = null, DateTimeOffset? Since = null);
