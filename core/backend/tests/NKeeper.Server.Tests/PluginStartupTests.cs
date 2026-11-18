@@ -37,7 +37,7 @@ public sealed class PluginStartupTests(PostgresFixture postgres) : IClassFixture
     {
         await using var server = new ServerScenario(await postgres.CreateDatabaseAsync());
         server.Install(TestPlugins.Package(server.DevelopmentKey));
-        server.Install(TestPlugins.Package(server.DevelopmentKey, id: "hello-quiet", entryType: TestPlugins.QuietType, dependsOn: ("hello", ">=1.0.0")));
+        server.Install(TestPlugins.Package(server.DevelopmentKey, id: "hello-quiet", entryType: TestPlugins.QuietType, dependsOn: ("hello", ">=1.0.0 <2.0.0")));
         using var client = await server.SignedInClientAsync();
 
         var plugins = await client.GetFromJsonAsync<List<PluginStatusResponse>>("/api/plugins", Json, TestContext.Current.CancellationToken);

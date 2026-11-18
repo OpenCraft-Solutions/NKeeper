@@ -1186,6 +1186,8 @@ KVM hypervisors, the way virt-manager reaches them, ported from 1.x's `KvmHost`,
 | `/etc/nkeeper/data-protection.pem` | `root:nkeeper` `0640` | the key ring certificate (§6.3). Back it up apart from the database |
 | `/etc/nkeeper/tls/` | `root:root` `0700` | nginx's certificate and key |
 | `/var/lib/nkeeper/` | `nkeeper:nkeeper` `0750` | the only place the service writes |
+| `/var/lib/nkeeper/plugin-requests/` | `nkeeper:nkeeper` `0750` | the plugins page's install requests, and root's helper's results (§9.1) |
+| `/usr/bin/nkeeper` | `root:root` `0755` | the command line: `nkeeper plugin …` (§9.1, plugin-security.md §9) |
 
 **The service** (`deploy/systemd/nkeeper.service`) runs the server as the unprivileged `nkeeper` user, listening on `127.0.0.1:5080` only. It has the hardening of plugin-security.md §4: `ProtectSystem=strict` with only `/var/lib/nkeeper` writable, `NoNewPrivileges`, `PrivateTmp`, `ProtectHome` and an empty `CapabilityBoundingSet`. It also has `PrivateDevices`, the kernel protections, `RestrictSUIDSGID`, `LockPersonality`, and network families limited to IPv4, IPv6 and Unix sockets.
 
@@ -1256,6 +1258,101 @@ The official key's private half exists only as an organisation secret, available
 **Developing a plugin** still works against a local server: the plugin's build signs it with a development key, as core's build does today, and the server loads it in `Development` from `Plugins:Directory`.
 
 **Core's tests and CI** test core with core's own test plugins (`testing/plugins`). Each official plugin's tests move with it. The Install workflow installs from the lock file, so it tests the released plugins as users get them.
+
+### 9.1 The plugin catalog
+
+The installer installs the plugins in `deploy/plugins.lock`. The **catalog** says which other plugins a server can get, and when one it has can be upgraded, without a release of NKeeper. It works like apt: refreshing the catalog (`update`) only looks; installing or upgrading (`install`, `upgrade`) changes what's installed, and only root does that (plugin-security.md §1).
+
+**The catalog file.** A JSON file in a repository of its own, `OpenCraft-Solutions/NKeeper-Plugins`, kept by its maintainer. Editing it changes nothing but the next refresh: no release of NKeeper or of any plugin. It points at plugin repositories, not packages:
+
+```json
+{
+  "formatVersion": 1,
+  "plugins": [
+    { "id": "kvm", "repository": "OpenCraft-Solutions/NKeeper-Plugin-KVM", "summary": "KVM hypervisors' virtual machines and consoles" }
+  ]
+}
+```
+
+- `id` is the plugin's ID (plugin-security.md §6.2) and `repository` a GitHub `owner/name`; `summary` is one line for the store's list. Unknown fields are ignored, so the format can grow. The file is at most 1 MiB, and an entry that doesn't parse is skipped with a warning, not the whole file.
+- **Versions come from the repository's releases**, as each plugin's release workflow publishes them (§9): tag `v<version>`, with `<id>-<version>.nkp` and `<id>-<version>.nkp.sha256`. Drafts and pre-releases are ignored. A new release reaches the store at the next refresh, with nothing else to edit.
+- **Being in the catalog isn't being trusted.** A package installs only if it verifies (plugin-security.md §5): an official plugin's ID needs the official key, and a third-party plugin's needs a key root has put in the trust directory, scoped to its ID (§6). The catalog can list a third-party plugin; until its key is trusted, the store shows it as "signed by a key this server doesn't trust".
+- **Where the server reads it:** `Plugins:Catalog:Url`, by default the file on the repository's `main` branch (`https://raw.githubusercontent.com/OpenCraft-Solutions/NKeeper-Plugins/main/catalog.json`). Only `https://` URLs are accepted. An empty URL turns the store off, for servers without internet access; plugins then come only from `plugins.lock` or root's own `nkeeper plugin install <file>`.
+
+**Refreshing (`update`).** The server refreshes the catalog shortly after it starts, then once a day, and when an administrator presses **Check for updates** on the plugins page. Refreshing:
+1. fetches the catalog file;
+2. lists each catalogued repository's releases through GitHub's API, without a token, with ETags so an unchanged repository costs nothing against GitHub's rate limit;
+3. picks, for each plugin, the newest release this server can load: its SDK range includes the server's (§4) and it is newer than the installed version, if any. It looks back at most ten releases;
+4. downloads that package into memory, checks it against its SHA-256 file, and verifies it exactly as at load: structure, signature, key and ID scope, revocation and SDK range (plugin-security.md §5). The release's package must be the plugin and version its tag says (`wrong_package`);
+5. keeps what it found until the next refresh: each plugin's newest installable version, its package's SHA-256, signer and dependencies, or why none can be installed (`sdk_incompatible`, `key_scope`, `untrusted_key`, `checksum_mismatch`, `download_failed`…). It's kept in memory: a restart refreshes again a minute later.
+
+A refresh installs nothing and changes nothing about loaded plugins. A refresh that can't reach GitHub keeps the last result and says when it was taken.
+
+Only administrators see the catalog: `GET /api/plugins/catalog`, `POST /api/plugins/catalog/refresh` and `POST /api/plugins/catalog/requests`.
+
+**The plugins page** gains two lists beside the installed plugins: **Updates** (installed plugins with a newer installable version) and **Available** (catalogued plugins that aren't installed), each with its summary, version, signer and repository. An administrator can install or upgrade from them (below), or read the command that does it.
+
+**Installing and upgrading (`install`, `upgrade`).** Only root writes the plugin directory, so installing is root's, in two ways that run the same code:
+- **On the command line,** with the server binary's `plugin` command (plugin-security.md §9), which `/usr/bin/nkeeper` runs:
+  - `nkeeper plugin update` refreshes the catalog, as above, and lists what can be installed or upgraded;
+  - `nkeeper plugin upgrade [<id>…]` upgrades every installed plugin with a newer installable version, or just those named;
+  - `nkeeper plugin install <id>` installs a catalogued plugin, with the plugins it depends on (`dependsOn`) that aren't installed.
+- **From the plugins page,** through a root helper. An administrator's **Install** or **Upgrade** writes a request (the plugin's ID, version and package SHA-256, and who asked) to `/var/lib/nkeeper/plugin-requests/`, and is audited (`plugin.install_requested`). A systemd path unit, `nkeeper-plugin-requests.path`, watches that directory and starts `nkeeper-plugin-requests.service`, which runs `nkeeper plugin apply-requests` as root.
+
+Either way, root's side trusts nothing the service wrote:
+- it fetches the catalog itself and checks the ID is in it;
+- it downloads the package itself, from the catalogued repository's release, and checks it against the request's SHA-256, so it installs what the administrator saw;
+- it verifies the package with root's own trust configuration (plugin-security.md §5 and §6), refuses a downgrade (§8), and installs dependencies first;
+- it copies each package into `/usr/lib/nkeeper/plugins/` as `root:root 0644` with an atomic rename, replacing the plugin's older package;
+- it restarts NKeeper once, after all the requests, so open sessions end. The page asks first and says so.
+
+It takes at most ten requests per run, refuses malformed ones and any beyond ten, and replaces each request with its result (`<id>.result`, created exclusively, so never through a link the service left), which the server reports on the plugins page and in the audit (`plugin.installed`, `plugin.upgraded`, or `plugin.install_failed` with the reason). A newly installed plugin is enabled when it is built in, as at first sight (plugin-security.md §8); any other waits for an administrator to enable it.
+
+The helper's unit can write only the plugin directory and the requests' directory (`ProtectSystem=strict`). `setup.sh install --no-store-requests` leaves the path unit and the requests' directory out, and is kept on upgrade. The plugins page then shows the command for root instead of the buttons.
+
+**What this changes about security** (plugin-security.md §1, principle 2): an administrator, or code running as the service, can now *ask* root to install or upgrade a plugin. It can ask only for a catalogued plugin, at a version newer than the installed one, in a package that root's own verification accepts. So it gains no code that root's trust doesn't already allow, and the service still can't write the plugin or trust directories (principle 4). The catalog's repository is a new thing to protect, as each plugin repository already is: whoever controls it can point an ID at another repository, but that repository's packages still need a key allowed to sign the ID.
+
+**The installer and the store.** `setup.sh install` replaces the plugin directory with the lock file's plugins (§8). It keeps a package the store installed: one whose plugin isn't in the lock file, or whose version is newer than the lock file's. `plugins.lock` stays the set every install gets; the catalog lists every official plugin, those included, so they get upgrades between NKeeper releases.
+
+### 9.2 Optional plugins and dependencies
+
+Core stays small: hosts, credentials, sessions, access, audit and the plugin host. Everything else is a plugin, and **every plugin can be turned off.** Some are on by default; none is part of core.
+
+**On by default.** A manifest's `builtIn: true` (plugin-security.md §3) now means *on by default*: such a plugin is enabled the first time the server sees it, and an administrator can disable it like any other. It is still honoured only from an official key, so a third-party plugin starts disabled until an administrator enables it. The official plugins say `builtIn: true`, so installing one, from `plugins.lock` or the catalog, turns it on. `plugins.lock` is the default set a new install gets (ssh, web, desktop, telnet, vnc, wake-on-lan), not a part of core: each can be disabled or removed.
+
+**Enabling and disabling,** on the plugins page, for administrators:
+- **Disable** turns a plugin off at the next restart. Its data and settings are kept; its service types show as unavailable (plugin-security.md §8). Audited as `plugin.disabled`.
+- **Enable** turns it on at the next restart. Audited as `plugin.enabled`.
+- Both are recorded at once and take effect when NKeeper restarts, since code is never loaded into or unloaded from a running server (plugin-security.md §7.1). The page says a restart is pending, and offers **Restart now** through root's helper (§9.1), which ends open sessions; or the change waits for the next restart.
+
+**Removing,** root's, like installing (§9.1): `sudo nkeeper plugin remove <id>`, or **Remove** on the page through root's helper. The package leaves the plugin directory; the plugin's data stays, and the page shows it as missing (plugin-security.md §8), so installing it again brings it back as it was. The installer doesn't bring back a plugin of `plugins.lock` that was removed: the helper remembers removals in `.removed` in the plugin directory, which the installer reads.
+
+**Dependencies, kept shallow.** A plugin may build on another only in one way, so the graph stays two layers deep and dependency hell has nowhere to start:
+- **Only on a shared plugin.** A plugin may depend only on a *shared plugin*: one that exists to be built on, exports something for its dependants (backend `exportedAssemblies`, frontend `exports`, §5) and depends on nothing itself. db-core and virt-core are shared plugins; mssql, oracle, ase and kvm build on them. A plugin that depends on a plugin with dependencies of its own is refused (`dependency_depth`), so there are no chains and no diamonds.
+- **Within one major version.** A dependency's range names one major version (`>=1.2.0 <2.0.0`); a range open at the top, or spanning majors, is refused (`dependency_range`). A shared plugin follows SemVer as the SDK does (§4): a minor version only adds, and a breaking change is a new major version, which should be rare.
+- **One copy each.** A server has one version of each plugin, so dependants share their shared plugin's one copy (§5).
+- **Enabling a plugin enables its shared plugin** with it, and the page says so before it does. **Disabling a shared plugin disables its dependants** with it, listed first; they come back when it's enabled again only if an administrator enables them. **Removing a shared plugin** is refused while an installed plugin depends on it, unless they're removed together.
+- **The catalog keeps them in step** (§9.1): installing a plugin installs its shared plugin. An upgrade of a shared plugin is offered only if every installed dependant's range accepts it; otherwise the page says which dependant to upgrade first. An upgrade of a dependant that needs a newer shared plugin brings it along; any other dependant that doesn't accept that version is upgraded in the same run to a release that does, and if one has no such release, nothing moves and the page says which. Either way they're installed in one run of root's helper, with one restart, dependants' upgrades ordered so no plugin is ever left outside its range.
+
+The plugin host checks the first three rules at every start (plugin-security.md §5.6), so a package can't break them by being installed by hand.
+
+### 9.3 Third-party plugins
+
+Anyone can write a plugin. A third-party plugin has a reverse-domain ID (`com.example.netbox`) and is signed with its publisher's own key, which a server must trust, for that publisher's IDs only (plugin-security.md §6.1, §6.2). It can never sign, replace or stand in for an official plugin. A third-party plugin starts disabled, whatever its manifest says, until an administrator enables it (§9.2).
+
+**Getting one,** in either of two ways:
+- **From the publisher's catalog.** An administrator adds a catalog's URL on the plugins page (HTTPS only, at most 20, kept in `/var/lib/nkeeper/plugin-catalogs.json`), and its plugins join the **Available** list, marked with the catalog they come from. A catalog is the same file as NKeeper's own (§9.1). Adding one is audited (`plugin.catalog_added`) and grants nothing by itself: its packages still need a trusted key. An ID that more than one catalog lists comes from NKeeper's own catalog first, then from the catalog added first; the page shows the others as conflicts. The request to install names the catalog, and root's helper fetches that catalog and the package itself, as for NKeeper's own (§9.1).
+- **By uploading the package** on the plugins page. The server verifies the upload as at load (plugin-security.md §5), shows its ID, version, signer and whether that key is trusted, and keeps it in the requests' directory with a request to install it. Root's helper verifies it again with root's trust configuration before installing it. Uploads are at most the package limit (plugin-security.md §5.2), and are audited (`plugin.uploaded`).
+
+**Trusting a publisher's key.** The publisher gives their public key file (plugin-security.md §6.1): its key ID (a fingerprint of the key), the key, and the ID patterns it may sign (`com.example.*`).
+- **As root, always:** `sudo nkeeper plugin trust add <key file>`, `trust list` and `trust remove <key ID>`. The key goes into `/etc/nkeeper/plugin-trust/`.
+- **From the plugins page, only where root allowed it:** `setup.sh install --allow-web-trust` lets administrators trust and untrust third-party keys from the page, through root's helper. It is off by default, and kept on upgrade. Without it, the page shows the command for root instead.
+  - The administrator pastes or uploads the key file, checks the key ID and ID patterns the page shows against what the publisher published, and confirms with their password.
+  - Root's helper accepts only a third-party key: never an official, install or development key. Its ID patterns must follow plugin-security.md §6.2: at least two fixed segments, never an unprefixed (official) ID. It writes the key file, `root:root 0644`, and NKeeper uses it from the next restart.
+  - The helper takes trust requests only when the server's settings say web trust is allowed. Its systemd unit can write the trust directory only then too (a drop-in the installer adds), so both locks must be open.
+  - Audited as `plugin.trust_requested` and `plugin.publisher_added` (or `plugin.publisher_removed`), with the key ID and its patterns.
+
+**What `--allow-web-trust` costs.** With it, an NKeeper administrator account can get code of its own choosing running on the server: sign a plugin with a key of its own, trust that key, upload the plugin and enable it. That code runs with the server's access, the credential vault included. Turn it on only where administrators are as trusted as root, and protect their accounts accordingly. Without it, trust stays root's (plugin-security.md §1), and the page can still add catalogs, upload packages signed by keys root trusts, and install, enable, disable and remove them.
 
 ## 10. Where to read more
 

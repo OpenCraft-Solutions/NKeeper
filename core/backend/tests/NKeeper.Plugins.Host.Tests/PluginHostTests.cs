@@ -361,7 +361,7 @@ public sealed class PluginHostTests : IDisposable
     public async Task A_plugin_that_fails_to_configure_is_refused_and_its_registrations_removed()
     {
         _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, entryType: TestPlugins.ThrowingConfigureType));
-        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "hello-dependant", dependsOn: ("hello", ">=1.0.0")));
+        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "hello-dependant", dependsOn: ("hello", ">=1.0.0 <2.0.0")));
         var host = _scenario.Host();
         var result = await host.LoadAsync(TestContext.Current.CancellationToken);
         var services = new ServiceCollection();
@@ -388,16 +388,15 @@ public sealed class PluginHostTests : IDisposable
     }
 
     [Fact]
-    public async Task A_plugin_contributing_a_taken_service_type_is_refused_with_its_dependants()
+    public async Task A_plugin_contributing_a_taken_service_type_is_refused()
     {
+        // copycat depends on hello so that hello, loaded first, has the service type first.
         _scenario.Install(TestPlugins.Package(_scenario.OfficialKey));
-        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "copycat", entryType: TestPlugins.DuplicateServiceTypeType, dependsOn: ("hello", ">=1.0.0")));
-        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "copycat-dependant", dependsOn: ("copycat", ">=1.0.0")));
+        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "copycat", entryType: TestPlugins.DuplicateServiceTypeType, dependsOn: ("hello", ">=1.0.0 <2.0.0")));
 
         var (result, services) = await ConfigureAsync();
 
         AssertRefused(result, "copycat", HostReasonCodes.ContributionInvalid);
-        AssertRefused(result, "copycat-dependant", HostReasonCodes.Dependency);
         Assert.Equal(["hello"], result.ServiceTypes.Select(t => t.PluginId));
         Assert.DoesNotContain(services, s => s.ImplementationInstance?.GetType().GetProperty("Text")?.GetValue(s.ImplementationInstance) is "must not be registered");
         Assert.Contains(_scenario.Audit.Events, e => e.Action == "plugin.refused" && e.Target == "copycat" && e.Detail == HostReasonCodes.ContributionInvalid);
@@ -450,7 +449,7 @@ public sealed class PluginHostTests : IDisposable
     public async Task A_plugin_contributing_a_taken_session_type_is_refused()
     {
         _scenario.Install(TestPlugins.Package(_scenario.OfficialKey));
-        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "broken", entryType: TestPlugins.InvalidServiceTypeType, dependsOn: ("hello", ">=1.0.0")));
+        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "broken", entryType: TestPlugins.InvalidServiceTypeType, dependsOn: ("hello", ">=1.0.0 <2.0.0")));
 
         var (result, _) = await ConfigureAsync(("Plugins:Settings:broken:Break", "session-taken"));
 
@@ -499,7 +498,7 @@ public sealed class PluginHostTests : IDisposable
     public async Task A_session_origin_prefix_claimed_by_an_earlier_plugin_is_refused()
     {
         _scenario.Install(TestPlugins.Package(_scenario.OfficialKey));
-        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "broken", entryType: TestPlugins.InvalidServiceTypeType, dependsOn: ("hello", ">=1.0.0")));
+        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "broken", entryType: TestPlugins.InvalidServiceTypeType, dependsOn: ("hello", ">=1.0.0 <2.0.0")));
 
         var (result, _) = await ConfigureAsync(("Plugins:Settings:hello:Origin", "hello"), ("Plugins:Settings:broken:Break", "origin-taken"));
 
@@ -511,7 +510,7 @@ public sealed class PluginHostTests : IDisposable
     public async Task A_host_action_ID_taken_by_an_earlier_plugin_is_refused()
     {
         _scenario.Install(TestPlugins.Package(_scenario.OfficialKey));
-        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "broken", entryType: TestPlugins.InvalidServiceTypeType, dependsOn: ("hello", ">=1.0.0")));
+        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "broken", entryType: TestPlugins.InvalidServiceTypeType, dependsOn: ("hello", ">=1.0.0 <2.0.0")));
 
         var (result, _) = await ConfigureAsync(("Plugins:Settings:broken:Break", "action-taken"));
 
@@ -556,8 +555,8 @@ public sealed class PluginHostTests : IDisposable
     }
 
     [Theory]
-    [InlineData("missing", ">=1.0.0")]
-    [InlineData("base", ">=2.0.0")]
+    [InlineData("missing", ">=1.0.0 <2.0.0")]
+    [InlineData("base", ">=2.0.0 <3.0.0")]
     public async Task A_missing_or_out_of_range_dependency_is_refused(string dependency, string range)
     {
         _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "base"));
@@ -573,23 +572,54 @@ public sealed class PluginHostTests : IDisposable
     public async Task A_disabled_dependency_refuses_its_dependant()
     {
         _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "base", builtIn: false));
-        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "dependant", dependsOn: ("base", ">=1.0.0")));
+        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "dependant", dependsOn: ("base", ">=1.0.0 <2.0.0")));
 
         AssertRefused(await _scenario.LoadAsync(), "dependant", HostReasonCodes.Dependency);
     }
 
     [Fact]
-    public async Task A_dependency_cycle_is_refused()
+    public async Task A_plugin_may_depend_only_on_a_plugin_without_dependencies_so_no_chain_or_cycle_forms()
     {
-        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "first", dependsOn: ("second", ">=1.0.0")));
-        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "second", dependsOn: ("first", ">=1.0.0")));
-        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "third", dependsOn: ("first", ">=1.0.0")));
+        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "base"));
+        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "middle", dependsOn: ("base", ">=1.0.0 <2.0.0")));
+        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "top", dependsOn: ("middle", ">=1.0.0 <2.0.0")));
+        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "first", dependsOn: ("second", ">=1.0.0 <2.0.0")));
+        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "second", dependsOn: ("first", ">=1.0.0 <2.0.0")));
 
         var result = await _scenario.LoadAsync();
 
-        AssertRefused(result, "first", HostReasonCodes.DependencyCycle);
-        AssertRefused(result, "second", HostReasonCodes.DependencyCycle);
-        AssertRefused(result, "third", HostReasonCodes.Dependency);
+        Assert.Equal(["base", "middle"], result.Loaded.Select(p => p.Manifest.Id));
+        AssertRefused(result, "top", HostReasonCodes.DependencyDepth);
+        AssertRefused(result, "first", HostReasonCodes.DependencyDepth);
+        AssertRefused(result, "second", HostReasonCodes.DependencyDepth);
+    }
+
+    [Theory]
+    [InlineData(">=1.0.0")]
+    [InlineData(">=1.0.0 <3.0.0")]
+    [InlineData("<2.0.0")]
+    [InlineData(">=1.0.0 <2.0.1")]
+    public async Task A_dependency_range_must_name_one_major_version(string range)
+    {
+        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "base"));
+        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "dependant", dependsOn: ("base", range)));
+
+        AssertRefused(await _scenario.LoadAsync(), "dependant", HostReasonCodes.DependencyRange);
+    }
+
+    [Fact]
+    public async Task A_plugin_on_by_default_can_be_disabled_and_stays_disabled_across_upgrades()
+    {
+        var first = _scenario.Install(TestPlugins.Package(_scenario.OfficialKey));
+        await _scenario.LoadAsync();
+        File.Delete(first);
+        _scenario.Store.Records["hello"] = _scenario.Store.Records["hello"] with { Enabled = false, EnabledBy = null, EnabledAtUtc = null };
+        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, version: "1.1.0"));
+
+        var result = await _scenario.LoadAsync();
+
+        Assert.Equal(PluginState.Disabled, Assert.Single(result.Statuses, s => s.Id == "hello" && s.Version == "1.1.0").State);
+        Assert.Empty(result.Loaded);
     }
 
     // ---- RequireAllEnabledLoaded (§9) ----

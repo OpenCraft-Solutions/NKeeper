@@ -8,7 +8,7 @@ NKeeper loads plugins at run time from signed packages. A plugin runs **inside**
 ## 1. Principles
 
 1. **Fail closed.** If any check fails, that plugin's code never runs. There is no "load anyway" switch and no unsigned mode, not even in development.
-2. **Root installs, admins enable.** Placing a plugin on a server requires root on that machine. An NKeeper administrator can only enable or disable plugins root has already installed. There is no upload through the web UI or the API.
+2. **Root installs, admins enable.** Placing a plugin on a server requires root on that machine. An NKeeper administrator can enable or disable plugins root has already installed, and can ask root's helper to install, upgrade or remove a plugin, from a catalog or an uploaded package, which root's side checks again from scratch ([architecture.md §9.1–§9.3](architecture.md#91-the-plugin-catalog)). Trusting a new signing key stays root's, unless root allows it from the web page on that server (`--allow-web-trust`, architecture.md §9.3).
 3. **Verify what you load, load what you verified.** The package is read into memory once, verified there, and code is loaded from those same verified bytes. Nothing is re-read from disk between verification and loading.
 4. **The process can't modify its own plugins.** Even a fully compromised NKeeper process (an attacker with code execution as the service user) can't write to the plugin directory or the trust configuration.
 5. **In-process is not a sandbox.** Separate load contexts keep plugins' library versions apart. They do not limit what a plugin can do. Trust is decided by signatures, and untrusted code would need the out-of-process design (plan, Phase 8).
@@ -23,7 +23,8 @@ NKeeper loads plugins at run time from signed packages. A plugin runs **inside**
 | Use a compromised third-party key to replace an official plugin (e.g. a fake `ssh`) | Keys are scoped to plugin ID namespaces. Unprefixed IDs are reserved for the official key. (§6) |
 | Replace a package with an older, validly signed version that has a known flaw | Installed versions are pinned. Downgrades are refused unless root explicitly allows one. (§8) |
 | Ship a different package under the same version number | Each package hash is pinned. The same ID and version with a different hash is refused as tampering. (§8) |
-| Take over an NKeeper administrator account | Can enable or disable plugins root already installed, and nothing more. Every change is audited. (§9) |
+| Take over an NKeeper administrator account | Can enable, disable and remove plugins, and ask for a plugin to be installed or upgraded: only a newer version, in a package root's own verification accepts. Can't trust a new key unless root allowed web trust (`--allow-web-trust`); where it did, an administrator account amounts to code execution on the server. Every change is audited. (§9, architecture.md §9.1–§9.3) |
+| Take over the catalog's repository | Can point a plugin ID at another repository, whose packages still need a key allowed to sign that ID (§6.2). Can't make a server load anything its trust doesn't already accept. (architecture.md §9.1) |
 | Craft a malicious ZIP (path traversal, duplicate entries, decompression bombs) | Strict package parser with limits, applied to every entry, the signature metadata included, before anything is decompressed or authenticated. Paths are normalized and validated before use. (§5.2) |
 | Swap files between verification and loading | Not possible: verification and loading use the same in-memory bytes. (§7) |
 | Learn a credential through a plugin's mistake (a log line, an error message, a serialized object) | Plugins use credentials without seeing them. Core authenticates the connection, or writes the secret onto the wire itself. Plaintext release is declared in the manifest and audited. (§12) |
@@ -49,7 +50,7 @@ frontend/<entry>.js, …     pre-built ES modules and assets
 - `backend.entryAssembly` and `backend.entryType` (the `IPlugin` implementation);
 - `backend.exportedAssemblies`: contract assemblies dependants may use, such as `db-core`'s engine interfaces;
 - `frontend.entry` (optional: a plugin may have no frontend);
-- `builtIn` (optional, default `false`): ship-with-NKeeper plugins such as `ssh`. It is honoured **only** when the package is signed by an official key, by an install key (§6.1), or by a development key on a server running in `Development`. From any other signer it is ignored, so a third-party plugin can never make itself undisableable. This is how the server knows what is built in without core naming any plugin.
+- `builtIn` (optional, default `false`): *on by default* (architecture.md §9.2). Such a plugin is enabled the first time the server sees it; an administrator can still disable it, as any plugin. It is honoured **only** when the package is signed by an official key, by an install key (§6.1), or by a development key on a server running in `Development`. From any other signer it is ignored, so a third-party plugin always starts disabled. This is how the server knows what is on by default without core naming any plugin.
 
 A **version range** is one or more comparators separated by spaces, all of which must hold: `>=0.1.0 <0.2.0`. The operators are `=`, `>`, `>=`, `<` and `<=`, with SemVer 2.0 precedence.
 
@@ -144,6 +145,7 @@ Nothing is decompressed until the whole ZIP structure passes, including the sign
 ### 5.6 Dependencies
 
 21. Every `dependsOn` entry is present, verified, enabled and in range. Otherwise this plugin is refused too (`dependency`). Dependency cycles are refused (`dependency_cycle`).
+22. Every dependency is a shared plugin, which depends on nothing itself (`dependency_depth`), and every range names one major version, with an upper bound (`dependency_range`). So dependencies stay one layer deep (architecture.md §9.2).
 
 Only a plugin that passes all of these **and** is enabled (§8) has its code loaded.
 
@@ -240,7 +242,7 @@ In development the shell is built with `--watch` and the server serves it, so pl
 | State | Meaning |
 | --- | --- |
 | **Installed** | A package is in the plugin directory and passes verification. Its manifest is read, and its code is not loaded. |
-| **Enabled** | An administrator has turned it on in NKeeper. Its code loads at startup, its migrations run, and its endpoints and contributions appear. Built-in plugins (§3, `builtIn`) are enabled the first time they are seen and can't be disabled. |
+| **Enabled** | An administrator has turned it on in NKeeper. Its code loads at startup, its migrations run, and its endpoints and contributions appear. Plugins that are on by default (§3, `builtIn`) are enabled the first time they are seen; any plugin can be disabled (architecture.md §9.2). |
 | **Disabled** | Its code doesn't load. Its data and settings are kept. Its service types show as unavailable. |
 | **Refused** | Verification failed. Its code doesn't load, it is shown with the reason code, and an alert is raised (§9). |
 | **Awaiting signer approval** | A newer version signed by a different key than the recorded one. Its code doesn't load until an administrator approves the new signer. |
@@ -250,7 +252,7 @@ Core records every plugin it has seen in `core.installed_plugins`:
 - whether it is enabled, and who enabled it, and when;
 - when it was first seen and last updated.
 
-A plugin seen for the first time is recorded and audited (`plugin.discovered`). A built-in plugin starts enabled; any other starts disabled until an administrator enables it.
+A plugin seen for the first time is recorded and audited (`plugin.discovered`). A plugin that is on by default starts enabled; any other starts disabled until an administrator enables it. Enabling and disabling take effect at the next restart (§7.1).
 
 At every start:
 - **same version, same hash:** loads;
@@ -273,11 +275,12 @@ Removing a package from the directory keeps the plugin's data. The plugin shows 
 - `verify <file>`: runs every check in §5 without installing, and prints the result and the reason codes;
 - `install <file>`: verifies, then copies the package into the plugin directory as `root:root 0644` with an atomic rename. Restart NKeeper to load it;
 - `remove <id>`, `list`, `allow-downgrade <id> <version>`, `trust add|remove|list`.
+- `update`, `upgrade [<id>…]`, `install <id>` (by ID, from the catalog), `remove <id>` and `apply-requests` (the plugins page's requests): the catalog's commands, architecture.md §9.1–§9.3.
 
 **Admin UI.**
 - **Shows:** every plugin with its state, version, signer, package hash, requirements and refusal reasons.
-- **Allows:** enable, disable, and approving a new signing key for an update.
-- **Does not offer:** upload, install or remove.
+- **Allows:** enable, disable, and approving a new signing key for an update; adding catalogs and uploading packages, installed only by root's helper; and, only where root allowed it, trusting third-party keys (architecture.md §9.3).
+- **Installs nothing itself.** Installing, upgrading, removing and (where allowed) trusting a key are requests to root's helper, which checks each one again with root's own trust configuration (architecture.md §9.1–§9.3).
 
 **Audit.** Plugin events are core-owned audit events:
 - `plugin.discovered`, `plugin.enabled`, `plugin.disabled`, `plugin.updated`, `plugin.loaded`;

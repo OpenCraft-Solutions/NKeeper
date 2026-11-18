@@ -32,6 +32,48 @@ public static class AuditActions
     public const string TrustMismatch = "trust.mismatch";
     public const string SessionOpen = "session.open";
     public const string SessionClose = "session.close";
+
+    /// <summary>An administrator asked root's helper to install or upgrade a catalogued plugin (architecture.md §9.1).</summary>
+    public const string PluginInstallRequested = "plugin.install_requested";
+
+    /// <summary>Root's helper installed a plugin from the catalog.</summary>
+    public const string PluginInstalled = "plugin.installed";
+
+    /// <summary>Root's helper upgraded a plugin from the catalog.</summary>
+    public const string PluginUpgraded = "plugin.upgraded";
+
+    /// <summary>Root's helper didn't do what the plugins page asked.</summary>
+    public const string PluginRequestFailed = "plugin.request_failed";
+
+    /// <summary>An administrator uploaded a plugin package (architecture.md §9.3).</summary>
+    public const string PluginUploaded = "plugin.uploaded";
+
+    /// <summary>An administrator added a publisher's catalog (architecture.md §9.3).</summary>
+    public const string PluginCatalogAdded = "plugin.catalog_added";
+
+    /// <summary>An administrator removed a publisher's catalog.</summary>
+    public const string PluginCatalogRemoved = "plugin.catalog_removed";
+
+    /// <summary>An administrator asked root's helper to remove a plugin (architecture.md §9.2).</summary>
+    public const string PluginRemoveRequested = "plugin.remove_requested";
+
+    /// <summary>Root's helper removed a plugin's package.</summary>
+    public const string PluginRemoved = "plugin.removed";
+
+    /// <summary>An administrator asked root's helper to restart NKeeper.</summary>
+    public const string PluginRestartRequested = "plugin.restart_requested";
+
+    /// <summary>Root's helper restarted NKeeper.</summary>
+    public const string PluginRestarted = "plugin.restarted";
+
+    /// <summary>An administrator asked root's helper to trust or untrust a key (architecture.md §9.3).</summary>
+    public const string PluginTrustRequested = "plugin.trust_requested";
+
+    /// <summary>Root's helper trusted a third-party key.</summary>
+    public const string PluginPublisherAdded = "plugin.publisher_added";
+
+    /// <summary>Root's helper stopped trusting a third-party key.</summary>
+    public const string PluginPublisherRemoved = "plugin.publisher_removed";
 }
 
 /// <summary>
