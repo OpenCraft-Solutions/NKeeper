@@ -910,6 +910,25 @@ contributions.AddHostAction(new HostAction("linux.scan", "Linux (internal)") { E
 - **Applying** saves the host's changes with one `PUT /api/hosts/{id}`, from the version the dialog opened with, so an edit in between is a conflict, not lost. Then it creates each new host with `POST /api/hosts`.
 - Not yet: scanning many hosts at once (1.x's bulk scan), external scans (TCP probes from the server, with `network-scan`), and guests and cluster nodes (with the virt plugins).
 
+### 7.27 The `storage` plugin
+
+A Linux host's shared storage over its SSH service, ported from 1.x's `StorageController` and `StorageHost`, in its own repository, `NKeeper-Plugin-Storage` (§9). Like the `linux` plugin (§7.25), it contributes no service type: its one tool opens on the `ssh` plugin's `ssh` services, as a stream session with a credential. It speaks the same request protocol, and needs SDK 1.3 (`>=1.3.0 <2.0.0`).
+
+- **Storage** (session type `storage`, host action `storage.open`):
+  - `status`: the host's iSCSI initiator, sessions and known targets (`iscsiadm`), multipath maps and their paths (`multipath -ll`), and DRBD resources with their volumes and peers (`drbdadm`, `drbdsetup`). Each part is null when its tools aren't installed.
+  - `action` `{ action, target?, portal?, name?, newName? }`: one of the everyday actions, then the host's storage afterwards, with what it did:
+    - iSCSI: discovery at a portal, login, logout and rescanning sessions;
+    - multipath: reloading the maps, flushing one, and renaming one. A rename sets the alias in the map's `multipath { wwid … }` block, or adds a file with one, and puts the files back if the map doesn't take the new name;
+    - DRBD: up, down, primary, secondary, connect, disconnect and adjust.
+- **Safety**, as in 1.x:
+  - every value that goes in a command line is checked against what the host itself reported: a target it knows, a map or resource it has. Discovery's portal must be an address and port. A value that doesn't fit is refused before anything runs;
+  - success is judged by the host's storage afterwards, not by the tool's exit code. An action that exits cleanly without taking effect is reported as failed, with what the tool printed;
+  - the view asks before an action that takes storage away or changes which node may write (logout, flush, DRBD down, primary, secondary and disconnect), saying what happens.
+- **Needs root**, or `sudo` without a password, as the tools do. Otherwise `status` says so.
+- **Audited** as `storage.action`, with what it acted on, such as `iSCSI login · <target> · <portal>`.
+- **Not only Linux.** Like Journal, it first checks `uname -s`, and refuses a host that isn't Linux. A service where it doesn't fit can turn it off (§7.4).
+- **Its frontend** is the Storage view, ported from 1.x's `StorageView`.
+
 ## 8. The native install
 
 `deploy/setup.sh` installs NKeeper on a Linux server, from a checkout of the repository, as root. It's an early version of the Phase 6 installer (v2-plan.md §8). NKeeper installs natively only (D8): systemd, nginx and PostgreSQL, no containers.
@@ -977,7 +996,7 @@ Each official plugin lives in a repository of its own and is released on its own
 
 **Repositories,** all under `OpenCraft-Solutions`:
 - `NKeeper`, this one: the server, the shell, the SDK, the plugin tooling, the test helpers and the installer.
-- `NKeeper-Plugin-<Name>` for each official plugin: `NKeeper-Plugin-SSH`, `NKeeper-Plugin-Web`, `NKeeper-Plugin-Desktop`, `NKeeper-Plugin-WakeOnLan`, and each new one (`NKeeper-Plugin-Telnet`, `NKeeper-Plugin-VNC`, `NKeeper-Plugin-Linux`, `NKeeper-Plugin-iDRAC`…). A plugin's ID doesn't change when it moves.
+- `NKeeper-Plugin-<Name>` for each official plugin: `NKeeper-Plugin-SSH`, `NKeeper-Plugin-Web`, `NKeeper-Plugin-Desktop`, `NKeeper-Plugin-WakeOnLan`, and each new one (`NKeeper-Plugin-Telnet`, `NKeeper-Plugin-VNC`, `NKeeper-Plugin-Linux`, `NKeeper-Plugin-Storage`, `NKeeper-Plugin-iDRAC`…). A plugin's ID doesn't change when it moves.
 - A plugin repository holds the plugin's backend, frontend, manifest and tests, and its own CI and release workflow. It references nothing of core's but the published packages below.
 
 **What core publishes,** to GitHub Packages under `OpenCraft-Solutions`, versioned with the SDK (§4) and released from this repository by a tag, `sdk-v<version>`:
