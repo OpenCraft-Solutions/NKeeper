@@ -8,7 +8,7 @@ NKeeper loads plugins at run time from signed packages. A plugin runs **inside**
 ## 1. Principles
 
 1. **Fail closed.** If any check fails, that plugin's code never runs. There is no "load anyway" switch and no unsigned mode, not even in development.
-2. **Root installs, admins enable.** Placing a plugin on a server requires root on that machine. An NKeeper administrator can only enable or disable plugins root has already installed. There is no upload through the web UI or the API.
+2. **Root installs, admins enable.** Placing a plugin on a server requires root on that machine. An NKeeper administrator can enable or disable plugins root has already installed, and can ask root's helper to install or upgrade a plugin from the catalog, which root's side checks again from scratch ([architecture.md §9.1](architecture.md#91-the-plugin-catalog)). There is no upload through the web UI or the API.
 3. **Verify what you load, load what you verified.** The package is read into memory once, verified there, and code is loaded from those same verified bytes. Nothing is re-read from disk between verification and loading.
 4. **The process can't modify its own plugins.** Even a fully compromised NKeeper process (an attacker with code execution as the service user) can't write to the plugin directory or the trust configuration.
 5. **In-process is not a sandbox.** Separate load contexts keep plugins' library versions apart. They do not limit what a plugin can do. Trust is decided by signatures, and untrusted code would need the out-of-process design (plan, Phase 8).
@@ -23,7 +23,8 @@ NKeeper loads plugins at run time from signed packages. A plugin runs **inside**
 | Use a compromised third-party key to replace an official plugin (e.g. a fake `ssh`) | Keys are scoped to plugin ID namespaces. Unprefixed IDs are reserved for the official key. (§6) |
 | Replace a package with an older, validly signed version that has a known flaw | Installed versions are pinned. Downgrades are refused unless root explicitly allows one. (§8) |
 | Ship a different package under the same version number | Each package hash is pinned. The same ID and version with a different hash is refused as tampering. (§8) |
-| Take over an NKeeper administrator account | Can enable or disable plugins root already installed, and nothing more. Every change is audited. (§9) |
+| Take over an NKeeper administrator account | Can enable or disable plugins root already installed, and ask for a catalogued plugin to be installed or upgraded: only a newer version, in a package root's own verification accepts. Every change is audited. (§9, architecture.md §9.1) |
+| Take over the catalog's repository | Can point a plugin ID at another repository, whose packages still need a key allowed to sign that ID (§6.2). Can't make a server load anything its trust doesn't already accept. (architecture.md §9.1) |
 | Craft a malicious ZIP (path traversal, duplicate entries, decompression bombs) | Strict package parser with limits, applied to every entry, the signature metadata included, before anything is decompressed or authenticated. Paths are normalized and validated before use. (§5.2) |
 | Swap files between verification and loading | Not possible: verification and loading use the same in-memory bytes. (§7) |
 | Learn a credential through a plugin's mistake (a log line, an error message, a serialized object) | Plugins use credentials without seeing them. Core authenticates the connection, or writes the secret onto the wire itself. Plaintext release is declared in the manifest and audited. (§12) |
@@ -273,11 +274,12 @@ Removing a package from the directory keeps the plugin's data. The plugin shows 
 - `verify <file>`: runs every check in §5 without installing, and prints the result and the reason codes;
 - `install <file>`: verifies, then copies the package into the plugin directory as `root:root 0644` with an atomic rename. Restart NKeeper to load it;
 - `remove <id>`, `list`, `allow-downgrade <id> <version>`, `trust add|remove|list`.
+- `update`, `upgrade [<id>…]`, `install <id>` (by ID, from the catalog) and `apply-requests` (the plugins page's requests): the catalog's commands, architecture.md §9.1.
 
 **Admin UI.**
 - **Shows:** every plugin with its state, version, signer, package hash, requirements and refusal reasons.
 - **Allows:** enable, disable, and approving a new signing key for an update.
-- **Does not offer:** upload, install or remove.
+- **Does not offer:** upload or remove. Installing and upgrading are requests to root's helper, for catalogued plugins only (architecture.md §9.1).
 
 **Audit.** Plugin events are core-owned audit events:
 - `plugin.discovered`, `plugin.enabled`, `plugin.disabled`, `plugin.updated`, `plugin.loaded`;
