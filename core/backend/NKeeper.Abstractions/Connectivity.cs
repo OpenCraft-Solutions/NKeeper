@@ -285,6 +285,16 @@ public interface ISshConnection : IAsyncDisposable
     /// </summary>
     Task<ISshCommand> StartAsync(string command, CancellationToken cancellationToken = default)
         => throw new NotSupportedException("This server doesn't stream commands: it needs SDK 1.3.");
+
+    /// <summary>
+    /// A TCP connection from the SSH server to <paramref name="address"/>:<paramref name="port"/>, as <c>ssh -L</c> opens
+    /// (docs/architecture.md §7.9, SDK 1.11): <c>127.0.0.1</c> is the SSH server itself. Disposing it closes the forward;
+    /// disposing the SSH connection closes all of them.
+    /// </summary>
+    /// <remarks>Whether something listens there is only known when the SSH server tries: if nothing does, the stream ends at once.</remarks>
+    /// <exception cref="ConnectException">The forward couldn't be set up.</exception>
+    Task<ITcpConnection> ForwardAsync(string address, int port, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("This server doesn't forward ports: it needs SDK 1.11.");
 }
 
 /// <summary>A running command (SDK 1.3). Disposing it stops it if it's still running; the connection stays open.</summary>
