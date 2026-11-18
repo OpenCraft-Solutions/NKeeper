@@ -535,8 +535,8 @@ internal sealed class PluginCatalogService(
                 "installed" => AuditActions.PluginInstalled,
                 "upgraded" => AuditActions.PluginUpgraded,
                 "removed" => AuditActions.PluginRemoved,
-                "trusted" => AuditActions.PluginSignerTrusted,
-                "untrusted" => AuditActions.PluginSignerUntrusted,
+                "trusted" => AuditActions.PluginPublisherAdded,
+                "untrusted" => AuditActions.PluginPublisherRemoved,
                 "restarting" => AuditActions.PluginRestarted,
                 _ => AuditActions.PluginRequestFailed,
             };

@@ -1317,7 +1317,7 @@ Anyone can write a plugin. A third-party plugin has a reverse-domain ID (`com.ex
   - The administrator pastes or uploads the key file, checks the key ID and ID patterns the page shows against what the publisher published, and confirms with their password.
   - Root's helper accepts only a third-party key: never an official, install or development key. Its ID patterns must follow plugin-security.md §6.2: at least two fixed segments, never an unprefixed (official) ID. It writes the key file, `root:root 0644`, and NKeeper uses it from the next restart.
   - The helper takes trust requests only when the server's settings say web trust is allowed. Its systemd unit can write the trust directory only then too (a drop-in the installer adds), so both locks must be open.
-  - Audited as `plugin.trust_requested` and `plugin.signer_trusted` (or `plugin.signer_untrusted`), with the key ID and its patterns.
+  - Audited as `plugin.trust_requested` and `plugin.publisher_added` (or `plugin.publisher_removed`), with the key ID and its patterns.
 
 **What `--allow-web-trust` costs.** With it, an NKeeper administrator account can get code of its own choosing running on the server: sign a plugin with a key of its own, trust that key, upload the plugin and enable it. That code runs with the server's access, the credential vault included. Turn it on only where administrators are as trusted as root, and protect their accounts accordingly. Without it, trust stays root's (plugin-security.md §1), and the page can still add catalogs, upload packages signed by keys root trusts, and install, enable, disable and remove them.
 
