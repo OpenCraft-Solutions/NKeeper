@@ -24,6 +24,25 @@ public sealed class SshConnectivityTests(PostgresFixture postgres, SshServerFixt
     // ---- The trust store (§7.7) ----
 
     [Fact]
+    public async Task Ssh_opens_on_another_port_of_the_services_address_with_its_own_trusted_key()
+    {
+        await using var server = await ServerAsync();
+        using var admin = await server.SignedInClientAsync();
+
+        // The service is on another port (an iDRAC's HTTPS, say); SSH is on the server's (SDK 1.6).
+        var host = await CreateHostAsync(admin, Credential(password: SshServerFixture.Password), port: 443);
+        var probe = new { serviceId = ServiceId(host), credentialId = CredentialId(host, 0), command = "echo racadm", port = ssh.Port };
+
+        var unknown = await SshAsync(admin, host, probe, HttpStatusCode.BadGateway);
+        Assert.Equal("HostKeyUnknown", unknown.GetProperty("reason").GetString());
+        await TrustAsync(admin, unknown.GetProperty("presentedKey"), HttpStatusCode.NoContent);
+        Assert.Equal("racadm\n", (await SshAsync(admin, host, probe)).GetProperty("output").GetString());
+
+        // The key is trusted for the port it was presented on, not the service's.
+        Assert.Equal(ssh.Port, Assert.Single((await GetHostAsync(admin, host)).GetProperty("trustedKeys").EnumerateArray()).GetProperty("port").GetInt32());
+    }
+
+    [Fact]
     public async Task An_unknown_key_is_presented_then_trusted_through_core_and_the_command_runs()
     {
         await using var server = await ServerAsync();

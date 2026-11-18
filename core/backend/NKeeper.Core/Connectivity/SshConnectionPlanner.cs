@@ -54,8 +54,14 @@ public sealed class SshConnectionPlanner(
 {
     /// <exception cref="CredentialDeniedException">The handle isn't valid here.</exception>
     /// <exception cref="ConnectException">The credential can't sign in, or the jump host can't be used.</exception>
-    public async Task<SshPlan> PlanAsync(HostContext host, Guid serviceId, CredentialHandle handle, CancellationToken cancellationToken)
+    /// <param name="port">Another port than the service's, on its address (SDK 1.6): an iDRAC's SSH, beside its HTTPS.</param>
+    public async Task<SshPlan> PlanAsync(HostContext host, Guid serviceId, CredentialHandle handle, CancellationToken cancellationToken, int? port = null)
     {
+        if (port is < 1 or > 65535)
+        {
+            throw new ArgumentOutOfRangeException(nameof(port), "A port is from 1 to 65535.");
+        }
+
         var (pluginId, _, entry) = await broker.UseAsync(host, serviceId, handle, cancellationToken);
         var context = http.HttpContext!;
         var service = host.Services.First(s => s.Id == serviceId);
@@ -66,7 +72,7 @@ public sealed class SshConnectionPlanner(
             throw new ConnectException(ConnectFailure.Unreachable, $"“{host.Name}” or this service was removed meanwhile. Reload the host and try again.");
         }
 
-        if (service.Port is not { } port)
+        if ((port ?? service.Port) is not { } targetPort)
         {
             throw new ConnectException(ConnectFailure.Unreachable, $"This service of “{host.Name}” has no port. Edit the host to set one.");
         }
@@ -82,12 +88,12 @@ public sealed class SshConnectionPlanner(
             throw new ConnectException(ConnectFailure.NoSecret, "This credential has no password or private key.");
         }
 
-        var endpoint = new TrustEndpoint(host.Id, serviceId, TrustedKeyKind.SshHostKey, stored.Address ?? string.Empty, port);
+        var endpoint = new TrustEndpoint(host.Id, serviceId, TrustedKeyKind.SshHostKey, stored.Address ?? string.Empty, targetPort);
         var target = new SshEndpoint(
             endpoint,
             host.Name,
             service.Address,
-            port,
+            targetPort,
             UserName(material.Username, material.Domain),
             material.Password,
             material.PrivateKey,

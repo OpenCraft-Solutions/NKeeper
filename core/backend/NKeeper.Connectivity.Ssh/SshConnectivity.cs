@@ -102,6 +102,17 @@ public sealed class SshConnectivity(SshConnectionPlanner planner, TrustStore tru
         return new SshConnection(client, forward, jump);
     }
 
+    /// <inheritdoc />
+    public async Task<ISshConnection> OpenSshAsync(HostContext host, Guid serviceId, CredentialHandle handle, int port, CancellationToken cancellationToken = default)
+    {
+        var (client, forward, jump) = await OpenAsync(host, serviceId, handle, "ssh", info => new SshClient(info), cancellationToken, port);
+        return new SshConnection(client, forward, jump);
+    }
+
+    /// <summary>Core signs in over HTTPS (SDK 1.6, docs/architecture.md §7.16): HTTP Basic, from the handle's credential.</summary>
+    public Task<IHttpConnection> OpenHttpAsync(HostContext host, Guid serviceId, CredentialHandle handle, CancellationToken cancellationToken = default) =>
+        services.GetRequiredService<HttpConnector>().OpenAsync(host, serviceId, tls: true, handle, cancellationToken);
+
     public async Task<ISftpConnection> OpenSftpAsync(HostContext host, Guid serviceId, CredentialHandle handle, CancellationToken cancellationToken = default)
     {
         var (client, forward, jump) = await OpenAsync(host, serviceId, handle, "sftp", info => new SftpClient(info), cancellationToken);
@@ -110,10 +121,10 @@ public sealed class SshConnectivity(SshConnectionPlanner planner, TrustStore tru
 
     /// <summary>Plans, connects through the jump host if there is one, signs in and audits the credential's use.</summary>
     private async Task<(T Client, ForwardedPortLocal? Forward, SshClient? Jump)> OpenAsync<T>(
-        HostContext host, Guid serviceId, CredentialHandle handle, string kind, Func<ConnectionInfo, T> create, CancellationToken cancellationToken)
+        HostContext host, Guid serviceId, CredentialHandle handle, string kind, Func<ConnectionInfo, T> create, CancellationToken cancellationToken, int? otherPort = null)
         where T : BaseClient
     {
-        using var plan = await planner.PlanAsync(host, serviceId, handle, cancellationToken);
+        using var plan = await planner.PlanAsync(host, serviceId, handle, cancellationToken, otherPort);
         SshClient? jump = null;
         ForwardedPortLocal? forward = null;
         try

@@ -156,7 +156,10 @@ public sealed class HelloPlugin : IPlugin
                 var handle = probe.PromptReference is { } reference
                     ? await broker.ResolvePromptAsync(host, probe.ServiceId, reference)
                     : await broker.ResolveSavedAsync(host, probe.ServiceId, probe.CredentialId ?? Guid.Empty);
-                await using var ssh = await connectivity.OpenSshAsync(host, probe.ServiceId, handle);
+                // Another port on the service's address (SDK 1.6), when the probe names one.
+                await using var ssh = probe.Port is { } port
+                    ? await connectivity.OpenSshAsync(host, probe.ServiceId, handle, port)
+                    : await connectivity.OpenSshAsync(host, probe.ServiceId, handle);
                 if (!probe.Shell)
                 {
                     var result = await ssh.RunAsync(probe.Command ?? "true");
@@ -266,6 +269,31 @@ public sealed class HelloPlugin : IPlugin
             catch (ConnectException ex)
             {
                 return Results.Json(new { reason = ex.Reason.ToString(), message = ex.Message, presentedKey = ex.Presented }, statusCode: StatusCodes.Status502BadGateway);
+            }
+        });
+
+        // Opens an HTTPS connection core signs in to (SDK 1.6) and GETs a path, answering the status and body.
+        use.MapPost("/https", async (HostContext host, SshProbe? probe, ICredentialBroker broker, IConnectivity connectivity) =>
+        {
+            if (probe is null)
+            {
+                return Results.Text("no probe");
+            }
+
+            try
+            {
+                var handle = await broker.ResolveSavedAsync(host, probe.ServiceId, probe.CredentialId ?? Guid.Empty);
+                await using var http = await connectivity.OpenHttpAsync(host, probe.ServiceId, handle);
+                using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(http.BaseAddress, probe.Command ?? "/"));
+
+                // The plugin's own authorization is replaced by core's.
+                request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", "cGx1Z2luOm1hZGUtdXA=");
+                using var response = await http.Client.SendAsync(request, CancellationToken.None);
+                return Results.Json(new { status = (int)response.StatusCode, body = await response.Content.ReadAsStringAsync() });
+            }
+            catch (ConnectException ex)
+            {
+                return Results.Json(new { reason = ex.Reason.ToString(), message = ex.Message, presented = ex.Presented }, statusCode: StatusCodes.Status502BadGateway);
             }
         });
 
@@ -502,7 +530,8 @@ public sealed record SshProbe(
     string? PromptReference = null,
     string? Command = null,
     bool Shell = false,
-    string? Expect = null);
+    string? Expect = null,
+    int? Port = null);
 
 /// <summary>Contributes the service type <c>hello</c> whatever its own ID: the host must refuse it when <c>hello</c> is taken.</summary>
 public sealed class DuplicateServiceTypePlugin : IPlugin

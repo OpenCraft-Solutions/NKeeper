@@ -25,6 +25,26 @@ public interface IConnectivity
     Task<IHttpConnection> OpenHttpAsync(HostContext host, Guid serviceId, bool tls, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// An HTTPS connection that core signs in to (docs/architecture.md §7.16, SDK 1.6): every request carries HTTP Basic
+    /// authentication from the handle's credential, which the plugin never sees, as a Redfish BMC needs. TLS only, with
+    /// the certificate checked as for <see cref="OpenHttpAsync(HostContext, Guid, bool, CancellationToken)"/>.
+    /// </summary>
+    /// <exception cref="CredentialDeniedException">The handle isn't valid here.</exception>
+    /// <exception cref="ConnectException">The certificate isn't trusted, the service can't be reached, or the credential has no password.</exception>
+    Task<IHttpConnection> OpenHttpAsync(HostContext host, Guid serviceId, CredentialHandle handle, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("This server doesn't sign in to HTTP services: it needs SDK 1.6.");
+
+    /// <summary>
+    /// Like <see cref="OpenSshAsync(HostContext, Guid, CredentialHandle, CancellationToken)"/>, to another port on the
+    /// service's address (SDK 1.6): RACADM, an iDRAC's SSH command line, beside its HTTPS service. The server's key is
+    /// trusted for that address and port.
+    /// </summary>
+    /// <exception cref="CredentialDeniedException">The handle isn't valid here.</exception>
+    /// <exception cref="ConnectException">The connection couldn't be opened.</exception>
+    Task<ISshConnection> OpenSshAsync(HostContext host, Guid serviceId, CredentialHandle handle, int port, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("This server doesn't open SSH on another port: it needs SDK 1.6.");
+
+    /// <summary>
     /// A remote desktop through guacd (docs/architecture.md §7.20, SDK 0.1.9): RDP, or VNC with
     /// <see cref="DesktopOptions.Protocol"/> (SDK 1.2). Core checks the handle and, for RDP, the server's certificate,
     /// and does the Guacamole handshake with the credential, which the plugin never sees.

@@ -18,12 +18,21 @@ namespace NKeeper.Core.Connectivity;
 /// accepted when it's publicly valid, or when it's the one trusted for the host; core checks that with a handshake
 /// before handing the connection over, and again on every request it sends.
 /// </summary>
-public sealed class HttpConnector(CoreDbContext db, TrustStore trust, IAuthSessionAccessor sessions, IHttpContextAccessor http, IJumpTunnels tunnels)
+public sealed class HttpConnector(CoreDbContext db, TrustStore trust, IAuthSessionAccessor sessions, IHttpContextAccessor http, IJumpTunnels tunnels, CredentialBroker broker, NKeeper.Core.Audit.IAuditLog audit)
 {
     public static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(15);
 
     /// <exception cref="ConnectException">The certificate isn't trusted, or the service can't be reached.</exception>
-    public async Task<IHttpConnection> OpenAsync(HostContext host, Guid serviceId, bool tls, CancellationToken cancellationToken)
+    public Task<IHttpConnection> OpenAsync(HostContext host, Guid serviceId, bool tls, CancellationToken cancellationToken) =>
+        OpenAsync(host, serviceId, tls, null, cancellationToken);
+
+    /// <summary>
+    /// With a <paramref name="handle"/> (SDK 1.6), core signs every request in with HTTP Basic authentication from the
+    /// handle's credential, which the plugin never sees, over TLS only (§7.16).
+    /// </summary>
+    /// <exception cref="ConnectException">The certificate isn't trusted, the service can't be reached, or the credential has no password.</exception>
+    /// <exception cref="CredentialDeniedException">The handle isn't valid here.</exception>
+    public async Task<IHttpConnection> OpenAsync(HostContext host, Guid serviceId, bool tls, CredentialHandle? handle, CancellationToken cancellationToken)
     {
         var context = http.HttpContext;
 
@@ -45,12 +54,40 @@ public sealed class HttpConnector(CoreDbContext db, TrustStore trust, IAuthSessi
             throw new ConnectException(ConnectFailure.Unreachable, $"This service of “{host.Name}” has no port. Edit the host to set one.");
         }
 
+        string? basic = null;
+        string? credential = null;
+        if (handle is not null)
+        {
+            if (!tls)
+            {
+                throw new ConnectException(ConnectFailure.SecurityNegotiationFailed, "Core signs in to HTTP services over TLS only, so the password isn't sent in the clear.");
+            }
+
+            var (_, _, entry) = await broker.UseAsync(host, serviceId, handle, cancellationToken);
+            var material = entry.Material;
+            if (material.Username is not { Length: > 0 } username || material.Password?.Reveal() is not { Length: > 0 } password)
+            {
+                throw new ConnectException(ConnectFailure.NoSecret, "Signing in over HTTP needs a user name and password, and this credential doesn't have both.");
+            }
+
+            basic = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes($"{username}:{password}"));
+            credential = material.Source == CredentialSource.Saved ? $"credential {material.CredentialId}" : "a typed credential";
+        }
+
         // Through the jump host, when there is one: requests still name the service, and its certificate is still
         // checked against the service, but they're dialled to the tunnel's loopback end (§7.16).
         var tunnel = await tunnels.OpenAsync(host, service.Address, port, cancellationToken);
         try
         {
-            return await OpenAsync(host, serviceId, service.Address, port, stored.Address ?? string.Empty, tls, tunnel, context, cancellationToken);
+            var connection = await OpenAsync(host, serviceId, service.Address, port, stored.Address ?? string.Empty, tls, tunnel, context, basic, cancellationToken);
+            if (credential is not null)
+            {
+                await audit.RecordAsync(
+                    new NKeeper.Core.Audit.AuditEntry(NKeeper.Core.Audit.AuditActions.CredentialUse, host.Id.ToString(), $"https to service {serviceId}, plugin {PluginCaller.Of(context)}, {credential}"),
+                    cancellationToken);
+            }
+
+            return connection;
         }
         catch
         {
@@ -60,13 +97,13 @@ public sealed class HttpConnector(CoreDbContext db, TrustStore trust, IAuthSessi
     }
 
     private async Task<IHttpConnection> OpenAsync(
-        HostContext host, Guid serviceId, string address, int port, string storedAddress, bool tls, IJumpTunnel? tunnel, HttpContext context, CancellationToken cancellationToken)
+        HostContext host, Guid serviceId, string address, int port, string storedAddress, bool tls, IJumpTunnel? tunnel, HttpContext context, string? basic, CancellationToken cancellationToken)
     {
         var dial = tunnel is null ? null : new DialTo("127.0.0.1", tunnel.LocalPort);
         var baseAddress = new UriBuilder(tls ? Uri.UriSchemeHttps : Uri.UriSchemeHttp, address, port).Uri;
         if (!tls)
         {
-            return new HttpConnection(baseAddress, Handler(baseAddress, validate: null, dial), tunnel);
+            return new HttpConnection(baseAddress, Handler(baseAddress, validate: null, dial, basic), tunnel);
         }
 
         var endpoint = new TrustEndpoint(host.Id, serviceId, TrustedKeyKind.TlsCertificate, storedAddress, port);
@@ -101,7 +138,7 @@ public sealed class HttpConnector(CoreDbContext db, TrustStore trust, IAuthSessi
 
         return new HttpConnection(
             baseAddress,
-            Handler(baseAddress, (certificate, errors) => errors == SslPolicyErrors.None || (certificate is not null && trustedFingerprints.Contains(Fingerprint(certificate))), dial),
+            Handler(baseAddress, (certificate, errors) => errors == SslPolicyErrors.None || (certificate is not null && trustedFingerprints.Contains(Fingerprint(certificate))), dial, basic),
             tunnel);
     }
 
@@ -151,7 +188,7 @@ public sealed class HttpConnector(CoreDbContext db, TrustStore trust, IAuthSessi
             : new PresentedTls(certificate, errors == SslPolicyErrors.None);
     }
 
-    private static HttpMessageInvoker Handler(Uri baseAddress, Func<X509Certificate?, SslPolicyErrors, bool>? validate, DialTo? dial)
+    private static HttpMessageInvoker Handler(Uri baseAddress, Func<X509Certificate?, SslPolicyErrors, bool>? validate, DialTo? dial, string? basic)
     {
         var sockets = new SocketsHttpHandler
         {
@@ -183,16 +220,29 @@ public sealed class HttpConnector(CoreDbContext db, TrustStore trust, IAuthSessi
             };
         }
 
-        return new HttpMessageInvoker(new OneEndpointHandler(baseAddress, sockets), disposeHandler: true);
+        return new HttpMessageInvoker(new OneEndpointHandler(baseAddress, sockets, basic), disposeHandler: true);
     }
 
-    /// <summary>Refuses any request to another scheme, host or port than the service's.</summary>
-    private sealed class OneEndpointHandler(Uri baseAddress, HttpMessageHandler inner) : DelegatingHandler(inner)
+    /// <summary>
+    /// Refuses any request to another scheme, host or port than the service's. With <paramref name="basic"/>, signs each
+    /// request in with it, replacing whatever authorization the plugin set.
+    /// </summary>
+    private sealed class OneEndpointHandler(Uri baseAddress, HttpMessageHandler inner, string? basic) : DelegatingHandler(inner)
     {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-            request.RequestUri is { IsAbsoluteUri: true } uri && Uri.Compare(uri, baseAddress, UriComponents.SchemeAndServer, UriFormat.Unescaped, StringComparison.OrdinalIgnoreCase) == 0
-                ? base.SendAsync(request, cancellationToken)
-                : throw new InvalidOperationException($"This connection only sends requests to {baseAddress.GetLeftPart(UriPartial.Authority)}.");
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.RequestUri is not { IsAbsoluteUri: true } uri || Uri.Compare(uri, baseAddress, UriComponents.SchemeAndServer, UriFormat.Unescaped, StringComparison.OrdinalIgnoreCase) != 0)
+            {
+                throw new InvalidOperationException($"This connection only sends requests to {baseAddress.GetLeftPart(UriPartial.Authority)}.");
+            }
+
+            if (basic is not null)
+            {
+                request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", basic);
+            }
+
+            return base.SendAsync(request, cancellationToken);
+        }
     }
 
     private sealed class HttpConnection(Uri baseAddress, HttpMessageInvoker client, IJumpTunnel? tunnel) : IHttpConnection
