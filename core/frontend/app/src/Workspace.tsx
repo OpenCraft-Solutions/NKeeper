@@ -466,6 +466,7 @@ export function Workspace({
               host={null}
               hosts={hosts ?? []}
               serviceTypes={catalog.serviceTypes}
+              sessionTypes={catalog.sessionTypes}
               onSaved={(host) => {
                 setHosts((current) => [...(current ?? []), host].sort((a, b) => a.name.localeCompare(b.name)))
                 setSelectedId(host.id)
@@ -481,6 +482,7 @@ export function Workspace({
               host={selected}
               hosts={hosts ?? []}
               serviceTypes={catalog.serviceTypes}
+              sessionTypes={catalog.sessionTypes}
               onSaved={(host) => {
                 replaceHost(host)
                 setPane({ kind: 'details' })

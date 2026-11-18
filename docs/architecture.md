@@ -240,7 +240,12 @@ public void Contribute(IPluginContributions contributions, PluginContext context
   - an optional label (up to 100 characters);
   - a port (1–65535). If it's left empty, the type's default applies;
   - an optional address, validated like a host's hostname or IP address. It's for a service that listens somewhere other than the host itself, such as a server's management controller. If it's left empty, the host's own address applies;
-  - settings, checked against the type's schema. Unknown keys are refused, and missing optional fields stay unset.
+  - settings, checked against the type's schema. Unknown keys are refused, and missing optional fields stay unset;
+  - **tools turned off** (`disabledTools`): the session types, of those offered on its type (§7.10), that this service doesn't offer. An SSH service on a Windows host, say, turns off the `linux` plugin's Journal and SELinux. Empty by default, so a tool a plugin adds later is on everywhere. It's ported from 1.x's service tools, which listed the tools that were on instead. In detail:
+    - at most 32 session type IDs, each well-formed. They aren't checked against the loaded plugins, so the setting survives a plugin being disabled and enabled again;
+    - the host's menus leave a turned-off tool out for that service;
+    - core refuses to open one: a stream session with `tool_disabled` (§7.10), and a stateful one (§7.17) with the `InvalidOperationException` `IPluginSessions.OpenAsync` already throws for a service that isn't the host's. Only a page loaded before the change gets that far;
+    - it tidies the menus and keeps a tool off a host it doesn't suit. It isn't a permission: a login that reaches the service can do the same from a terminal.
 - A host has at most 50 services, kept in the order given.
 - Services are edited with their host: `services` in `POST` and `PUT /api/hosts`. It replaces the host's list:
   - a service sent with its `id` keeps it (credentials will refer to services by ID, step 5);
@@ -489,6 +494,7 @@ After `connected`, the plugin owns the data: binary frames, and text frames whos
    - a message that isn't valid, with `bad_request`;
    - a host the user can't use, with `host_not_found`, exactly like a missing one;
    - a service that isn't the host's, or isn't of one of the session type's service types, with `wrong_service`;
+   - a session type the service has turned off (§7.4), with `tool_disabled`;
    - a host reached through a jump host, with `jump_host_unsupported`, when the type can't use one.
 4. **Resolves the credential**, if one is named: a saved one by `credentialId`, or a typed one by `promptReference` (§7.6). The handle is bound to the session type's plugin and to this request, which lasts as long as the session. A refusal is `credential_denied`, audited as `credential.denied`.
 5. **Opens the plugin's session**, with the `HostContext`, the service, the handle and the options: `IStreamSessionHandler.OpenAsync`. The plugin connects, through `IConnectivity`, which can't tell this request from a plugin endpoint's. The session is in the registry (below) from this step on, so a change of access while it opens, during a key prompt say, ends it with `access_revoked`.
@@ -859,9 +865,9 @@ Tools for Linux hosts over their SSH service, ported from 1.x's `SftpController`
   - `install` `{ name, source }`: compiles and installs it (`checkmodule`, `semodule_package`, `semodule -i`). The source must declare the module it's named as.
   - `remove` `{ name, priority }`: removes one installed copy of a module (`semodule -X <priority> -r`). Modules at the distribution's priority (100) can't be removed here.
   - Reading and changing need root, or `sudo` without a password. Installing and removing are audited as `linux.selinux-install` and `linux.selinux-remove`.
-- **Not only Linux.** An `ssh` service may be Windows' OpenSSH, or a switch's. Files works wherever the server offers SFTP, Windows included (its paths look like `/C:/Users/…`). Journal and SELinux first run `uname -s`, and refuse with a clear message on a host that doesn't answer `Linux`, rather than run their scripts there.
+- **Not only Linux.** An `ssh` service may be Windows' OpenSSH, or a switch's. Files works wherever the server offers SFTP, Windows included (its paths look like `/C:/Users/…`). Journal and SELinux first run `uname -s`, and refuse with a clear message on a host that doesn't answer `Linux`, rather than run their scripts there. A service where a tool doesn't fit turns it off (§7.4, tools turned off), and the host's menus leave it out.
 - **Its frontend** has the three session views, ported from 1.x's `FileBrowser`, `JournalView` and `SelinuxView`.
-- **Not yet:** turning each tool on or off per service (1.x's service tools, so a Windows host's SSH service can hide Journal and SELinux), and the Linux internal scanner. Both arrive with the extension points they need (v2-plan.md §4.2: ServiceTool and Scanner).
+- **Not yet:** the Linux internal scanner. It arrives with the scan pipeline (v2-plan.md §4.2: Scanner).
 
 ## 8. The native install
 

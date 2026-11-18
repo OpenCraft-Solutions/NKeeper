@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using NKeeper.Core.Access;
 using NKeeper.Core.Audit;
@@ -12,12 +13,14 @@ namespace NKeeper.Core.Inventory;
 public sealed record HostTagDto(string Name, string? Value);
 
 /// <summary>A service as sent: with the <see cref="Id"/> of one the host has, to keep it, or without, to add one.</summary>
-public sealed record HostServiceRequest(Guid? Id, string? Type, string? Label, int? Port, string? Address, JsonElement? Settings);
+/// <param name="DisabledTools">The session types it turns off (§7.4); null or empty for none.</param>
+public sealed record HostServiceRequest(Guid? Id, string? Type, string? Label, int? Port, string? Address, JsonElement? Settings, IReadOnlyList<string>? DisabledTools = null);
 
 /// <param name="Port">As set; null for the type's default.</param>
 /// <param name="Address">As set; null for the host's own.</param>
 /// <param name="Available">Whether an enabled plugin provides the type. When none does, the settings are as stored.</param>
-public sealed record HostServiceResponse(Guid Id, string Type, string? Label, int? Port, string? Address, JsonElement Settings, bool Available);
+/// <param name="DisabledTools">The session types it turns off (§7.4).</param>
+public sealed record HostServiceResponse(Guid Id, string Type, string? Label, int? Port, string? Address, JsonElement Settings, bool Available, IReadOnlyList<string> DisabledTools);
 
 /// <summary>
 /// A credential as sent (docs/architecture.md §7.5): with the <see cref="Id"/> of one the host has, to keep it,
@@ -112,7 +115,7 @@ public sealed class HostManageDeniedException() : Exception("You can use this ho
 /// <see cref="HostAccess"/>, so a host the user can't see is indistinguishable from one that doesn't exist.
 /// Ported from 1.x.
 /// </summary>
-public sealed class HostInventory(CoreDbContext db, HostAccess access, ServiceTypeCatalog serviceTypes, CredentialProtector protector, IAuditLog audit, TimeProvider time)
+public sealed partial class HostInventory(CoreDbContext db, HostAccess access, ServiceTypeCatalog serviceTypes, CredentialProtector protector, IAuditLog audit, TimeProvider time)
 {
     /// <summary>
     /// Every host the user can see, by name. The shell searches, groups and sorts them itself, which
@@ -444,6 +447,7 @@ public sealed class HostInventory(CoreDbContext db, HostAccess access, ServiceTy
             }
 
             var settings = ServiceTypeCatalog.Validate(type, request.Settings, $"{field}.settings");
+            var disabledTools = DisabledTools(request, $"{field}.disabledTools");
 
             // The key is set here, not generated, so credentials in this edit can refer to a new service.
             service ??= new HostService { Id = Guid.NewGuid() };
@@ -454,6 +458,7 @@ public sealed class HostInventory(CoreDbContext db, HostAccess access, ServiceTy
             service.Address = address;
             service.Settings = settings.ToJsonString();
             service.SettingsVersion = type.SettingsVersion;
+            service.DisabledTools = disabledTools;
             requested.Add(service);
         }
 
@@ -577,9 +582,35 @@ public sealed class HostInventory(CoreDbContext db, HostAccess access, ServiceTy
                 ? [.. services.Select((s, index) => (s, index)).Where(p => ids.Contains(p.s.Id)).Select(p => p.index)]
                 : null);
 
-    /// <summary>Whether a request leaves a stored service as it is: the same label, port, address and settings.</summary>
+    /// <summary>
+    /// The session types a service turns off (§7.4): well-formed IDs, in the order sent, without repeats. They aren't
+    /// checked against the loaded plugins, so the setting survives a plugin being disabled and enabled again.
+    /// </summary>
+    private static List<string> DisabledTools(HostServiceRequest request, string field)
+    {
+        var tools = new List<string>();
+        foreach (var tool in request.DisabledTools ?? [])
+        {
+            if (tool is null || !SessionTypeId().IsMatch(tool))
+            {
+                throw new InventoryValidationException(field, "A tool turned off must be a session type's ID.");
+            }
+
+            if (!tools.Contains(tool, StringComparer.Ordinal))
+            {
+                tools.Add(tool);
+            }
+        }
+
+        return tools.Count > HostService.MaxDisabledTools
+            ? throw new InventoryValidationException(field, $"A service can turn off at most {HostService.MaxDisabledTools} tools.")
+            : tools;
+    }
+
+    /// <summary>Whether a request leaves a stored service as it is: the same label, port, address, settings and tools.</summary>
     private static bool Unchanged(HostService service, HostServiceRequest request) =>
-        service.Label == TrimToNull(request.Label)
+        service.DisabledTools.SequenceEqual(request.DisabledTools?.Distinct(StringComparer.Ordinal) ?? [], StringComparer.Ordinal)
+        && service.Label == TrimToNull(request.Label)
         && service.Port == request.Port
         && service.Address == TrimToNull(request.Address)
         && JsonNode.DeepEquals(
@@ -601,7 +632,7 @@ public sealed class HostInventory(CoreDbContext db, HostAccess access, ServiceTy
             [.. services.Select(s =>
             {
                 var (settings, type) = serviceTypes.Read(s);
-                return new HostServiceResponse(s.Id, s.Type, s.Label, s.Port, s.Address, settings, type is not null);
+                return new HostServiceResponse(s.Id, s.Type, s.Label, s.Port, s.Address, settings, type is not null, s.DisabledTools);
             })],
             [.. host.Credentials.OrderBy(c => c.Position).Select(c => ToResponse(c, services))],
             host.JumpHostId is { } jumpHostId ? new HostJumpDto(jumpHostId, host.JumpServiceId, host.JumpCredentialId) : null,
@@ -616,4 +647,8 @@ public sealed class HostInventory(CoreDbContext db, HostAccess access, ServiceTy
     }
 
     private static string? TrimToNull(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    /// <summary>A session type's ID, as the plugin host requires one (§7.10).</summary>
+    [GeneratedRegex(@"^[a-z][a-z0-9-]{0,31}\z")]
+    private static partial Regex SessionTypeId();
 }

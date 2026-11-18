@@ -37,9 +37,14 @@ public sealed class PluginSessions(
             throw new InvalidOperationException($"'{sessionType}' isn't one of plugin {plugin}'s stateful session types.");
         }
 
-        if (!host.Services.Any(s => s.Id == serviceId))
+        if (host.Services.FirstOrDefault(s => s.Id == serviceId) is not { } service)
         {
             throw new InvalidOperationException("The host has no such service.");
+        }
+
+        if (await ServiceTools.IsDisabledAsync(db, serviceId, sessionType, cancellationToken))
+        {
+            throw new InvalidOperationException(ServiceTools.DisabledMessage(type, host, service));
         }
 
         var user = RequestUser.From(context.User);

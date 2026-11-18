@@ -492,7 +492,7 @@ describe('the workspace', () => {
       ipAddress: '192.0.2.99',
       description: null,
       tags: [],
-      services: [{ id: null, type: 'term', label: null, port: 99999, address: null, settings: { shell: '/bin/zsh', mode: 'safe', retries: 3, compress: true } }],
+      services: [{ id: null, type: 'term', label: null, port: 99999, address: null, settings: { shell: '/bin/zsh', mode: 'safe', retries: 3, compress: true }, disabledTools: [] }],
       credentials: [
         { id: null, label: null, username: 'root', domain: null, notes: null, password: null, clearPassword: false, privateKey: null, clearPrivateKey: false, serviceIndexes: null },
       ],
@@ -504,6 +504,35 @@ describe('the workspace', () => {
     expect(await screen.findByRole('article', { name: 'new01' })).toBeInTheDocument()
     // It's checked at once, rather than at the next background round.
     await waitFor(() => expect(fetch.mock.calls.some(([url, init]) => url === '/api/hosts/h9/health' && init?.method === 'POST')).toBe(true))
+  })
+
+  it('turns a service’s tools off and on, when its type has more than one', async () => {
+    const fetch = signedIn({
+      'GET /api/plugins': [
+        terminalPlugin({
+          sessionTypes: [
+            { id: 'term', label: 'Terminal', serviceTypes: ['term'], supportsJumpHost: true },
+            { id: 'term-files', label: 'Files', serviceTypes: ['term'], supportsJumpHost: true },
+          ],
+        }),
+      ],
+      'POST /api/hosts': () => Response.json(host({ id: 'h9', name: 'new01' }), { status: 201 }),
+    })
+    const user = userEvent.setup()
+
+    render(<App importer={termImporter} />)
+    await user.click(await screen.findByRole('button', { name: 'New host' }))
+    const form = screen.getByRole('form', { name: 'New host' })
+    await user.type(within(form).getByLabelText('Name'), 'new01')
+    await user.click(within(form).getByRole('button', { name: 'Add service' }))
+    await user.selectOptions(within(form).getByLabelText('Mode for service 1'), 'safe')
+    expect(within(form).getByLabelText('Terminal for service 1')).toBeChecked()
+    await user.click(within(form).getByLabelText('Files for service 1'))
+    await user.click(within(form).getByLabelText('Terminal for service 1'))
+    await user.click(within(form).getByLabelText('Terminal for service 1'))
+    await user.click(within(form).getByRole('button', { name: 'Create host' }))
+
+    await waitFor(() => expect(bodyOf(fetch, 'POST /api/hosts')).toMatchObject({ services: [{ type: 'term', disabledTools: ['term-files'] }] }))
   })
 
   it('sends the version an edit started from, and offers to reload after a conflict', async () => {

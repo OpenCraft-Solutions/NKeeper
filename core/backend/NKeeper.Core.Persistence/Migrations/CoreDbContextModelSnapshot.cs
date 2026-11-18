@@ -588,6 +588,11 @@ namespace NKeeper.Core.Persistence.Migrations
                         .HasColumnType("character varying(253)")
                         .HasColumnName("address");
 
+                    b.PrimitiveCollection<List<string>>("DisabledTools")
+                        .IsRequired()
+                        .HasColumnType("text[]")
+                        .HasColumnName("disabled_tools");
+
                     b.Property<Guid>("HostId")
                         .HasColumnType("uuid")
                         .HasColumnName("host_id");

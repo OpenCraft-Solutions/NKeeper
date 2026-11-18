@@ -32,6 +32,7 @@ public static class SessionErrorCodes
     public const string TooManySessions = "too_many_sessions";
     public const string HostNotFound = "host_not_found";
     public const string WrongService = "wrong_service";
+    public const string ToolDisabled = "tool_disabled";
     public const string JumpHostUnsupported = "jump_host_unsupported";
     public const string CredentialDenied = "credential_denied";
     public const string HostKeyRejected = "host_key_rejected";
@@ -303,6 +304,11 @@ internal sealed class StreamSessionRunner(HttpContext context, SessionSocket soc
         if (host.Services.FirstOrDefault(s => s.Id == start.ServiceId) is not { } service || !sessionType.ServiceTypes.Contains(service.Type, StringComparer.Ordinal))
         {
             throw new SessionStartException(SessionErrorCodes.WrongService, $"“{host.Name}” has no such service for a {sessionType.Label} session. Reload the host and try again.");
+        }
+
+        if (await ServiceTools.IsDisabledAsync(_services.GetRequiredService<CoreDbContext>(), service.Id, sessionType.Id, cancellationToken))
+        {
+            throw new SessionStartException(SessionErrorCodes.ToolDisabled, ServiceTools.DisabledMessage(sessionType, host, service));
         }
 
         var jumpHostId = await _services.GetRequiredService<CoreDbContext>().Hosts.Where(h => h.Id == host.Id).Select(h => h.JumpHostId).FirstOrDefaultAsync(cancellationToken);

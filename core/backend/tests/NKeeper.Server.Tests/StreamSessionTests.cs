@@ -96,6 +96,42 @@ public sealed class StreamSessionTests(PostgresFixture postgres, SshServerFixtur
     }
 
     [Fact]
+    public async Task A_tool_the_service_turns_off_is_refused_and_opens_again_once_it_is_on()
+    {
+        await using var server = await ServerAsync();
+        var (admin, cookie) = await SignInAsync(server, ServerScenario.AdminUserName, ServerScenario.AdminPassword);
+        var host = await CreateHostAsync(admin);
+        var start = new { type = "start", hostId = Id(host), serviceId = ServiceId(host) };
+
+        async Task SetDisabledAsync(params string[] tools)
+        {
+            await using var scope = server.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<CoreDbContext>();
+            var service = await db.HostServices.SingleAsync(s => s.Id == ServiceId(host), Token);
+            service.DisabledTools = [.. tools];
+            await db.SaveChangesAsync(Token);
+        }
+
+        await SetDisabledAsync("other-tool", "hello");
+        await using (var session = await SessionClient.ConnectAsync(server, cookie))
+        {
+            await session.SendAsync(start);
+            var error = await session.ExpectAsync("error");
+            Assert.Equal("tool_disabled", error.GetProperty("code").GetString());
+            Assert.Contains("turned off", error.GetProperty("message").GetString(), StringComparison.Ordinal);
+        }
+
+        Assert.Empty(await AuditAsync(server, AuditActions.SessionOpen));
+
+        await SetDisabledAsync("other-tool");
+        await using (var session = await SessionClient.ConnectAsync(server, cookie))
+        {
+            await session.SendAsync(start);
+            await session.ExpectAsync("connected");
+        }
+    }
+
+    [Fact]
     public async Task An_unknown_key_is_asked_about_in_band_of_a_manager_and_the_shell_runs_once_it_is_trusted()
     {
         await using var server = await ServerAsync();

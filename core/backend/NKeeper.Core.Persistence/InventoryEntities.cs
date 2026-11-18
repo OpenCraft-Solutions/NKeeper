@@ -83,6 +83,7 @@ public sealed class HostService
     public const int MaxPerHost = 50;
     public const int TypeMaxLength = 32;
     public const int LabelMaxLength = 100;
+    public const int MaxDisabledTools = 32;
 
     public Guid Id { get; set; }
 
@@ -106,6 +107,12 @@ public sealed class HostService
     public string Settings { get; set; } = "{}";
 
     public int SettingsVersion { get; set; } = 1;
+
+    /// <summary>
+    /// The session types this service doesn't offer, of those offered on its type (§7.4, tools turned off). Empty, the
+    /// default, for all of them. It tidies menus and keeps a tool off a host it doesn't suit; it isn't a permission.
+    /// </summary>
+    public List<string> DisabledTools { get; set; } = [];
 }
 
 /// <summary>
