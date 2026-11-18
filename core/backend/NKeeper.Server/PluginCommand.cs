@@ -143,7 +143,8 @@ internal static class PluginCommand
         { Available: { } a, InstalledVersion: { } installed } => $"{status.Id}: {installed} -> {a.Version} (upgrade)",
         { Available: { } a } => $"{status.Id}: {a.Version} available (install){(status.Summary is null ? string.Empty : $" - {status.Summary}")}",
         { ReasonCode: { } reason } => $"{status.Id}: {(status.InstalledVersion is null ? "not installed" : status.InstalledVersion)}; nothing installable: {status.Message} ({reason})",
-        _ => $"{status.Id}: {status.InstalledVersion ?? "not installed"}, up to date",
+        { InstalledVersion: { } installed } => $"{status.Id}: {installed}, up to date",
+        _ => $"{status.Id}: not installed; no release yet",
     };
 
     private static async Task RestartAsync(CancellationToken cancellationToken)
