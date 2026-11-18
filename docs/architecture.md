@@ -1042,6 +1042,7 @@ DbConnection connection = login.Connection;
 - Core sets the user name and password under the keywords the plugin names, and `Persist Security Info=false` when the driver has that keyword. A domain, when the credential has one, is set under `DomainKeyword` if the plugin names one, or else prefixed to the user name (`DOMAIN\user`).
 - It opens the connection with the plugin's `DbProviderFactory`, in the plugin's own load context.
 - **Then it checks** that the driver forgot the password: if the open connection's `ConnectionString` still contains it, core closes the connection and refuses it. That keeps the password from reaching the plugin through its own driver, as §12.3 asks.
+- **A driver that always keeps it (SDK 1.10).** Some drivers keep the password whatever they're told, as AdoNetCore.AseClient does. A plugin using one sets `DriverKeepsPassword` on the request, and must declare `credentialRelease` in its manifest (plugin-security.md §12.3). Core then hands the connection over, and audits the login as `credential.reveal` (`database to service …`, with the manifest's reason) beside `credential.use`. Without the declaration, the request is refused with `SecurityNegotiationFailed`, as for any driver that kept it.
 - It returns an `IDatabaseLogin`:
   - `Connection`, open;
   - `OpenAnotherAsync()`, for another connection with the same login, as 1.x's database tools opened beside the query window;
@@ -1100,6 +1101,28 @@ SQL Server, ported from 1.x's `SqlServer/`, in its own repository, `NKeeper-Plug
   - a named instance's port from the SQL Server Browser: set the service's port;
   - Orphaned Users, the insurance survey, and the internal scan's SQL Server detection;
   - asking again about a new self-signed certificate. SQL Server without a certificate of its own makes a new one at each start. 1.x asked the user again when both were SQL Server's own; core refuses a changed certificate (§7.7), so someone who manages the host removes the old one first.
+
+### 7.34 The `oracle` plugin
+
+Oracle Database (11g and later), ported from 1.x's `Oracle/`, in its own repository, `NKeeper-Plugin-Oracle` (§9), on SDK 1.9 (`>=1.9.0 <2.0.0`). It's a database engine for db-core (§7.32), which it depends on.
+
+- **Service type `oracle`** ("Oracle"): default port 1521, health by TCP. Its one setting, required, is the database's service name or SID.
+- **The database tab** (session type `oracle`, host action `oracle.query`): db-core's, with Oracle's engine. The toolbar chooses the window's schema (`CURRENT_SCHEMA`), which is its "database".
+- **Signing in.** Core opens the login with ODP.NET (§7.31): by service name, and by SID when the listener doesn't know the name (ORA-12514, which ODP.NET 23 wraps in ORA-50201: core's message carries the driver's inner messages for that, SDK 1.9). Oracle's native network encryption and integrity checks are requested, process-wide, before the plugin's first connection. A login named SYS connects AS SYSDBA; a credential with a domain is refused. Oracle's native encryption proves no server identity, so there's nothing to trust, as in 1.x.
+- **The dialect**, ported from 1.x: statements split as SQL*Plus splits them, with PL/SQL blocks ending at `/`; SQL*Plus's messages after each statement; DBMS_OUTPUT under Messages (enabled on each query window's connection, `PrepareWindowAsync`); compilation errors listed; the explorer through the `ALL_` views; scripts from DBMS_METADATA; the blocking chains from `V$SESSION` (with `SELECT_CATALOG_ROLE`); and `ALTER SYSTEM KILL SESSION 'sid,serial#' IMMEDIATE`, which Oracle may answer with ORA-00031 (marked for kill), which is a kill too.
+- **The driver** is the plugin's own, built for `linux-x64` like mssql's, since some of ODP.NET's dependencies are per operating system.
+- **Not yet:** 1.x's Management reports (Storage, Backups, Health) and the insurance survey.
+
+### 7.35 The `ase` plugin
+
+SAP (Sybase) ASE, ported from 1.x's `Ase/`, in its own repository, `NKeeper-Plugin-ASE` (§9), on SDK 1.10 (`>=1.10.0 <2.0.0`). It's a database engine for db-core (§7.32), which it depends on.
+
+- **Service type `ase`** ("SAP ASE"): default port 5000, health by TCP.
+- **The database tab** (session type `ase`, host action `ase.query`): db-core's, with ASE's engine.
+- **Signing in.** Core opens the login with AdoNetCore.AseClient (§7.31). The password is sent encrypted when the server supports it; the rest of the connection is as the server is set up (ASE's own SSL isn't used), as in 1.x. A credential with a domain is refused.
+- **The password.** AdoNetCore.AseClient keeps the password in its connection string whatever it's told, so the plugin could read it. Its manifest declares that (`credentialRelease`, plugin-security.md §12.3), administrators see it on the plugins page, and each login is audited as `credential.reveal` (§7.31, SDK 1.10).
+- **The dialect**, ported from 1.x: batches split at `GO` as SQL Server's, `PRINT` and the server's messages under Messages, the explorer from each database's system tables, scripts from `syscomments` and `syscolumns`, the blocking chains from `master..sysprocesses` (with the sessions' SQL from `monProcessSQLText` when the login has `mon_role` and monitoring is on), and `kill`. Its driver's errors aren't `DbException`s, which its dialect says (`IsServerError`).
+- **Not yet:** Replication Server (1.x's `rs`, on the same protocol), 1.x's Management reports (Space, Replication Drift, Backups, Error Log, Resources, Logins, Maintenance, License), Copy Database and the insurance survey.
 
 ## 8. The native install
 
@@ -1168,7 +1191,7 @@ Each official plugin lives in a repository of its own and is released on its own
 
 **Repositories,** all under `OpenCraft-Solutions`:
 - `NKeeper`, this one: the server, the shell, the SDK, the plugin tooling, the test helpers and the installer.
-- `NKeeper-Plugin-<Name>` for each official plugin: `NKeeper-Plugin-SSH`, `NKeeper-Plugin-Web`, `NKeeper-Plugin-Desktop`, `NKeeper-Plugin-WakeOnLan`, and each new one (`NKeeper-Plugin-Telnet`, `NKeeper-Plugin-VNC`, `NKeeper-Plugin-Linux`, `NKeeper-Plugin-Storage`, `NKeeper-Plugin-Windows`, `NKeeper-Plugin-iDRAC`, `NKeeper-Plugin-DbCore`, `NKeeper-Plugin-MSSQL`…). A plugin's ID doesn't change when it moves.
+- `NKeeper-Plugin-<Name>` for each official plugin: `NKeeper-Plugin-SSH`, `NKeeper-Plugin-Web`, `NKeeper-Plugin-Desktop`, `NKeeper-Plugin-WakeOnLan`, and each new one (`NKeeper-Plugin-Telnet`, `NKeeper-Plugin-VNC`, `NKeeper-Plugin-Linux`, `NKeeper-Plugin-Storage`, `NKeeper-Plugin-Windows`, `NKeeper-Plugin-iDRAC`, `NKeeper-Plugin-DbCore`, `NKeeper-Plugin-MSSQL`, `NKeeper-Plugin-Oracle`, `NKeeper-Plugin-ASE`…). A plugin's ID doesn't change when it moves.
 - A plugin repository holds the plugin's backend, frontend, manifest and tests, and its own CI and release workflow. It references nothing of core's but the published packages below.
 
 **What core publishes,** to GitHub Packages under `OpenCraft-Solutions`, versioned with the SDK (§4) and released from this repository by a tag, `sdk-v<version>`:

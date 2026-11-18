@@ -15,6 +15,7 @@ namespace NKeeper.Server;
 /// <param name="SessionTypes">For a loaded plugin, the session types it contributed (§7.10).</param>
 /// <param name="HostActions">For a loaded plugin, the host actions it contributed (§7.12).</param>
 /// <param name="DependsOn">For a loaded plugin, the plugins it depends on, whose frontends the shell activates first (§5, SDK 1.8).</param>
+/// <param name="CredentialRelease">For a loaded plugin whose signed manifest declares it, why it needs a credential's plaintext (plugin-security.md §12.3, SDK 1.10).</param>
 public sealed record PluginStatusResponse(
     string Id,
     string? Version,
@@ -28,7 +29,8 @@ public sealed record PluginStatusResponse(
     IReadOnlyList<ServiceTypeResponse>? ServiceTypes = null,
     IReadOnlyList<SessionTypeResponse>? SessionTypes = null,
     IReadOnlyList<HostActionResponse>? HostActions = null,
-    IReadOnlyList<string>? DependsOn = null);
+    IReadOnlyList<string>? DependsOn = null,
+    string? CredentialRelease = null);
 
 /// <summary>A host menu entry: the session type it opens, or the endpoint it runs (§7.12), and whether it needs a credential.</summary>
 /// <param name="SessionType">For an action that opens a session; null for a run action.</param>
@@ -69,6 +71,13 @@ public sealed record ServiceSettingResponse(
             setting.Minimum,
             setting.Maximum,
             setting.Kind == ServiceSettingKind.Choice ? setting.Choices : null);
+}
+
+/// <summary>The loaded plugins' declarations, from their verified manifests (plugin-security.md §12.3).</summary>
+internal sealed class LoadedPluginDeclarations(PluginHostResult plugins) : NKeeper.Core.Credentials.IPluginDeclarations
+{
+    public string? CredentialRelease(string pluginId) =>
+        plugins.Loaded.FirstOrDefault(p => p.Manifest.Id == pluginId)?.Manifest.CredentialRelease;
 }
 
 internal static class PluginEndpoints
@@ -118,7 +127,8 @@ internal static class PluginEndpoints
                     loaded is null ? null : [.. plugins.ServiceTypes.Where(t => t.PluginId == s.Id).Select(t => ServiceTypeResponse.From(t.Type))],
                     loaded is null ? null : [.. plugins.SessionTypes.Where(t => t.PluginId == s.Id).Select(t => new SessionTypeResponse(t.Type.Id, t.Type.Label, t.Type.ServiceTypes, t.Type.SupportsJumpHost))],
                     loaded is null ? null : [.. plugins.HostActions.Where(a => a.PluginId == s.Id).Select(a => new HostActionResponse(a.Action.Id, a.Action.Label, a.Action.SessionType, a.Action.Endpoint, a.Action.ServiceTypes, a.Action.Credential, a.Action.Scan))],
-                    loaded is null ? null : [.. loaded.Manifest.DependsOn.Select(d => d.Id)]);
+                    loaded is null ? null : [.. loaded.Manifest.DependsOn.Select(d => d.Id)],
+                    loaded?.Manifest.CredentialRelease);
             })
             .ToList());
 

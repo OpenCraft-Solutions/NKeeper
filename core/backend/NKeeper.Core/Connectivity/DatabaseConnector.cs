@@ -23,7 +23,8 @@ public sealed class DatabaseConnector(
     IJumpTunnels tunnels,
     TrustStore trust,
     IAuthSessionAccessor sessions,
-    IAuditLog audit)
+    IAuditLog audit,
+    IPluginDeclarations declarations)
 {
     public async Task<IDatabaseLogin> OpenAsync(HostContext host, Guid serviceId, CredentialHandle handle, DatabaseConnectRequest request, CancellationToken cancellationToken)
     {
@@ -33,6 +34,15 @@ public sealed class DatabaseConnector(
         if (context is null || pluginId is null || !ReferenceEquals(context.Features.Get<HostContext>(), host))
         {
             throw new InvalidOperationException("Database connections can only be opened from a plugin's host-scoped endpoint, for its own host.");
+        }
+
+        // A driver that keeps the password releases it to the plugin: only to one whose signed manifest says why (SDK 1.10).
+        var release = request.DriverKeepsPassword ? declarations.CredentialRelease(pluginId) : null;
+        if (request.DriverKeepsPassword && release is null)
+        {
+            throw new ConnectException(
+                ConnectFailure.SecurityNegotiationFailed,
+                "This plugin's database driver keeps the password, and its manifest doesn't declare that it needs it (credentialRelease), so core didn't open the connection.");
         }
 
         var (_, _, entry) = await broker.UseAsync(host, serviceId, handle, cancellationToken);
@@ -71,12 +81,19 @@ public sealed class DatabaseConnector(
             material.Domain,
             password,
             $"{service.Address}:{port}",
-            tunnel);
+            tunnel,
+            allowKeptPassword: release is not null);
         try
         {
             await login.OpenFirstAsync(cancellationToken);
             var credential = material.Source == CredentialSource.Saved ? $"credential {material.CredentialId}" : "a typed credential";
             await audit.RecordAsync(new AuditEntry(AuditActions.CredentialUse, host.Id.ToString(), $"database to service {serviceId}, plugin {pluginId}, {credential}"), cancellationToken);
+            if (release is not null)
+            {
+                await audit.RecordAsync(
+                    new AuditEntry(AuditActions.CredentialReveal, host.Id.ToString(), $"database to service {serviceId}, plugin {pluginId}, {credential}: the driver keeps the password ({release})"),
+                    cancellationToken);
+            }
             return login;
         }
         catch
@@ -129,7 +146,7 @@ public sealed class DatabaseConnector(
 
     /// <summary>One login's connections. The password stays here, in core, for the login's life.</summary>
     private sealed class DatabaseLogin(
-        DatabaseConnectRequest request, DatabaseEndpoint endpoint, string username, string? domain, string password, string display, IJumpTunnel? tunnel) : IDatabaseLogin
+        DatabaseConnectRequest request, DatabaseEndpoint endpoint, string username, string? domain, string password, string display, IJumpTunnel? tunnel, bool allowKeptPassword) : IDatabaseLogin
     {
         private readonly List<DbConnection> _opened = [];
         private readonly Lock _lock = new();
@@ -188,7 +205,7 @@ public sealed class DatabaseConnector(
 
                 // The driver must have forgotten the password (plugin-security.md §12.3): read with its own parser, so a user
                 // name that happens to equal the password isn't mistaken for it.
-                if (KeptPassword(connection.ConnectionString))
+                if (!allowKeptPassword && KeptPassword(connection.ConnectionString))
                 {
                     throw new ConnectException(ConnectFailure.SecurityNegotiationFailed, "The database driver kept the password in its connection string after opening, so core didn't hand the connection over.");
                 }

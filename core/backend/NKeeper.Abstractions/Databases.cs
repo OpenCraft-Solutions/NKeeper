@@ -20,6 +20,13 @@ public sealed record DatabaseConnectRequest(DbProviderFactory Factory, Func<Data
 
     /// <summary>How long opening may take, the driver's own timeout aside.</summary>
     public TimeSpan ConnectTimeout { get; init; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// The driver keeps the password in its connection string whatever it's told, as AdoNetCore.AseClient does (SDK 1.10).
+    /// Core then hands the connection over instead of refusing it, and audits the release, but only to a plugin whose
+    /// manifest declares <c>credentialRelease</c> (plugin-security.md §12.3).
+    /// </summary>
+    public bool DriverKeepsPassword { get; init; }
 }
 
 /// <summary>

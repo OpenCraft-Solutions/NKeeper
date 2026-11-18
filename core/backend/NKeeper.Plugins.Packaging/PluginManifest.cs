@@ -21,6 +21,10 @@ public sealed record PluginFrontend(string Entry);
 /// <see cref="BuiltIn"/> is only what the package claims. The plugin host honours it only for
 /// official signers (or development keys in Development).
 /// </remarks>
+/// <param name="CredentialRelease">
+/// Why the plugin needs a credential's plaintext, when it does (SDK 1.10): shown to administrators, and required before
+/// core releases one to it (plugin-security.md §12.3).
+/// </param>
 public sealed partial record PluginManifest(
     int FormatVersion,
     string Id,
@@ -31,8 +35,12 @@ public sealed partial record PluginManifest(
     IReadOnlyList<string> Requirements,
     PluginBackend Backend,
     PluginFrontend? Frontend,
-    bool BuiltIn = false)
+    bool BuiltIn = false,
+    string? CredentialRelease = null)
 {
+    /// <summary>The longest reason a manifest may give for <see cref="CredentialRelease"/>.</summary>
+    public const int MaxCredentialReleaseLength = 300;
+
     /// <summary>
     /// Parses and validates a manifest. When <paramref name="packageFiles"/> is given, the entry
     /// points must be files in that set.
@@ -123,6 +131,12 @@ public sealed partial record PluginManifest(
             return "The entry type must be a type name.";
         }
 
+        // A plugin that needs a credential's plaintext says why, for administrators (plugin-security.md §12.3, SDK 1.10).
+        if (doc.CredentialRelease is { } reason && (string.IsNullOrWhiteSpace(reason) || reason.Length > MaxCredentialReleaseLength || reason.Any(char.IsControl)))
+        {
+            return $"The credential release must say why, in 1 to {MaxCredentialReleaseLength} characters on one line.";
+        }
+
         if (doc.Frontend is { } frontend
             && (!PackagePath.IsValid(frontend.Entry)
                 || !frontend.Entry.StartsWith(PackageFormat.FrontendFolder, StringComparison.Ordinal)
@@ -142,7 +156,8 @@ public sealed partial record PluginManifest(
             requirements,
             new PluginBackend(backend.EntryAssembly, backend.EntryType, exported),
             doc.Frontend is { } f ? new PluginFrontend(f.Entry) : null,
-            doc.BuiltIn ?? false);
+            doc.BuiltIn ?? false,
+            doc.CredentialRelease?.Trim());
         return null;
     }
 
@@ -165,7 +180,8 @@ public sealed partial record PluginManifest(
         IReadOnlyList<DependencyDocument>? DependsOn = null,
         IReadOnlyList<string>? Requirements = null,
         FrontendDocument? Frontend = null,
-        bool? BuiltIn = null);
+        bool? BuiltIn = null,
+        string? CredentialRelease = null);
 
     private sealed record DependencyDocument(string Id, string Version);
 

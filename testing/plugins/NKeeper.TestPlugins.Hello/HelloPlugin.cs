@@ -288,8 +288,17 @@ public sealed class HelloPlugin : IPlugin
                     probe.Throw ? KeepingFactory.Throwing : probe.Keep ? KeepingFactory.Instance : Npgsql.NpgsqlFactory.Instance,
                     endpoint => new Npgsql.NpgsqlConnectionStringBuilder { Host = endpoint.Address, Port = endpoint.Port, Database = probe.Database, Pooling = false, PersistSecurityInfo = true },
                     "Username",
-                    "Password");
+                    "Password")
+                {
+                    DriverKeepsPassword = probe.DriverKeeps,
+                };
                 await using var login = await connectivity.OpenDatabaseAsync(host, probe.ServiceId, handle, request);
+                if (probe.Keep)
+                {
+                    // The keeping driver runs no commands: it was handed over, password and all (SDK 1.10).
+                    return Results.Json(new { kept = login.Connection.ConnectionString.Contains("Password", StringComparison.OrdinalIgnoreCase) });
+                }
+
                 await using var command = login.Connection.CreateCommand();
                 command.CommandText = "SELECT current_user";
                 var first = (string?)await command.ExecuteScalarAsync();
@@ -601,7 +610,7 @@ public sealed record DesktopProbe(Guid ServiceId, Guid CredentialId, DesktopProt
 /// <summary>Waits for <paramref name="Expect"/> in the terminal, then types <paramref name="Send"/> and Enter.</summary>
 public sealed record TelnetStep(string Expect, string? Send = null);
 
-public sealed record DatabaseProbe(Guid ServiceId, Guid? CredentialId = null, string? Database = null, bool Keep = false, bool Throw = false);
+public sealed record DatabaseProbe(Guid ServiceId, Guid? CredentialId = null, string? Database = null, bool Keep = false, bool Throw = false, bool DriverKeeps = false);
 
 public sealed record TcpProbe(Guid ServiceId, string Send = "ping");
 
