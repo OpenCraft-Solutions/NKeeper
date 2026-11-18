@@ -23,6 +23,10 @@ public static class AuditActions
     public const string HostDelete = "host.delete";
     public const string CredentialDenied = "credential.denied";
     public const string CredentialUse = "credential.use";
+
+    /// <summary>A credential's plaintext reached a plugin that declared it needs it (plugin-security.md §12.3, SDK 1.10).</summary>
+    public const string CredentialReveal = "credential.reveal";
+
     public const string TrustAdd = "trust.add";
     public const string TrustRemove = "trust.remove";
     public const string TrustMismatch = "trust.mismatch";

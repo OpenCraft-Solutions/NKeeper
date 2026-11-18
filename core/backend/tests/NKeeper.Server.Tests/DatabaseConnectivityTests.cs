@@ -62,6 +62,36 @@ public sealed class DatabaseConnectivityTests(PostgresFixture postgres) : IClass
     }
 
     [Fact]
+    public async Task A_driver_that_keeps_the_password_is_refused_unless_the_manifest_declares_why()
+    {
+        var database = new NpgsqlConnectionStringBuilder(await postgres.CreateDatabaseAsync());
+        var probe = (JsonElement host) => new { serviceId = ServiceId(host), credentialId = CredentialId(host), keep = true, driverKeeps = true };
+
+        await using (var undeclared = await ServerAsync())
+        {
+            using var admin = await undeclared.SignedInClientAsync();
+            var host = await CreateHostAsync(admin, database.Port, database.Username!, database.Password);
+            var refused = await ProbeAsync(admin, host, "db", probe(host), HttpStatusCode.BadGateway);
+            Assert.Equal("SecurityNegotiationFailed", refused.GetProperty("reason").GetString());
+            Assert.Contains("credentialRelease", refused.GetProperty("message").GetString(), StringComparison.Ordinal);
+            Assert.Empty(await AuditAsync(undeclared, AuditActions.CredentialReveal));
+        }
+
+        await using var declared = new ServerScenario(await postgres.CreateDatabaseAsync());
+        declared.Install(TestPlugins.Package(declared.DevelopmentKey, credentialRelease: "Its test driver keeps the password."));
+        using var client = await declared.SignedInClientAsync();
+        var plugins = await client.GetFromJsonAsync<JsonElement>("/api/plugins", Token);
+        Assert.Equal("Its test driver keeps the password.", plugins.EnumerateArray().Single(p => p.GetProperty("id").GetString() == "hello").GetProperty("credentialRelease").GetString());
+
+        var opened = await CreateHostAsync(client, database.Port, database.Username!, database.Password);
+        Assert.True((await ProbeAsync(client, opened, "db", probe(opened))).GetProperty("kept").GetBoolean());
+        var reveal = Assert.Single(await AuditAsync(declared, AuditActions.CredentialReveal));
+        Assert.StartsWith($"database to service {ServiceId(opened)}, plugin hello, credential ", reveal.Detail, StringComparison.Ordinal);
+        Assert.EndsWith("the driver keeps the password (Its test driver keeps the password.)", reveal.Detail, StringComparison.Ordinal);
+        Assert.Single(await AuditAsync(declared, AuditActions.CredentialUse));
+    }
+
+    [Fact]
     public async Task An_identity_the_plugin_read_is_asked_about_then_trusted_and_a_changed_one_refused()
     {
         await using var server = await ServerAsync();

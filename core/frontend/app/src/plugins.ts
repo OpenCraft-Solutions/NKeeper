@@ -19,6 +19,8 @@ export interface PluginStatus {
   hostActions?: HostActionInfo[] | null
   /** For a loaded plugin, the plugins it depends on (SDK 1.8). */
   dependsOn?: string[] | null
+  /** Why the plugin needs a credential's plaintext, when its signed manifest says it does (SDK 1.10). */
+  credentialRelease?: string | null
 }
 
 /** What happened to one plugin's frontend in this page. */

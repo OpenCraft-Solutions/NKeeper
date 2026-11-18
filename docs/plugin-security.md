@@ -45,6 +45,7 @@ frontend/<entry>.js, …     pre-built ES modules and assets
 **Manifest** (`nkeeper-plugin.json`):
 - `formatVersion`, `id`, `name`, `version` (SemVer 2.0), `sdkVersion` (the range it is compatible with);
 - `dependsOn` (IDs with version ranges), `requirements` (e.g. `guacd`);
+- `credentialRelease` (optional, SDK 1.10): why the plugin needs a credential's plaintext, in a sentence administrators read (§12.3). Without it, a plugin can't have one;
 - `backend.entryAssembly` and `backend.entryType` (the `IPlugin` implementation);
 - `backend.exportedAssemblies`: contract assemblies dependants may use, such as `db-core`'s engine interfaces;
 - `frontend.entry` (optional: a plugin may have no frontend);
@@ -355,10 +356,11 @@ Decision D13 ([v2-plan.md §4.6](v2-plan.md#46-credentials-core-uses-them-plugin
    - a database connection opened by core with `Persist Security Info=false`, with the plugin's own driver, and refused when the driver kept the password (SDK 1.7, [architecture.md §7.31](architecture.md#731-database-connections)).
 2. **Secret on the wire.** The plugin builds the outgoing message with a typed placeholder, not a string. Core's writer replaces the placeholder with the secret as it writes to the socket. The message the plugin holds, logs or keeps never contains it.
 3. **Released plaintext** (a last resort). Rules:
-   - Only a plugin whose manifest declares it may ask. The declaration is added to the manifest format with the first plugin that needs it; until then, no plugin can obtain a plaintext secret.
+   - Only a plugin whose manifest declares it may ask: `credentialRelease`, with the reason (SDK 1.10). It's part of the signed manifest, so it can't be added after signing.
    - The declaration is shown on the plugins page and in `GET /api/plugins`, before an administrator enables the plugin.
    - Each release is audited as `credential.reveal`, with the plugin, user, host and service.
-   - The secret is returned in a buffer the plugin clears once it's done.
+   - Its first use is a database driver that keeps the password in its connection string after opening, as AdoNetCore.AseClient (SAP ASE's) does. Such a plugin opens its database connections with `DriverKeepsPassword` ([architecture.md §7.31](architecture.md#731-database-connections)); core then hands the connection over instead of refusing it, and audits the release. A plugin that doesn't declare it is refused, as before.
+   - A plugin that needs the secret itself would get it in a buffer it clears once it's done. That arrives with its first user.
 
 Inside core, a secret is a type that prints as `***` and refuses to be serialized. Tests check that no secret appears in log output, responses, audit events or exception messages.
 

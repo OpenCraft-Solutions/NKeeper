@@ -266,4 +266,39 @@ public sealed class FormatTests
         Assert.StartsWith("""{"formatVersion":1,"id":"sample","version":"1.0.0","files":[{"path":"a.js","size":1,""", json, StringComparison.Ordinal);
         Assert.True(FileList.TryParse(Encoding.UTF8.GetBytes(json), out _, out _));
     }
+
+    [Theory]
+    [InlineData(null, true)]
+    [InlineData("\"Its driver keeps the password in its connection string.\"", true)]
+    [InlineData("\"   \"", false)]
+    [InlineData("\"two\nlines\"", false)]
+    [InlineData("42", false)]
+    public void A_credential_release_says_why_on_one_line(string? reason, bool valid)
+    {
+        var json = $$"""
+            { "formatVersion": 1, "id": "ase", "name": "SAP ASE", "version": "1.0.0", "sdkVersion": ">=1.10.0 <2.0.0",
+              {{(reason is null ? "" : $"\"credentialRelease\": {reason},")}}
+              "backend": { "entryAssembly": "backend/Ase.dll", "entryType": "Ase.Plugin" } }
+            """;
+
+        var parsed = PluginManifest.TryParse(Encoding.UTF8.GetBytes(json), null, out var manifest, out var error);
+
+        Assert.True(parsed == valid, error);
+        if (valid && reason is not null)
+        {
+            Assert.Equal("Its driver keeps the password in its connection string.", manifest!.CredentialRelease);
+        }
+    }
+
+    [Fact]
+    public void A_credential_release_has_a_limit()
+    {
+        var json = $$"""
+            { "formatVersion": 1, "id": "ase", "name": "SAP ASE", "version": "1.0.0", "sdkVersion": ">=1.10.0 <2.0.0",
+              "credentialRelease": "{{new string('x', PluginManifest.MaxCredentialReleaseLength + 1)}}",
+              "backend": { "entryAssembly": "backend/Ase.dll", "entryType": "Ase.Plugin" } }
+            """;
+
+        Assert.False(PluginManifest.TryParse(Encoding.UTF8.GetBytes(json), null, out _, out _));
+    }
 }

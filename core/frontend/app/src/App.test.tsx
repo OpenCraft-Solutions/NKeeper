@@ -221,7 +221,10 @@ describe('App', () => {
   it('lists the plugins and their frontend state, for an administrator', async () => {
     fakeApi({
       'GET /api/auth/me': ADMIN,
-      'GET /api/plugins': [status(), status({ id: 'broken', state: 'refused', reasonCode: 'hash_mismatch', builtIn: false, frontendEntry: null })],
+      'GET /api/plugins': [
+        status({ credentialRelease: 'Its driver keeps the password.' }),
+        status({ id: 'broken', state: 'refused', reasonCode: 'hash_mismatch', builtIn: false, frontendEntry: null }),
+      ],
       'GET /api/hosts': [],
       'GET /api/health': [],
     })
@@ -231,6 +234,7 @@ describe('App', () => {
     await user.click(await screen.findByRole('button', { name: 'Settings' }))
 
     expect(screen.getByText('hello (built in)')).toBeInTheDocument()
+    expect(screen.getByText('Can see passwords: Its driver keeps the password.')).toBeInTheDocument()
     expect(screen.getByText('Active')).toBeInTheDocument()
     expect(screen.getByText('Refused (hash_mismatch)')).toBeInTheDocument()
   })

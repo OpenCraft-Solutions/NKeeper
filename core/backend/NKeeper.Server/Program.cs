@@ -84,6 +84,7 @@ builder.Services.AddNKeeperHealth(builder.Configuration);
 builder.Services.AddSingleton(new SessionOriginRouter(webDomain, plugins.SessionOrigins.Select(o => o.Origin)));
 builder.Services.AddSingleton<ISessionOrigins>(provider => provider.GetRequiredService<SessionOriginRouter>());
 builder.Services.AddSingleton(plugins);
+builder.Services.AddSingleton<NKeeper.Core.Credentials.IPluginDeclarations>(new LoadedPluginDeclarations(plugins));
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase, allowIntegerValues: false)));

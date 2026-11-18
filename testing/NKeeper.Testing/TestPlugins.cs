@@ -44,6 +44,7 @@ public static class TestPlugins
         string sdk = ">=1.0.0 <2.0.0",
         IReadOnlyDictionary<string, byte[]>? frontend = null,
         string frontendEntry = FrontendEntry,
+        string? credentialRelease = null,
         params (string Id, string Range)[] dependsOn)
     {
         var dependencies = dependsOn.Length == 0
@@ -51,7 +52,7 @@ public static class TestPlugins
             : $", \"dependsOn\": [{string.Join(", ", dependsOn.Select(d => $"{{ \"id\": \"{d.Id}\", \"version\": \"{d.Range}\" }}"))}]";
         var manifest = $$"""
             { "formatVersion": 1, "id": "{{id}}", "name": "Hello", "version": "{{version}}", "sdkVersion": "{{sdk}}",
-              "builtIn": {{(builtIn ? "true" : "false")}}{{dependencies}}{{(frontend is null ? "" : $", \"frontend\": {{ \"entry\": \"{frontendEntry}\" }}")}},
+              "builtIn": {{(builtIn ? "true" : "false")}}{{dependencies}}{{(credentialRelease is null ? "" : $", \"credentialRelease\": \"{credentialRelease}\"")}}{{(frontend is null ? "" : $", \"frontend\": {{ \"entry\": \"{frontendEntry}\" }}")}},
               "backend": { "entryAssembly": "{{EntryAssembly}}", "entryType": "{{entryType}}" } }
             """;
         var files = new Dictionary<string, byte[]> { [EntryAssembly] = HelloAssembly };

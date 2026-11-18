@@ -46,6 +46,9 @@ export function PluginsView({ plugins, frontends }: { plugins: PluginStatus[]; f
                   <td>
                     {plugin.id}
                     {plugin.builtIn && ' (built in)'}
+                    {plugin.credentialRelease ? (
+                      <p className={report.overcommitted}>Can see passwords: {plugin.credentialRelease}</p>
+                    ) : null}
                   </td>
                   <td className={report.mono}>{plugin.version ?? '—'}</td>
                   <td className={plugin.state === 'loaded' ? undefined : report.overcommitted}>

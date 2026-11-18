@@ -1042,6 +1042,7 @@ DbConnection connection = login.Connection;
 - Core sets the user name and password under the keywords the plugin names, and `Persist Security Info=false` when the driver has that keyword. A domain, when the credential has one, is set under `DomainKeyword` if the plugin names one, or else prefixed to the user name (`DOMAIN\user`).
 - It opens the connection with the plugin's `DbProviderFactory`, in the plugin's own load context.
 - **Then it checks** that the driver forgot the password: if the open connection's `ConnectionString` still contains it, core closes the connection and refuses it. That keeps the password from reaching the plugin through its own driver, as §12.3 asks.
+- **A driver that always keeps it (SDK 1.10).** Some drivers keep the password whatever they're told, as AdoNetCore.AseClient does. A plugin using one sets `DriverKeepsPassword` on the request, and must declare `credentialRelease` in its manifest (plugin-security.md §12.3). Core then hands the connection over, and audits the login as `credential.reveal` (`database to service …`, with the manifest's reason) beside `credential.use`. Without the declaration, the request is refused with `SecurityNegotiationFailed`, as for any driver that kept it.
 - It returns an `IDatabaseLogin`:
   - `Connection`, open;
   - `OpenAnotherAsync()`, for another connection with the same login, as 1.x's database tools opened beside the query window;
