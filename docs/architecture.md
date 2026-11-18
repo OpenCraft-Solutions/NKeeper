@@ -440,6 +440,8 @@ The connection doesn't need its handle once it's open; the plugin disposes it, w
 - `WaitAsync` waits for the command to end and returns its exit status and error output (at most 64 KB of it);
 - disposing it before then stops the command: core closes its channel, which ends the remote process, even under `sudo`. The connection stays open.
 
+**Another port (SDK 1.6).** `IConnectivity.OpenSshAsync(host, serviceId, handle, port)` connects to the service's address on another port, with every other check the same. A service's port is what it's for, and some devices offer SSH beside it: an iDRAC's RACADM listens on 22, beside its HTTPS service on 443 (§7.30). The server's key is trusted for that address and port, so it's asked for and recorded apart from the service's own.
+
 **SFTP (SDK 1.3).** `IConnectivity.OpenSftpAsync(host, serviceId, handle)` opens an SFTP connection to an SSH service, with every check of `OpenSshAsync`: the handle, the jump host, the server's key, the same sign-in and the same failures. It's audited as `credential.use`, as `sftp to service …`. A plugin gets an `ISftpConnection`, not SSH.NET's client:
 - `HomeDirectory`: where the login starts, as an absolute path;
 - `ListAsync(path)`: a folder's entries, without `.` and `..`, and `GetAsync(path)`: one entry. An entry has a name, an absolute path, a kind (`File`, `Directory`, `Link`, `Other`), a size, a modification time in UTC and its permissions as `rwxr-xr-x`;
@@ -722,6 +724,12 @@ var response = await http.Client.SendAsync(new HttpRequestMessage(HttpMethod.Get
   - every later request on the connection is checked against the same rule, so a certificate that changes mid-session is refused too.
 - The user trusts a certificate the way they trust a key: the shell posts it to core's trusted-keys endpoint, which takes the kind from what core presented. The shell's dialog says "certificate" and shows its subject and expiry.
 
+**Signing in (SDK 1.6).** `IConnectivity.OpenHttpAsync(host, serviceId, handle)` opens the same connection over TLS, and core signs every request in with HTTP Basic authentication from the handle's credential, as a Redfish BMC needs (§7.30):
+- core checks the handle as for SSH (§7.9). The credential needs a user name and a password, or it's refused with `NoSecret`;
+- core sets the `Authorization` header on each request, replacing any the plugin set. The plugin never sees the password;
+- **TLS only:** over plain HTTP the password would cross the network in the clear, so core never sends it there;
+- it's audited as `credential.use` (`https to service …`).
+
 **TLS health probe.** `HealthProbe.Tls`: a TCP connection and a TLS handshake that accepts any certificate, so an expired or self-signed one still counts as up. The result adds the certificate's subject and expiry, and the host's details show how long it has left.
 
 ### 7.17 Stateful sessions
@@ -984,6 +992,18 @@ Windows hosts over RPC, ported from 1.x's `Rpc/`, `EventLogs/` and `WindowsInter
 
   SQL Server instances wait for `db-mssql`.
 - Its frontend has the Event Log and RPC views.
+
+### 7.30 The `idrac` plugin
+
+Dell iDRACs, at their own management address, ported from 1.x's `IdracController`, `IdracRedfish` and `RedfishClient`, in its own repository, `NKeeper-Plugin-iDRAC` (§9), on SDK 1.6 (`>=1.6.0 <2.0.0`).
+
+- **Service type `idrac`** ("iDRAC"): default port 443, health by TLS. Its one setting is RACADM's SSH port, 22 when it's left empty.
+- **Overview and power** (session type `idrac-status`, host action `idrac.status`), a stream session over one HTTPS connection core signs in to (§7.16), as 1.x's iDRAC view. It speaks the linux plugin's request protocol (§7.25):
+  - `overview`: the server as Redfish reports it. That's the model, service tag, serial number, power state, health, BIOS, processors, memory, the manager's model and firmware, and the power actions it accepts. Resources are found from the service root rather than assumed, so other Redfish BMCs work too;
+  - `power` `{ resetType }`: presses one of the server's power buttons (`ComputerSystem.Reset`), one of the reset types the server lists. It's audited as `idrac.power`. The view asks before every action but switching on.
+- **RACADM** (session type `idrac-racadm`, host action `idrac.racadm`): the iDRAC's SSH command line, a terminal on the same service's address at its RACADM port (§7.9, another port), drawn by the ssh plugin's terminal view. It's 1.x's RACADM session, with its key trusted for that port.
+- **Scanner** (scan action `idrac.scan`, §7.26): the server's hardware over Redfish. That's its host name, its service tag (else its serial number) as the serial number, its CPU threads and its memory, with the model in a note, as 1.x's `idracHardware`. The iDRAC's own address and MAC address are the BMC's, not the server's, so they're left out.
+- **Not yet:** the HTML5 virtual console. It needs a web session through the iDRAC, as the web plugin's (§7.19), and arrives with a way for one plugin to open another's sessions.
 
 ## 8. The native install
 
