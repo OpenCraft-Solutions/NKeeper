@@ -1104,7 +1104,7 @@ SQL Server, ported from 1.x's `SqlServer/`, in its own repository, `NKeeper-Plug
 
 ### 7.34 The `oracle` plugin
 
-Oracle Database (11g and later), ported from 1.x's `Oracle/`, in its own repository, `NKeeper-Plugin-Oracle` (§9), on SDK 1.8 (`>=1.8.0 <2.0.0`). It's a database engine for db-core (§7.32), which it depends on.
+Oracle Database (11g and later), ported from 1.x's `Oracle/`, in its own repository, `NKeeper-Plugin-Oracle` (§9), on SDK 1.9 (`>=1.9.0 <2.0.0`). It's a database engine for db-core (§7.32), which it depends on.
 
 - **Service type `oracle`** ("Oracle"): default port 1521, health by TCP. Its one setting, required, is the database's service name or SID.
 - **The database tab** (session type `oracle`, host action `oracle.query`): db-core's, with Oracle's engine. The toolbar chooses the window's schema (`CURRENT_SCHEMA`), which is its "database".
