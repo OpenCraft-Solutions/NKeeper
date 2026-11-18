@@ -160,7 +160,13 @@ Ported from 1.x. Phase 1 step 3 brings hosts, their tags, and who may see and ch
   - a name (up to 200 characters);
   - a hostname (RFC 1123, underscores tolerated, up to 253 characters), an IP address (IPv4 or IPv6, stored in canonical form), or both. At least one is required;
   - an optional description (up to 4000 characters);
-  - tags.
+  - tags;
+  - **hardware** (§7.26), each optional, as in 1.x. Several plugins fill them in (v2-plan.md §5), so they're core's:
+    - a MAC address: six hex pairs, stored upper-case with colons (`AA:BB:CC:DD:EE:FF`). Dashes and lower case are accepted;
+    - CPU cores (1–65535);
+    - memory in MiB (1–2³¹−1). The editor shows GiB;
+    - a serial number (up to 100 characters), such as a Dell service tag;
+    - whether it's a virtual machine.
 - **Tags** are a name (up to 64 characters, no colon, since `name:value` is the search syntax) and an optional value (up to 255). A host may carry one name with several values. Duplicates that differ only in case are dropped, keeping the first spelling. A host has at most 100 tags.
 - **Only administrators create hosts.** Changing or deleting one needs Manage access to it (§7.2).
 - **Edits can't silently overwrite each other.** Each host has a version (PostgreSQL's `xmin`). An update sends the version it was based on, and a stale one is refused with `409` and `version_conflict`.
@@ -867,7 +873,42 @@ Tools for Linux hosts over their SSH service, ported from 1.x's `SftpController`
   - Reading and changing need root, or `sudo` without a password. Installing and removing are audited as `linux.selinux-install` and `linux.selinux-remove`.
 - **Not only Linux.** An `ssh` service may be Windows' OpenSSH, or a switch's. Files works wherever the server offers SFTP, Windows included (its paths look like `/C:/Users/…`). Journal and SELinux first run `uname -s`, and refuse with a clear message on a host that doesn't answer `Linux`, rather than run their scripts there. A service where a tool doesn't fit turns it off (§7.4, tools turned off), and the host's menus leave it out.
 - **Its frontend** has the three session views, ported from 1.x's `FileBrowser`, `JournalView` and `SelinuxView`.
-- **Not yet:** the Linux internal scanner. It arrives with the scan pipeline (v2-plan.md §4.2: Scanner).
+- **Scanner** (host action `linux.scan`, SDK 1.4, linux 1.1.0): 1.x's internal scan (§7.26), on `ssh` services. It's ported from `InternalScan`: one SSH login runs one script that reads the hostname, the operating system (`/etc/os-release`), the MAC address of the default route's interface, the CPU cores, memory, serial number (`/sys/class/dmi`), virtualization (`systemd-detect-virt`), the listening TCP ports (`ss`), the accounts with a login shell, and the neighbour table (`ip neigh`). Each value it can't read becomes a note instead. Like Journal, it first checks `uname -s`, and refuses a host that isn't Linux. A hypervisor's guests and a Proxmox cluster's nodes wait for the virt plugins.
+
+### 7.26 Scans
+
+A scan reads facts about a host for the user to review: its hardware, operating system, listening ports, accounts and network neighbours. It's ported from 1.x's Tasks ▸ Scan. **Nothing is saved by the scan.** The shell shows the findings as proposed changes, and applies the ones the user picks with ordinary host edits, audited as such.
+
+```csharp
+contributions.AddHostAction(new HostAction("linux.scan", "Linux (internal)") { Endpoint = "scan", ServiceTypes = ["ssh"], Scan = true });
+```
+
+**Scanners (SDK 1.4).** A scanner is a run action (§7.12) with `Scan` set:
+- It has the run action's parts: an ID, a label, the service types it scans through, its credential mode and its `Endpoint`. It's checked at startup like any run action.
+- `GET /api/plugins` lists it with `scan: true`. The shell offers it in the Scan dialog, not in the Connect menu.
+- **The endpoint.** The shell calls it as `POST /api/p/<plugin>/hosts/<hostId>/<endpoint>`, with `{ serviceId }`, plus `credentialId` or `promptReference`. The plugin maps it with `MapHostGroup(HostPermission.Manage)`: only someone who can change the host can apply what a scan finds. It resolves the credential and connects like any endpoint (§7.6, §7.9).
+- **The answer** is a `ScanFindings`, the SDK's fixed shape. Every field is optional:
+  - `hostname`, `ipAddress`, `macAddress`, `operatingSystem`, `cpuCores`, `memoryMiB`, `serialNumber`;
+  - `virtualization`: what the host runs under (`kvm`, `vmware`), or null for physical hardware;
+  - `ports`: `{ port, name?, serviceType? }`. The scanner may name the service type it takes the port to be;
+  - `users`: `{ username, fullName? }`, the accounts that can log in;
+  - `neighbors`: `{ ipAddress, macAddress? }`, from the host's neighbour table, read passively;
+  - `notes`: what it couldn't read, and how values were found.
+- **Failures:**
+  - an unknown key answers `409` with `host_key_unknown` and the key as `presented`, as the web plugin does (§7.19). The shell asks the user to trust it, and scans again;
+  - other connection failures are problem responses with a code from the failure;
+  - the plugin audits the scan through `IPluginAudit` (`linux.scan`).
+
+**The shell's Scan dialog.**
+- Opened from a host's details by someone with Manage. It lists one choice per scanner and available service it applies to, with the credentials used with that service, or "Enter credentials…".
+- **Proposals.** It turns the findings into proposed changes, leaving out what the host already has, as 1.x's `scanProposals`. One that fills an empty field starts ticked; one that would replace a value starts unticked:
+  - the hostname, IP address and the hardware fields (§7.1). Virtualization proposes "virtual machine";
+  - the operating system, as an `os` tag, replacing the host's `os` tag;
+  - a service for each port whose type is known. That's the scanner's `serviceType` when a plugin provides it, or else the one service type whose default port it is. A port the host already has a service of that type on is left out;
+  - a credential, with the username only, for each account the host has none for. These start ticked when there are at most 10, since a server with many accounts rarely needs each one;
+  - for an administrator, a new host for each neighbour that matches no host the user can see, by MAC address or IP address. These start unticked.
+- **Applying** saves the host's changes with one `PUT /api/hosts/{id}`, from the version the dialog opened with, so an edit in between is a conflict, not lost. Then it creates each new host with `POST /api/hosts`.
+- Not yet: scanning many hosts at once (1.x's bulk scan), external scans (TCP probes from the server, with `network-scan`), and guests and cluster nodes (with the virt plugins).
 
 ## 8. The native install
 

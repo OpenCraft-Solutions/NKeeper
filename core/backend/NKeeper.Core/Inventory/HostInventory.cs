@@ -65,6 +65,11 @@ public sealed record HostResponse(
     string? Hostname,
     string? IpAddress,
     string? Description,
+    string? MacAddress,
+    int? CpuCores,
+    int? MemoryMiB,
+    string? SerialNumber,
+    bool IsVirtualMachine,
     IReadOnlyList<HostTagDto> Tags,
     IReadOnlyList<HostServiceResponse> Services,
     IReadOnlyList<HostCredentialResponse> Credentials,
@@ -85,6 +90,17 @@ public sealed class HostRequest
     public string? IpAddress { get; set; }
 
     public string? Description { get; set; }
+
+    /// <summary>Hardware (§7.1): six hex pairs, with colons or dashes.</summary>
+    public string? MacAddress { get; set; }
+
+    public int? CpuCores { get; set; }
+
+    public int? MemoryMiB { get; set; }
+
+    public string? SerialNumber { get; set; }
+
+    public bool? IsVirtualMachine { get; set; }
 
     public List<HostTagDto>? Tags { get; set; }
 
@@ -320,6 +336,7 @@ public sealed partial class HostInventory(CoreDbContext db, HostAccess access, S
         host.Hostname = hostname;
         host.IpAddress = string.IsNullOrEmpty(ip) ? null : ip;
         host.Description = description;
+        ApplyHardware(host, request);
         ApplyTags(host, request.Tags ?? []);
         var services = ApplyServices(host, request.Services ?? []);
         ApplyCredentials(host, request.Credentials ?? [], services);
@@ -582,6 +599,42 @@ public sealed partial class HostInventory(CoreDbContext db, HostAccess access, S
                 ? [.. services.Select((s, index) => (s, index)).Where(p => ids.Contains(p.s.Id)).Select(p => p.index)]
                 : null);
 
+    /// <summary>The hardware fields (§7.1), each optional.</summary>
+    private static void ApplyHardware(Host host, HostRequest request)
+    {
+        string? mac = null;
+        if (TrimToNull(request.MacAddress) is { } typed)
+        {
+            mac = NormalizeMac(typed) ?? throw new InventoryValidationException("macAddress", "Enter a MAC address as six pairs of hex digits, such as AA:BB:CC:DD:EE:FF.");
+        }
+
+        if (request.CpuCores is < 1 or > 65535)
+        {
+            throw new InventoryValidationException("cpuCores", "Enter a number of CPU cores from 1 to 65535.");
+        }
+
+        if (request.MemoryMiB is < 1)
+        {
+            throw new InventoryValidationException("memoryMiB", "Enter the memory as a positive number.");
+        }
+
+        var serial = TrimToNull(request.SerialNumber);
+        if (serial?.Length > Host.SerialNumberMaxLength)
+        {
+            throw new InventoryValidationException("serialNumber", $"Use at most {Host.SerialNumberMaxLength} characters.");
+        }
+
+        host.MacAddress = mac;
+        host.CpuCores = request.CpuCores;
+        host.MemoryMiB = request.MemoryMiB;
+        host.SerialNumber = serial;
+        host.IsVirtualMachine = request.IsVirtualMachine ?? false;
+    }
+
+    /// <summary><c>AA:BB:CC:DD:EE:FF</c> from six hex pairs separated by colons or dashes; null for anything else.</summary>
+    internal static string? NormalizeMac(string value) =>
+        MacAddress().IsMatch(value) ? value.Replace('-', ':').ToUpperInvariant() : null;
+
     /// <summary>
     /// The session types a service turns off (§7.4): well-formed IDs, in the order sent, without repeats. They aren't
     /// checked against the loaded plugins, so the setting survives a plugin being disabled and enabled again.
@@ -626,6 +679,11 @@ public sealed partial class HostInventory(CoreDbContext db, HostAccess access, S
             host.Hostname,
             host.IpAddress,
             host.Description,
+            host.MacAddress,
+            host.CpuCores,
+            host.MemoryMiB,
+            host.SerialNumber,
+            host.IsVirtualMachine,
             [.. host.Tags
                 .OrderBy(t => t.Name, StringComparer.OrdinalIgnoreCase).ThenBy(t => t.Value, StringComparer.OrdinalIgnoreCase)
                 .Select(t => new HostTagDto(t.Name, t.Value.Length == 0 ? null : t.Value))],
@@ -651,4 +709,7 @@ public sealed partial class HostInventory(CoreDbContext db, HostAccess access, S
     /// <summary>A session type's ID, as the plugin host requires one (§7.10).</summary>
     [GeneratedRegex(@"^[a-z][a-z0-9-]{0,31}\z")]
     private static partial Regex SessionTypeId();
+
+    [GeneratedRegex(@"^[0-9A-Fa-f]{2}(?:([:-])[0-9A-Fa-f]{2})(?:\1[0-9A-Fa-f]{2}){4}\z")]
+    private static partial Regex MacAddress();
 }

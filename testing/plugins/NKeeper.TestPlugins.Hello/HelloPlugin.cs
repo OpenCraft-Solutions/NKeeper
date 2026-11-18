@@ -481,6 +481,7 @@ public sealed class InvalidServiceTypePlugin : IPlugin
                 "action-endpoint" => new HostAction("fine.go", "Go") { Endpoint = "../go", ServiceTypes = ["fine"] },
                 "action-run-services" => new HostAction("fine.go", "Go") { Endpoint = "go" },
                 "action-session-services" => new HostAction("fine.go", "Go", "fine") { ServiceTypes = ["fine"] },
+                "action-scan-session" => new HostAction("fine.scan", "Scan", "fine") { Scan = true },
                 _ => new HostAction("Fine.Go", "Go", "fine"),
             });
             return;

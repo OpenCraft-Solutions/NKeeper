@@ -41,9 +41,9 @@ export function terminalPlugin(overrides: Partial<PluginStatus> = {}): PluginSta
     ],
     sessionTypes: [{ id: 'term', label: 'Terminal', serviceTypes: ['term'], supportsJumpHost: true }],
     hostActions: [
-      { id: 'term.open', label: 'Terminal', sessionType: 'term', endpoint: null, serviceTypes: [], credential: 'required' },
+      { id: 'term.open', label: 'Terminal', sessionType: 'term', endpoint: null, serviceTypes: [], credential: 'required', scan: false },
       // A run action (SDK 0.1.7), listed first, so double-clicking must skip it.
-      { id: 'term.reboot', label: 'Reboot', sessionType: null, endpoint: 'reboot', serviceTypes: ['term'], credential: 'none' },
+      { id: 'term.reboot', label: 'Reboot', sessionType: null, endpoint: 'reboot', serviceTypes: ['term'], credential: 'none', scan: false },
     ],
     ...overrides,
   })
@@ -64,6 +64,11 @@ export function host(overrides: Partial<Host> = {}): Host {
     hostname: 'web01.example.com',
     ipAddress: '192.0.2.10',
     description: null,
+    macAddress: null,
+    cpuCores: null,
+    memoryMiB: null,
+    serialNumber: null,
+    isVirtualMachine: false,
     tags: [],
     services: [],
     credentials: [],

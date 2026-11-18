@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
+using Microsoft.EntityFrameworkCore.Metadata;
 
 namespace NKeeper.Core.Persistence;
 
@@ -171,6 +172,9 @@ public sealed class CoreDbContext(DbContextOptions<CoreDbContext> options)
             host.Property(h => h.Hostname).HasMaxLength(Host.HostnameMaxLength);
             host.Property(h => h.IpAddress).HasMaxLength(Host.IpAddressMaxLength);
             host.Property(h => h.Description).HasMaxLength(Host.DescriptionMaxLength);
+            host.Property(h => h.MacAddress).HasMaxLength(Host.MacAddressLength);
+            host.Property(h => h.SerialNumber).HasMaxLength(Host.SerialNumberMaxLength);
+            host.Property(h => h.MemoryMiB).HasColumnName("memory_mib");
             host.Property(h => h.Version).IsRowVersion().HasColumnName("xmin");
             host.HasMany(h => h.Tags).WithOne().HasForeignKey(t => t.HostId).OnDelete(DeleteBehavior.Cascade);
             host.HasMany(h => h.Services).WithOne().HasForeignKey(s => s.HostId).OnDelete(DeleteBehavior.Cascade);
@@ -247,10 +251,11 @@ public sealed class CoreDbContext(DbContextOptions<CoreDbContext> options)
         });
 
         // One naming style for the whole schema: snake_case columns, Identity's own tables included.
-        // Npgsql's row version is PostgreSQL's xmin system column, which keeps its name.
+        // Npgsql's row version is PostgreSQL's xmin system column, which keeps its name, as does a name set explicitly
+        // (memory_mib, which the rule would split as memory_mi_b).
         foreach (var entity in builder.Model.GetEntityTypes())
         {
-            foreach (var property in entity.GetProperties().Where(p => p.GetColumnName() != "xmin"))
+            foreach (var property in entity.GetProperties().Where(p => p.GetColumnName() != "xmin" && p.FindAnnotation(RelationalAnnotationNames.ColumnName) is null))
             {
                 property.SetColumnName(SnakeCase(property.Name));
             }

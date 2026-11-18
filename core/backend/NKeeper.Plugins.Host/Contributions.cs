@@ -187,6 +187,11 @@ public static partial class ContributionRules
             return $"Host action '{action.Id}' must name either a session type to open or an endpoint to run, not both or neither.";
         }
 
+        if (action.Scan && action.SessionType is not null)
+        {
+            return $"Host action '{action.Id}' is a scan, so it must run an endpoint, not open a session.";
+        }
+
         if (action.SessionType is not null)
         {
             if (!sessionTypes.Any(t => t.Id == action.SessionType))

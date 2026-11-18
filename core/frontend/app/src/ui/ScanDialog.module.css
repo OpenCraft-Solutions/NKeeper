@@ -1,0 +1,65 @@
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.choices {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.choice {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.groupTitle {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.proposal {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.detail {
+  color: var(--color-text-subtle);
+  font-size: 0.8125rem;
+  overflow-wrap: anywhere;
+}
+
+.notes {
+  margin: 0;
+  padding-left: var(--space-4);
+  color: var(--color-text-subtle);
+  font-size: 0.8125rem;
+}
+
+.hint {
+  color: var(--color-text-subtle);
+  font-size: 0.8125rem;
+}
+
+.running {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}

@@ -491,6 +491,11 @@ describe('the workspace', () => {
       hostname: null,
       ipAddress: '192.0.2.99',
       description: null,
+      macAddress: null,
+      cpuCores: null,
+      memoryMiB: null,
+      serialNumber: null,
+      isVirtualMachine: false,
       tags: [],
       services: [{ id: null, type: 'term', label: null, port: 99999, address: null, settings: { shell: '/bin/zsh', mode: 'safe', retries: 3, compress: true }, disabledTools: [] }],
       credentials: [
@@ -533,6 +538,37 @@ describe('the workspace', () => {
     await user.click(within(form).getByRole('button', { name: 'Create host' }))
 
     await waitFor(() => expect(bodyOf(fetch, 'POST /api/hosts')).toMatchObject({ services: [{ type: 'term', disabledTools: ['term-files'] }] }))
+  })
+
+  it('scans a host and applies the findings the user picks, from the version it opened with', async () => {
+    const plugin = terminalPlugin()
+    const fetch = signedIn({
+      'GET /api/plugins': [
+        {
+          ...plugin,
+          hostActions: [...(plugin.hostActions ?? []), { id: 'term.scan', label: 'Scan', sessionType: null, endpoint: 'scan', serviceTypes: ['term'], credential: 'required', scan: true }],
+        },
+      ],
+      'POST /api/p/term/hosts/h1/scan': { hostname: 'web01.lab.example.com', macAddress: 'aa:bb:cc:dd:ee:ff', operatingSystem: 'Debian 12', notes: ['No serial number: not physical hardware.'] },
+      'PUT /api/hosts/h1': (init) => Response.json({ ...hosts[0], ...(JSON.parse(String(init?.body)) as object), version: 2 }),
+    })
+    const user = userEvent.setup()
+
+    render(<App importer={termImporter} />)
+    await user.click(await screen.findByRole('button', { name: /^web01,/ }))
+    await user.click(screen.getByRole('button', { name: 'Scan' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Scan web01' })
+    await user.click(within(dialog).getByRole('button', { name: 'Scan' }))
+
+    expect(await within(dialog).findByText('No serial number: not physical hardware.')).toBeInTheDocument()
+    expect(bodyOf(fetch, 'POST /api/p/term/hosts/h1/scan')).toMatchObject({ serviceId: 's1', credentialId: 'c1' })
+    // The hostname would replace one, so it starts unticked; the MAC address and the os tag fill gaps.
+    expect(within(dialog).getByRole('checkbox', { name: /Hostname/ })).not.toBeChecked()
+    await user.click(within(dialog).getByRole('checkbox', { name: /Operating system/ }))
+    await user.click(within(dialog).getByRole('button', { name: 'Apply' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Scan web01' })).not.toBeInTheDocument())
+    expect(bodyOf(fetch, 'PUT /api/hosts/h1')).toMatchObject({ hostname: 'web01.example.com', macAddress: 'AA:BB:CC:DD:EE:FF', tags: [{ name: 'env', value: 'prod' }], version: 1 })
   })
 
   it('sends the version an edit started from, and offers to reload after a conflict', async () => {
