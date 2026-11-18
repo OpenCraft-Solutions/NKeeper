@@ -42,6 +42,10 @@ public sealed class SshConnectivity(SshConnectionPlanner planner, TrustStore tru
     public Task CheckIdentityAsync(HostContext host, Guid serviceId, PresentedIdentity identity, bool publiclyValid, CancellationToken cancellationToken = default) =>
         services.GetRequiredService<DatabaseConnector>().CheckIdentityAsync(host, serviceId, identity, publiclyValid, cancellationToken);
 
+    /// <inheritdoc />
+    public Task<ITcpConnection> OpenTcpAsync(HostContext host, Guid serviceId, CancellationToken cancellationToken = default) =>
+        services.GetRequiredService<TcpConnector>().OpenAsync(host, serviceId, cancellationToken);
+
     /// <summary>WMI and RPC are core's own (docs/architecture.md §7.28): no SSH, and no jump hosts.</summary>
     public Task<IWmiConnection> OpenWmiAsync(HostContext host, Guid serviceId, CredentialHandle handle, CancellationToken cancellationToken = default) =>
         services.GetRequiredService<NKeeper.Core.Connectivity.Wmi.WmiConnector>().OpenAsync(host, serviceId, handle, cancellationToken);

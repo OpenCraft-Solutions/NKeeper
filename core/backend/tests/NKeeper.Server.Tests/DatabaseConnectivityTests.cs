@@ -13,7 +13,7 @@ namespace NKeeper.Server.Tests;
 /// <summary>
 /// docs/architecture.md §7.31, SDK 1.7: database connections core opens with the plugin's driver (the test plugin's
 /// <c>/db</c>, with Npgsql against the tests' own PostgreSQL), and identities a plugin read checked against the trust
-/// store (<c>/identity</c>).
+/// store (<c>/identity</c>), and plain TCP connections (<c>/tcp</c>, SDK 1.9).
 /// </summary>
 public sealed class DatabaseConnectivityTests(PostgresFixture postgres) : IClassFixture<PostgresFixture>
 {
@@ -50,6 +50,12 @@ public sealed class DatabaseConnectivityTests(PostgresFixture postgres) : IClass
         var kept = await ProbeAsync(admin, host, "db", new { serviceId = ServiceId(host), credentialId = CredentialId(host), keep = true }, HttpStatusCode.BadGateway);
         Assert.Equal("SecurityNegotiationFailed", kept.GetProperty("reason").GetString());
 
+        // A driver whose error isn't a DbException, repeating the password: refused, in its words, without the password.
+        var thrown = await ProbeAsync(admin, host, "db", new { serviceId = ServiceId(host), credentialId = CredentialId(host), @throw = true }, HttpStatusCode.BadGateway);
+        Assert.Equal("AuthenticationFailed", thrown.GetProperty("reason").GetString());
+        Assert.Contains("Refused:", thrown.GetProperty("message").GetString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(database.Password!, thrown.GetProperty("message").GetString(), StringComparison.Ordinal);
+
         var none = await CreateHostAsync(admin, database.Port, database.Username!, null);
         Assert.Equal("NoSecret", (await ProbeAsync(admin, none, "db", new { serviceId = ServiceId(none), credentialId = CredentialId(none) }, HttpStatusCode.BadGateway)).GetProperty("reason").GetString());
         Assert.Empty(await AuditAsync(server, AuditActions.CredentialUse));
@@ -80,6 +86,33 @@ public sealed class DatabaseConnectivityTests(PostgresFixture postgres) : IClass
 
         // A publicly valid certificate needs no trust.
         Assert.True((await ProbeAsync(admin, host, "identity", new { serviceId = ServiceId(host), fingerprint = "PUBLIC", publiclyValid = true })).GetProperty("ok").GetBoolean());
+    }
+
+    [Fact]
+    public async Task A_plain_TCP_connection_reaches_the_service_and_an_unreachable_one_is_refused()
+    {
+        using var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var answering = Task.Run(async () =>
+        {
+            using var client = await listener.AcceptTcpClientAsync(Token);
+            var stream = client.GetStream();
+            var buffer = new byte[64];
+            var read = await stream.ReadAsync(buffer, Token);
+            await stream.WriteAsync(System.Text.Encoding.ASCII.GetBytes("pong:" + System.Text.Encoding.ASCII.GetString(buffer, 0, read).Trim()), Token);
+        }, Token);
+        await using var server = await ServerAsync();
+        using var admin = await server.SignedInClientAsync();
+        var host = await CreateHostAsync(admin, port, "sa", "x");
+
+        var answer = await ProbeAsync(admin, host, "tcp", new { serviceId = ServiceId(host), send = "hello" });
+        await answering;
+
+        Assert.Equal(("127.0.0.1", port, "pong:hello"), (answer.GetProperty("address").GetString(), answer.GetProperty("port").GetInt32(), answer.GetProperty("answer").GetString()));
+        listener.Stop();
+        var closed = await CreateHostAsync(admin, port, "sa", "x");
+        Assert.Equal("Unreachable", (await ProbeAsync(admin, closed, "tcp", new { serviceId = ServiceId(closed) }, HttpStatusCode.BadGateway)).GetProperty("reason").GetString());
     }
 
     private async Task<ServerScenario> ServerAsync()

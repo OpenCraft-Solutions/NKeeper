@@ -173,15 +173,17 @@ public sealed class DatabaseConnector(
                 {
                     throw new ConnectException(ConnectFailure.TimedOut, $"{display} didn't answer in time.");
                 }
-                catch (DbException ex)
-                {
-                    throw new ConnectException(
-                        ex.InnerException is SocketException || ex.GetBaseException() is SocketException ? ConnectFailure.Unreachable : ConnectFailure.AuthenticationFailed,
-                        $"{display}: {Scrub(ex.Message)}");
-                }
                 catch (SocketException)
                 {
                     throw new ConnectException(ConnectFailure.Unreachable, $"Couldn't connect to {display}.");
+                }
+                catch (Exception ex) when (ex is not (OperationCanceledException or OutOfMemoryException))
+                {
+                    // Most drivers' errors are DbExceptions, but not every driver's (AdoNetCore.AseClient's derive from
+                    // SystemException): whatever it threw, the plugin gets the driver's words, without the password.
+                    throw new ConnectException(
+                        ex.InnerException is SocketException || ex.GetBaseException() is SocketException ? ConnectFailure.Unreachable : ConnectFailure.AuthenticationFailed,
+                        $"{display}: {Scrub(Messages(ex))}");
                 }
 
                 // The driver must have forgotten the password (plugin-security.md §12.3): read with its own parser, so a user
@@ -227,6 +229,25 @@ public sealed class DatabaseConnector(
             return parsed.Keys.Cast<string>().Any(key =>
                 !string.Equals(key, request.UserKeyword, StringComparison.OrdinalIgnoreCase)
                 && parsed.TryGetValue(key, out var value) && string.Equals(Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture), password, StringComparison.Ordinal));
+        }
+
+        /// <summary>
+        /// The driver's message with its inner exceptions' (SDK 1.9): some drivers wrap the server's own error, as ODP.NET
+        /// 23 wraps the listener's ORA-12514 in ORA-50201, and an engine tells them apart by it.
+        /// </summary>
+        private static string Messages(Exception ex)
+        {
+            var messages = new List<string>();
+            for (var e = ex; e is not null && messages.Count < 5; e = e.InnerException)
+            {
+                var message = e.Message.Trim();
+                if (message.Length > 0 && !messages.Any(m => m.Contains(message, StringComparison.Ordinal)))
+                {
+                    messages.Add(message);
+                }
+            }
+
+            return string.Join(" ", messages);
         }
 
         /// <summary>A driver's message, without the password should it repeat it.</summary>

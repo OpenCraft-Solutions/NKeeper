@@ -1046,7 +1046,7 @@ DbConnection connection = login.Connection;
   - `Connection`, open;
   - `OpenAnotherAsync()`, for another connection with the same login, as 1.x's database tools opened beside the query window;
   - disposing it closes every connection it opened, and the tunnel.
-- It's audited as `credential.use` (`database to service …`). Failures are `ConnectException`: `AuthenticationFailed` for a login the server refused (the driver's message, without the password), `Unreachable`, `TimedOut`, `JumpHostUnavailable` or `NoSecret`.
+- It's audited as `credential.use` (`database to service …`). Failures are `ConnectException`: `AuthenticationFailed` for a login the server refused (the driver's message, with its inner exceptions' since SDK 1.9, without the password), `Unreachable`, `TimedOut`, `JumpHostUnavailable` or `NoSecret`.
 
 **Server identities a plugin reads (SDK 1.7).** Some servers prove themselves inside their own protocol, as SQL Server sends its certificate inside TDS. Core can't read those, so the plugin does, and asks core about what it read: `IConnectivity.CheckIdentityAsync(host, serviceId, identity, publiclyValid)`.
 - `identity` is a `PresentedIdentity` of kind `TlsCertificate`, with its algorithm `x509`, the certificate's SHA-256 fingerprint, its subject and expiry. `publiclyValid` says whether the certificate chained to a trusted root for the address.
@@ -1056,6 +1056,13 @@ DbConnection connection = login.Connection;
   - an unknown one throws `ConnectException` with `HostKeyUnknown` and the identity, which core remembers it presented, so the user can trust it;
   - a changed one throws `HostKeyChanged`, audited as `trust.mismatch`.
 - The plugin then pins its driver to exactly that certificate, as 1.x's SQL Server connector did. Core can't check that it does: the plugin's own driver makes the TLS connection. A plugin that skips the check, or pins nothing, is a plugin bug core can't catch, as for any code in process (plugin-security.md §12.4).
+
+**A plain TCP connection (SDK 1.9).** A plugin that reads a server's identity in the server's own protocol needs to reach the server first, before core signs in, as SQL Server's pre-login hands over its certificate. `IConnectivity.OpenTcpAsync(host, serviceId)` opens a TCP connection to the service's address and port for it:
+- through the host's jump host when it has one (§7.8), as for HTTP (§7.16);
+- only from the plugin's own host-scoped endpoint, for the host core authorized, as for every connection here;
+- core sends nothing on it and reads nothing from it. It carries no credential, so it isn't audited;
+- it gives the stream, and the service's own address and port, which a certificate is checked against even through a tunnel;
+- disposing it closes the connection and the tunnel. Failures are `ConnectException`: `Unreachable`, `TimedOut` or `JumpHostUnavailable`.
 
 ### 7.32 The `db-core` plugin
 
@@ -1075,6 +1082,24 @@ What the database engine plugins (SQL Server, Oracle, SAP ASE) share, ported fro
 **The tab** is 1.x's: the object explorer on the left, query windows and the blocking manager as tabs on the right, results as grids or text with messages beside them, and F5 or Ctrl+Enter to run the selection or everything.
 
 **Not yet:** the Management reports, the insurance survey, orphaned users and Copy Database. They come with the engines that have them.
+
+### 7.33 The `mssql` plugin
+
+SQL Server, ported from 1.x's `SqlServer/`, in its own repository, `NKeeper-Plugin-MSSQL` (§9), on SDK 1.9 (`>=1.9.0 <2.0.0`). It's a database engine for db-core (§7.32), which it depends on.
+
+- **Service type `mssql`** ("SQL Server"): default port 1433, health by TCP.
+- **The database tab** (session type `mssql`, host action `mssql.query`): db-core's, with SQL Server's engine.
+- **Signing in.** The connection is always encrypted, as in 1.x:
+  - the engine reads the server's certificate from its PRELOGIN, over a TCP connection core opens (§7.31, SDK 1.9). TDS carries the TLS handshake inside PRELOGIN packets, so core can't read it itself;
+  - it asks core about it (`CheckIdentityAsync`). A publicly valid certificate passes; any other is shown to the user once, by the stream session's trust prompt (§7.10);
+  - core then opens the login with SqlClient (§7.31), pinned to exactly the certificate the user trusted (`ServerCertificate`, for the name it was issued to). The plugin writes the certificate to a temporary file for SqlClient, and deletes it with the login.
+  - SQL logins only: a credential with a domain is refused, since SqlClient's Windows logins come from the server's own account, never a typed password.
+- **The dialect**, ported from 1.x: `GO` batches with counts, results of up to 10,000 rows a set and 50,000 in all, messages and errors at their line in the script; the explorer as SSMS's; Select Top 1000 Rows, Script as CREATE and Script as EXECUTE; the blocking chains, with `VIEW SERVER STATE`'s waits; and `KILL`.
+- **The driver** is the plugin's own, Microsoft.Data.SqlClient, loaded in its own context (plugin-security.md §7.1). Its portable assembly only says the platform isn't supported, so the plugin is built for `linux-x64`, and its package carries the real one.
+- **Not yet:**
+  - a named instance's port from the SQL Server Browser: set the service's port;
+  - Orphaned Users, the insurance survey, and the internal scan's SQL Server detection;
+  - asking again about a new self-signed certificate. SQL Server without a certificate of its own makes a new one at each start. 1.x asked the user again when both were SQL Server's own; core refuses a changed certificate (§7.7), so someone who manages the host removes the old one first.
 
 ## 8. The native install
 
@@ -1143,7 +1168,7 @@ Each official plugin lives in a repository of its own and is released on its own
 
 **Repositories,** all under `OpenCraft-Solutions`:
 - `NKeeper`, this one: the server, the shell, the SDK, the plugin tooling, the test helpers and the installer.
-- `NKeeper-Plugin-<Name>` for each official plugin: `NKeeper-Plugin-SSH`, `NKeeper-Plugin-Web`, `NKeeper-Plugin-Desktop`, `NKeeper-Plugin-WakeOnLan`, and each new one (`NKeeper-Plugin-Telnet`, `NKeeper-Plugin-VNC`, `NKeeper-Plugin-Linux`, `NKeeper-Plugin-Storage`, `NKeeper-Plugin-Windows`, `NKeeper-Plugin-iDRAC`, `NKeeper-Plugin-DbCore`…). A plugin's ID doesn't change when it moves.
+- `NKeeper-Plugin-<Name>` for each official plugin: `NKeeper-Plugin-SSH`, `NKeeper-Plugin-Web`, `NKeeper-Plugin-Desktop`, `NKeeper-Plugin-WakeOnLan`, and each new one (`NKeeper-Plugin-Telnet`, `NKeeper-Plugin-VNC`, `NKeeper-Plugin-Linux`, `NKeeper-Plugin-Storage`, `NKeeper-Plugin-Windows`, `NKeeper-Plugin-iDRAC`, `NKeeper-Plugin-DbCore`, `NKeeper-Plugin-MSSQL`…). A plugin's ID doesn't change when it moves.
 - A plugin repository holds the plugin's backend, frontend, manifest and tests, and its own CI and release workflow. It references nothing of core's but the published packages below.
 
 **What core publishes,** to GitHub Packages under `OpenCraft-Solutions`, versioned with the SDK (§4) and released from this repository by a tag, `sdk-v<version>`:
