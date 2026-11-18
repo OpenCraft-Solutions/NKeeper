@@ -434,14 +434,19 @@ internal sealed class StreamingCommand : ISshCommand
     private readonly SshCommand _command;
     private readonly CancellationTokenSource _stop = new();
     private readonly Task _run;
+    private readonly Lazy<Stream> _input;
 
     public StreamingCommand(SshCommand command)
     {
         _command = command;
         _run = command.ExecuteAsync(_stop.Token);
+        // The channel is open once the command has started, which is when SSH.NET can give its input (SDK 1.12).
+        _input = new Lazy<Stream>(command.CreateInputStream);
     }
 
     public Stream Output => _command.OutputStream;
+
+    public Stream Input => _input.Value;
 
     public async Task<SshCommandResult> WaitAsync(CancellationToken cancellationToken = default)
     {
@@ -464,6 +469,11 @@ internal sealed class StreamingCommand : ISshCommand
         catch (Exception ex) when (ex is OperationCanceledException or SshException or ObjectDisposedException)
         {
             // Stopped, or the connection went: either way it's over.
+        }
+
+        if (_input.IsValueCreated)
+        {
+            await _input.Value.DisposeAsync();
         }
 
         _command.Dispose();
