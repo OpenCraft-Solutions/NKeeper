@@ -1281,6 +1281,46 @@ The helper's unit can write only the plugin directory and the requests' director
 
 **The installer and the store.** `setup.sh install` replaces the plugin directory with the lock file's plugins (§8). It keeps a package the store installed: one whose plugin isn't in the lock file, or whose version is newer than the lock file's. `plugins.lock` stays the set every install gets; the catalog lists every official plugin, those included, so they get upgrades between NKeeper releases.
 
+### 9.2 Optional plugins and dependencies
+
+Core stays small: hosts, credentials, sessions, access, audit and the plugin host. Everything else is a plugin, and **every plugin can be turned off.** Some are on by default; none is part of core.
+
+**On by default.** A manifest's `builtIn: true` (plugin-security.md §3) now means *on by default*: such a plugin is enabled the first time the server sees it, and an administrator can disable it like any other. It is still honoured only from an official key, so a third-party plugin starts disabled until an administrator enables it. The official plugins say `builtIn: true`, so installing one, from `plugins.lock` or the catalog, turns it on. `plugins.lock` is the default set a new install gets (ssh, web, desktop, telnet, vnc, wake-on-lan), not a part of core: each can be disabled or removed.
+
+**Enabling and disabling,** on the plugins page, for administrators:
+- **Disable** turns a plugin off at the next restart. Its data and settings are kept; its service types show as unavailable (plugin-security.md §8). Audited as `plugin.disabled`.
+- **Enable** turns it on at the next restart. Audited as `plugin.enabled`.
+- Both are recorded at once and take effect when NKeeper restarts, since code is never loaded into or unloaded from a running server (plugin-security.md §7.1). The page says a restart is pending, and offers **Restart now** through root's helper (§9.1), which ends open sessions; or the change waits for the next restart.
+
+**Removing,** root's, like installing (§9.1): `sudo nkeeper plugin remove <id>`, or **Remove** on the page through root's helper. The package leaves the plugin directory; the plugin's data stays, and the page shows it as missing (plugin-security.md §8), so installing it again brings it back as it was. The installer doesn't bring back a plugin of `plugins.lock` that was removed: it remembers removals in `/etc/nkeeper/plugins-removed`.
+
+**Dependencies, kept shallow.** A plugin may build on another only in one way, so the graph stays two layers deep and dependency hell has nowhere to start:
+- **Only on a shared plugin.** A plugin may depend only on a *shared plugin*: one that exists to be built on, exports something for its dependants (backend `exportedAssemblies`, frontend `exports`, §5) and depends on nothing itself. db-core and virt-core are shared plugins; mssql, oracle, ase and kvm build on them. A plugin that depends on a plugin with dependencies of its own is refused (`dependency_depth`), so there are no chains and no diamonds.
+- **Within one major version.** A dependency's range names one major version (`>=1.2.0 <2.0.0`); a range open at the top, or spanning majors, is refused (`dependency_range`). A shared plugin follows SemVer as the SDK does (§4): a minor version only adds, and a breaking change is a new major version, which should be rare.
+- **One copy each.** A server has one version of each plugin, so dependants share their shared plugin's one copy (§5).
+- **Enabling a plugin enables its shared plugin** with it, and the page says so before it does. **Disabling a shared plugin disables its dependants** with it, listed first; they come back when it's enabled again only if an administrator enables them. **Removing a shared plugin** is refused while an installed plugin depends on it, unless they're removed together.
+- **The catalog keeps them in step** (§9.1): installing a plugin installs its shared plugin. An upgrade of a shared plugin is offered only if every installed dependant's range accepts it; otherwise the page says which dependant to upgrade first. An upgrade of a dependant that needs a newer shared plugin brings it along, when every other dependant accepts that version too. Either way they're installed in one run of root's helper, with one restart.
+
+The plugin host checks the first three rules at every start (plugin-security.md §5.6), so a package can't break them by being installed by hand.
+
+### 9.3 Third-party plugins
+
+Anyone can write a plugin. A third-party plugin has a reverse-domain ID (`com.example.netbox`) and is signed with its publisher's own key, which a server must trust, for that publisher's IDs only (plugin-security.md §6.1, §6.2). It can never sign, replace or stand in for an official plugin. A third-party plugin starts disabled, whatever its manifest says, until an administrator enables it (§9.2).
+
+**Getting one,** in either of two ways:
+- **From the publisher's catalog.** An administrator adds a catalog's URL on the plugins page (HTTPS only), and its plugins join the **Available** list, marked with the catalog they come from. A catalog is the same file as NKeeper's own (§9.1). Adding one is audited (`plugin.catalog_added`) and grants nothing by itself: its packages still need a trusted key. An ID that more than one catalog lists comes from NKeeper's own catalog first, then from the catalog added first; the page shows the others as conflicts. The request to install names the catalog, and root's helper fetches that catalog and the package itself, as for NKeeper's own (§9.1).
+- **By uploading the package** on the plugins page. The server verifies the upload as at load (plugin-security.md §5), shows its ID, version, signer and whether that key is trusted, and keeps it in the requests' directory with a request to install it. Root's helper verifies it again with root's trust configuration before installing it. Uploads are at most the package limit (plugin-security.md §5.2), and are audited (`plugin.uploaded`).
+
+**Trusting a publisher's key.** The publisher gives their public key file (plugin-security.md §6.1): its key ID (a fingerprint of the key), the key, and the ID patterns it may sign (`com.example.*`).
+- **As root, always:** `sudo nkeeper plugin trust add <key file>`, `trust list` and `trust remove <key ID>`. The key goes into `/etc/nkeeper/plugin-trust/`.
+- **From the plugins page, only where root allowed it:** `setup.sh install --allow-web-trust` lets administrators trust and untrust third-party keys from the page, through root's helper. It is off by default, and kept on upgrade. Without it, the page shows the command for root instead.
+  - The administrator pastes or uploads the key file, checks the key ID and ID patterns the page shows against what the publisher published, and confirms with their password.
+  - Root's helper accepts only a third-party key: never an official, install or development key. Its ID patterns must follow plugin-security.md §6.2: at least two fixed segments, never an unprefixed (official) ID. It writes the key file, `root:root 0644`, and NKeeper uses it from the next restart.
+  - The helper takes trust requests only when the server's settings say web trust is allowed. Its systemd unit can write the trust directory only then too (a drop-in the installer adds), so both locks must be open.
+  - Audited as `plugin.trust_requested` and `plugin.key_trusted` (or `plugin.key_untrusted`), with the key ID and its patterns.
+
+**What `--allow-web-trust` costs.** With it, an NKeeper administrator account can get code of its own choosing running on the server: sign a plugin with a key of its own, trust that key, upload the plugin and enable it. That code runs with the server's access, the credential vault included. Turn it on only where administrators are as trusted as root, and protect their accounts accordingly. Without it, trust stays root's (plugin-security.md §1), and the page can still add catalogs, upload packages signed by keys root trusts, and install, enable, disable and remove them.
+
 ## 10. Where to read more
 
 - [v2-plan.md](v2-plan.md): the audit of 1.x, the core/plugin boundary, the contribution catalogue, phases and decisions.
