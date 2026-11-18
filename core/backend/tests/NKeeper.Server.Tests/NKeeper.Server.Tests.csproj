@@ -26,4 +26,9 @@
     <ProjectReference Include="..\..\..\..\testing\NKeeper.Testing\NKeeper.Testing.csproj" />
   </ItemGroup>
 
+  <!-- The fake WMI helper (docs/architecture.md §7.28). -->
+  <ItemGroup>
+    <None Include="Windows\*.py" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

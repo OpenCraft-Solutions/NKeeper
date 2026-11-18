@@ -127,6 +127,12 @@ install_packages() {
     else
         die "This installer supports apt (Debian, Ubuntu) and dnf (the RHEL family, Fedora)."
     fi
+    # Impacket, for Windows hosts' WMI (docs/architecture.md §7.28), from the distribution where it has it.
+    if [[ $pm == apt ]]; then
+        apt-get install -y -qq python3-impacket >/dev/null 2>&1 || warn "The distribution has no python3-impacket: Windows hosts' event logs and scans won't work."
+    else
+        dnf install -y -q python3-impacket >/dev/null 2>&1 || warn "No python3-impacket package (on the RHEL family it's in EPEL): Windows hosts' event logs and scans won't work."
+    fi
     ok "Installed."
 }
 
