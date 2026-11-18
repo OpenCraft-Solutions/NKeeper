@@ -975,7 +975,7 @@ Windows hosts over RPC, ported from 1.x's `Rpc/`, `EventLogs/` and `WindowsInter
   - `logs`: the host's event logs with their sizes (`Win32_NTEventlogFile`);
   - `read` `{ log, levels?, source?, eventId?, before?, since? }`: up to 200 events, newest first, and whether older ones remain. `before` is a record number, for the next page. Filters go into the WQL with their quotes escaped, as in 1.x.
   - Opening a log is audited as `windows.eventlog-read`; paging isn't.
-- **RPC console** (session type `windows-rpc`, host action `windows.rpc`): 1.x's raw RPC session. It binds an interface (the endpoint mapper by default), then sends calls: `call` `{ opnum, stub }`, with the stub in hex (at most 256 KB), answered by `response` `{ stub }` or `fault` `{ message, status }`.
+- **RPC console** (session type `windows-rpc`, host action `windows.rpc`): 1.x's raw RPC session. It binds an interface (the endpoint mapper by default), then sends calls: `call` `{ opnum, stub }`, with the stub in hex (at most 256 KB). It's answered by a reply `{ stub }`, or an error that gives the fault's status. The interface can be chosen in the session's options, `{ interfaceId, major, minor }`.
 - **Scanner** (scan action `windows.scan`, §7.26): 1.x's Windows internal scan, over one WMI connection. It reads:
   - the hostname, operating system, MAC address and IP address of the adapter NKeeper reached;
   - CPU cores, memory (installed, else the total), the serial number of physical hardware, and virtualization (from the manufacturer and model);
