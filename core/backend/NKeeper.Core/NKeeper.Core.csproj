@@ -16,4 +16,9 @@
     <ProjectReference Include="..\NKeeper.Core.Persistence\NKeeper.Core.Persistence.csproj" />
   </ItemGroup>
 
+  <!-- The Impacket helper WMI connections run (docs/architecture.md §7.28), shipped beside the server. -->
+  <ItemGroup>
+    <Content Include="Connectivity\Wmi\wmi_helper.py" Link="Connectivity\wmi_helper.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

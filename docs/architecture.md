@@ -929,6 +929,62 @@ A Linux host's shared storage over its SSH service, ported from 1.x's `StorageCo
 - **Not only Linux.** Like Journal, it first checks `uname -s`, and refuses a host that isn't Linux. A service where it doesn't fit can turn it off (§7.4).
 - **Its frontend** is the Storage view, ported from 1.x's `StorageView`.
 
+### 7.28 WMI and RPC connections
+
+Windows hosts are managed over RPC: WMI queries (over DCOM) for their event logs and their inventory, and raw DCE/RPC calls. Both sign in with NTLM, which needs the password, which a plugin never sees (D13). So core opens these connections too, as it does SSH and Telnet (SDK 1.5). 1.x ran them in the API process.
+
+```csharp
+await using var wmi = await connectivity.OpenWmiAsync(host, serviceId, handle);
+var rows = await wmi.QueryAsync(new WmiQuery("SELECT Caption, Version FROM Win32_OperatingSystem"));
+
+await using var rpc = await connectivity.OpenRpcAsync(host, serviceId, handle, new RpcInterface(endpointMapper, 3, 0));
+var response = await rpc.CallAsync(opnum: 2, stub);
+```
+
+**WMI (`OpenWmiAsync`).**
+- It needs a credential with a password. A user name typed as `DOMAIN\user` is split, as in 1.x, when the credential has no domain of its own.
+- **Core runs Impacket**, a Python library, as one helper process per connection. This is 1.x's `ImpacketWmiScan` and `ImpacketEventLogReader` made into one generic helper, `wmi_helper.py`, which core ships:
+  - the login goes to the helper over its standard input, never its command line;
+  - the helper signs in once (DCOM, then `IWbemLevel1Login`), and then answers each query on the same connection.
+- `QueryAsync(query)` runs one read-only WQL query and returns its rows as JSON objects, property names to values:
+  - `Namespace`: `root/cimv2` by default;
+  - `Limit`: at most this many rows;
+  - `TimeProperty` and `Since`: stop at the first row whose CIM date property is older than `Since`. Event logs list newest first, so a page is read without the rest of the log, as 1.x did.
+
+  A query the host refuses throws `WmiException`. The connection stays usable.
+- Core finds Python at `Connectivity:Wmi:Python` (`/usr/bin/python3` by default). The native install adds the distribution's Impacket package (§8). Where there is none, opening fails with `Unreachable`, saying Impacket is needed.
+- **Limits:** a query answers at most 10,000 rows and 16 MB, and each takes at most 60 seconds. A connection is dropped after 10 minutes without a query.
+
+**RPC (`OpenRpcAsync`).**
+- 1.x's `RpcClient`, ported: connection-oriented DCE/RPC over TCP (`ncacn_ip_tcp`), to the service's address and port (135 by default).
+- It binds one interface (its UUID and version), authenticating with NTLM at the "connect" level. On Linux it uses .NET's managed NTLM (`System.Net.Security.UseManagedNtlm`), which needs no GSSAPI module. That proves the login at bind time, but doesn't sign or encrypt the calls, as in 1.x.
+- `CallAsync(opnum, stub)` sends opaque NDR stubs, in fragments when large, and returns the response's stub. A fault throws `RpcFaultException` with the server's status. A response is at most 4 MB, and a call takes at most 30 seconds.
+
+**Both:**
+- They check the handle as SSH does (§7.9), and are audited as `credential.use` (`wmi to service …`, `rpc to service …`).
+- **No jump hosts.** DCOM moves to ports the server picks, which a single forwarded port can't carry, so 1.x refused jump hosts for both. Opening either for a host behind one fails with `JumpHostUnavailable`.
+- **No server identity is checked.** NTLM proves the client, not the server. The trust store has nothing to compare, as for Telnet.
+- **Failures:** `ConnectException` with `AuthenticationFailed`, `NoSecret`, `Unreachable`, `TimedOut` or `JumpHostUnavailable`, and `CredentialDeniedException`.
+
+### 7.29 The `windows` plugin
+
+Windows hosts over RPC, ported from 1.x's `Rpc/`, `EventLogs/` and `WindowsInternalScan`, in its own repository, `NKeeper-Plugin-Windows` (§9), on SDK 1.5 (`>=1.5.0 <2.0.0`).
+
+- **Service type `rpc`** ("Windows RPC"): default port 135, health by TCP.
+- **Event Log Viewer** (session type `windows-eventlog`, host action `windows.eventlog`): a stream session over one WMI connection (§7.28), ported from 1.x's `EventLogView`. It speaks the linux plugin's request protocol (§7.25):
+  - `logs`: the host's event logs with their sizes (`Win32_NTEventlogFile`);
+  - `read` `{ log, levels?, source?, eventId?, before?, since? }`: up to 200 events, newest first, and whether older ones remain. `before` is a record number, for the next page. Filters go into the WQL with their quotes escaped, as in 1.x.
+  - Opening a log is audited as `windows.eventlog-read`; paging isn't.
+- **RPC console** (session type `windows-rpc`, host action `windows.rpc`): 1.x's raw RPC session. It binds an interface (the endpoint mapper by default), then sends calls: `call` `{ opnum, stub }`, with the stub in hex (at most 256 KB). It's answered by a reply `{ stub }`, or an error that gives the fault's status. The interface can be chosen in the session's options, `{ interfaceId, major, minor }`.
+- **Scanner** (scan action `windows.scan`, §7.26): 1.x's Windows internal scan, over one WMI connection. It reads:
+  - the hostname, operating system, MAC address and IP address of the adapter NKeeper reached;
+  - CPU cores, memory (installed, else the total), the serial number of physical hardware, and virtualization (from the manufacturer and model);
+  - the listening ports (`MSFT_NetTCPConnection`, Windows 8 and Server 2012 or later);
+  - the local accounts that are enabled.
+
+  SQL Server instances wait for `db-mssql`.
+- Its frontend has the Event Log and RPC views.
+
 ## 8. The native install
 
 `deploy/setup.sh` installs NKeeper on a Linux server, from a checkout of the repository, as root. It's an early version of the Phase 6 installer (v2-plan.md §8). NKeeper installs natively only (D8): systemd, nginx and PostgreSQL, no containers.
@@ -938,7 +994,7 @@ A Linux host's shared storage over its SSH service, ported from 1.x's `StorageCo
   - `uninstall`, which keeps the database and `/etc/nkeeper`. `--purge` removes them too.
 
 **What `install` does, in order.**
-1. Installs PostgreSQL, nginx and OpenSSL from the distribution.
+1. Installs PostgreSQL, nginx and OpenSSL from the distribution, and its Impacket package (`python3-impacket`) where it has one, for Windows hosts' WMI (§7.28). Debian, Ubuntu and Fedora have it. On the RHEL 9 family it comes from EPEL, which the installer doesn't add, so it says so instead.
 2. Sets up PostgreSQL: a role and database `nkeeper` with a random password, and password sign-in over loopback only.
 3. **Builds NKeeper** from a copy of the checkout, so the checkout gets no root-owned files:
    - with the .NET 10 SDK and Node.js, fetched into `/var/cache/nkeeper-build`. Node.js is checked against its published SHA-256;
@@ -996,7 +1052,7 @@ Each official plugin lives in a repository of its own and is released on its own
 
 **Repositories,** all under `OpenCraft-Solutions`:
 - `NKeeper`, this one: the server, the shell, the SDK, the plugin tooling, the test helpers and the installer.
-- `NKeeper-Plugin-<Name>` for each official plugin: `NKeeper-Plugin-SSH`, `NKeeper-Plugin-Web`, `NKeeper-Plugin-Desktop`, `NKeeper-Plugin-WakeOnLan`, and each new one (`NKeeper-Plugin-Telnet`, `NKeeper-Plugin-VNC`, `NKeeper-Plugin-Linux`, `NKeeper-Plugin-Storage`, `NKeeper-Plugin-iDRAC`…). A plugin's ID doesn't change when it moves.
+- `NKeeper-Plugin-<Name>` for each official plugin: `NKeeper-Plugin-SSH`, `NKeeper-Plugin-Web`, `NKeeper-Plugin-Desktop`, `NKeeper-Plugin-WakeOnLan`, and each new one (`NKeeper-Plugin-Telnet`, `NKeeper-Plugin-VNC`, `NKeeper-Plugin-Linux`, `NKeeper-Plugin-Storage`, `NKeeper-Plugin-Windows`, `NKeeper-Plugin-iDRAC`…). A plugin's ID doesn't change when it moves.
 - A plugin repository holds the plugin's backend, frontend, manifest and tests, and its own CI and release workflow. It references nothing of core's but the published packages below.
 
 **What core publishes,** to GitHub Packages under `OpenCraft-Solutions`, versioned with the SDK (§4) and released from this repository by a tag, `sdk-v<version>`:

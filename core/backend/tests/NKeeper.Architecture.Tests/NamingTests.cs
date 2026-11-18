@@ -28,6 +28,8 @@ public sealed class NamingTests
         ["core/backend/NKeeper.Core/Connectivity/DesktopConnector.cs: vnc"] = "guacd's protocol name in the handshake (SDK 1.2)",
         // The protocol core speaks in this project, named in the credential.use audit line beside "sftp" (SDK 1.3).
         ["core/backend/NKeeper.Connectivity.Ssh/SshConnectivity.cs: ssh"] = "the SSH protocol, in the audit line",
+        // The DCE/RPC protocol core speaks (SDK 1.5), named in its messages, not the windows plugin's service type.
+        ["core/backend/NKeeper.Core/Connectivity/Rpc/RpcConnector.cs: RPC"] = "the RPC protocol, in its messages",
     };
 
     public static IReadOnlySet<string> Ids { get; } = PlannedIds

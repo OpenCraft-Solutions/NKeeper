@@ -26,4 +26,15 @@
     <ProjectReference Include="..\..\..\..\testing\NKeeper.Testing\NKeeper.Testing.csproj" />
   </ItemGroup>
 
+  <!-- The fake WMI helper (docs/architecture.md §7.28). -->
+  <ItemGroup>
+    <None Include="Windows\*.py" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- RPC's NTLM (docs/architecture.md §7.28): .NET's managed NTLM, so Linux needs no GSSAPI module. It's read once, at
+       first use, so it's set for the whole process. -->
+  <ItemGroup>
+    <RuntimeHostConfigurationOption Include="System.Net.Security.UseManagedNtlm" Value="true" />
+  </ItemGroup>
+
 </Project>

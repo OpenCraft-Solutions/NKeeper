@@ -269,6 +269,73 @@ public sealed class HelloPlugin : IPlugin
             }
         });
 
+        // Opens a WMI connection through core (SDK 1.5) and runs each query on it in turn, reporting its rows or why not.
+        use.MapPost("/wmi", async (HostContext host, WindowsProbe? probe, ICredentialBroker broker, IConnectivity connectivity) =>
+        {
+            if (probe is null)
+            {
+                return Results.Text("no probe");
+            }
+
+            try
+            {
+                var handle = probe.CredentialId is { } id ? await broker.ResolveSavedAsync(host, probe.ServiceId, id) : await broker.ResolvePromptAsync(host, probe.ServiceId, probe.PromptReference ?? string.Empty);
+                await using var wmi = await connectivity.OpenWmiAsync(host, probe.ServiceId, handle);
+                var answers = new List<object>();
+                foreach (var wql in probe.Queries ?? [])
+                {
+                    try
+                    {
+                        answers.Add(await wmi.QueryAsync(new WmiQuery(wql) { Limit = probe.Limit, TimeProperty = probe.Since is null ? null : "TimeGenerated", Since = probe.Since }));
+                    }
+                    catch (WmiException ex)
+                    {
+                        answers.Add(new { refused = ex.Message });
+                    }
+                }
+
+                return Results.Json(answers);
+            }
+            catch (ConnectException ex)
+            {
+                return Results.Json(new { reason = ex.Reason.ToString(), message = ex.Message }, statusCode: StatusCodes.Status502BadGateway);
+            }
+        });
+
+        // Binds the endpoint mapper over RPC through core (SDK 1.5) and makes one call per stub, in hex.
+        use.MapPost("/rpc", async (HostContext host, WindowsProbe? probe, ICredentialBroker broker, IConnectivity connectivity) =>
+        {
+            if (probe is null)
+            {
+                return Results.Text("no probe");
+            }
+
+            try
+            {
+                var handle = await broker.ResolveSavedAsync(host, probe.ServiceId, probe.CredentialId ?? Guid.Empty);
+                await using var rpc = await connectivity.OpenRpcAsync(host, probe.ServiceId, handle, RpcInterface.EndpointMapper);
+                var answers = new List<string>();
+                foreach (var call in probe.Queries ?? [])
+                {
+                    var (opnum, stub) = (ushort.Parse(call.Split(':')[0], System.Globalization.CultureInfo.InvariantCulture), Convert.FromHexString(call.Split(':')[1]));
+                    try
+                    {
+                        answers.Add(Convert.ToHexString(await rpc.CallAsync(opnum, stub)));
+                    }
+                    catch (RpcFaultException ex)
+                    {
+                        answers.Add($"fault {ex.Status}");
+                    }
+                }
+
+                return Results.Json(answers);
+            }
+            catch (ConnectException ex)
+            {
+                return Results.Json(new { reason = ex.Reason.ToString(), message = ex.Message }, statusCode: StatusCodes.Status502BadGateway);
+            }
+        });
+
         // Streams a command's output through core (SDK 1.3): reads it all, or with Shell stops it after Expect arrives,
         // then shows the connection still works and the command ended.
         use.MapPost("/stream", async (HostContext host, SshProbe? probe, ICredentialBroker broker, IConnectivity connectivity) =>
@@ -425,6 +492,9 @@ public sealed record DesktopProbe(Guid ServiceId, Guid CredentialId, DesktopProt
 
 /// <summary>Waits for <paramref name="Expect"/> in the terminal, then types <paramref name="Send"/> and Enter.</summary>
 public sealed record TelnetStep(string Expect, string? Send = null);
+
+/// <summary>WMI: the queries to run. RPC: the calls to make, each <c>opnum:hex stub</c>.</summary>
+public sealed record WindowsProbe(Guid ServiceId, Guid? CredentialId = null, string? PromptReference = null, IReadOnlyList<string>? Queries = null, int? Limit = null, DateTimeOffset? Since = null);
 
 public sealed record SshProbe(
     Guid ServiceId,

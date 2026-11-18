@@ -52,6 +52,82 @@ public interface IConnectivity
     /// <exception cref="ConnectException">The connection couldn't be opened; <see cref="ConnectException.Reason"/> says why.</exception>
     Task<ISftpConnection> OpenSftpAsync(HostContext host, Guid serviceId, CredentialHandle handle, CancellationToken cancellationToken = default)
         => throw new NotSupportedException("This server doesn't open SFTP connections: it needs SDK 1.3.");
+
+    /// <summary>
+    /// A WMI connection to one of a Windows host's RPC services (docs/architecture.md §7.28, SDK 1.5): core signs in
+    /// over DCOM with the handle's credential, which needs a password. Not through a jump host.
+    /// </summary>
+    /// <exception cref="CredentialDeniedException">The handle isn't valid here.</exception>
+    /// <exception cref="ConnectException">The connection couldn't be opened; <see cref="ConnectException.Reason"/> says why.</exception>
+    Task<IWmiConnection> OpenWmiAsync(HostContext host, Guid serviceId, CredentialHandle handle, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("This server doesn't open WMI connections: it needs SDK 1.5.");
+
+    /// <summary>
+    /// A DCE/RPC connection to one of a Windows host's RPC services (docs/architecture.md §7.28, SDK 1.5), bound to one
+    /// interface with NTLM sign-in, which needs a password. Not through a jump host.
+    /// </summary>
+    /// <exception cref="CredentialDeniedException">The handle isn't valid here.</exception>
+    /// <exception cref="ConnectException">The connection couldn't be opened; <see cref="ConnectException.Reason"/> says why.</exception>
+    Task<IRpcConnection> OpenRpcAsync(HostContext host, Guid serviceId, CredentialHandle handle, RpcInterface rpcInterface, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("This server doesn't open RPC connections: it needs SDK 1.5.");
+}
+
+/// <summary>
+/// One read-only WQL query (SDK 1.5). Event logs list newest first, so <see cref="TimeProperty"/> and
+/// <see cref="Since"/> read a page without the rest of the log.
+/// </summary>
+/// <param name="Wql">The query, such as <c>SELECT Caption FROM Win32_OperatingSystem</c>.</param>
+public sealed record WmiQuery(string Wql)
+{
+    /// <summary>The most rows a query answers, whatever its <see cref="Limit"/>.</summary>
+    public const int MaxRows = 10_000;
+
+    public string Namespace { get; init; } = "root/cimv2";
+
+    /// <summary>At most this many rows; null for all of them, up to <see cref="MaxRows"/>.</summary>
+    public int? Limit { get; init; }
+
+    /// <summary>A CIM date property (<c>TimeGenerated</c>): reading stops at the first row older than <see cref="Since"/>.</summary>
+    public string? TimeProperty { get; init; }
+
+    public DateTimeOffset? Since { get; init; }
+}
+
+/// <summary>An open WMI connection (SDK 1.5). Disposing it signs out and ends core's helper.</summary>
+public interface IWmiConnection : IAsyncDisposable
+{
+    /// <summary>The query's rows, each a JSON object of property names and values.</summary>
+    /// <exception cref="WmiException">The host refused the query; the connection stays usable.</exception>
+    /// <exception cref="ConnectException">The connection was lost, or the query took too long.</exception>
+    Task<IReadOnlyList<System.Text.Json.JsonElement>> QueryAsync(WmiQuery query, CancellationToken cancellationToken = default);
+}
+
+/// <summary>The host refused a WMI query (SDK 1.5); the message is fit to show the user.</summary>
+public sealed class WmiException(string message) : Exception(message);
+
+/// <summary>A DCE/RPC interface: its UUID and version (SDK 1.5).</summary>
+public sealed record RpcInterface(Guid Id, ushort Major, ushort Minor)
+{
+    /// <summary>The endpoint mapper, e1af8308-5d1f-11c9-91a4-08002b14a0fa v3.0.</summary>
+    public static RpcInterface EndpointMapper { get; } = new(new Guid("e1af8308-5d1f-11c9-91a4-08002b14a0fa"), 3, 0);
+}
+
+/// <summary>An open DCE/RPC connection, bound to one interface (SDK 1.5).</summary>
+public interface IRpcConnection : IAsyncDisposable
+{
+    /// <summary>The most a response's stub may be.</summary>
+    public const int MaxResponseBytes = 4 * 1024 * 1024;
+
+    /// <summary>Calls one operation of the bound interface with an NDR stub; returns the response's stub.</summary>
+    /// <exception cref="RpcFaultException">The server reported a fault.</exception>
+    /// <exception cref="ConnectException">The connection was lost, or the call took too long.</exception>
+    Task<byte[]> CallAsync(ushort opnum, ReadOnlyMemory<byte> stub, CancellationToken cancellationToken = default);
+}
+
+/// <summary>The server answered a call with a fault (SDK 1.5), with its status code when it gave one.</summary>
+public sealed class RpcFaultException(string message, uint? status = null) : Exception(message)
+{
+    public uint? Status { get; } = status;
 }
 
 /// <summary>A terminal's size, from 1 × 1 to 1000 × 1000 (SDK 1.1).</summary>

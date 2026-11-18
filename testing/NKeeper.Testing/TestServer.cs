@@ -68,6 +68,8 @@ public sealed class TestServer : IAsyncDisposable
     /// <summary>Installs the packages, starts the server and waits until it answers.</summary>
     public static async Task<TestServer> StartAsync(TestServerOptions options, CancellationToken cancellationToken = default)
     {
+        // As the real server's runtimeconfig sets it: RPC's NTLM needs no GSSAPI module on Linux (docs/architecture.md §7.28).
+        AppContext.SetSwitch("System.Net.Security.UseManagedNtlm", true);
         ArgumentNullException.ThrowIfNull(options);
         var serverDll = LocateServer();
 
