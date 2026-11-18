@@ -347,11 +347,82 @@ internal sealed class SshConnection(SshClient client, ForwardedPortLocal? forwar
         return Task.FromResult<ISshCommand>(new StreamingCommand(client.CreateCommand(command)));
     }
 
+    /// <summary>A port of the loopback forwarded through this connection, with a stream connected to it (SDK 1.11).</summary>
+    public async Task<ITcpConnection> ForwardAsync(string address, int port, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(address);
+        ArgumentOutOfRangeException.ThrowIfLessThan(port, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(port, 65535);
+        var forwarded = new ForwardedPortLocal("127.0.0.1", 0, address, (uint)port);
+        var tcp = new TcpClient();
+        try
+        {
+            try
+            {
+                client.AddForwardedPort(forwarded);
+                forwarded.Start();
+            }
+            catch (Exception ex) when (ex is SshException or SocketException or InvalidOperationException)
+            {
+                throw new ConnectException(ConnectFailure.Unreachable, $"The SSH server wouldn't forward to {address}:{port}. It must allow TCP forwarding.");
+            }
+
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(15));
+            await tcp.ConnectAsync("127.0.0.1", (int)forwarded.BoundPort, timeout.Token);
+            return new ForwardedConnection(tcp, forwarded, client, address, port);
+        }
+        catch (Exception ex) when (ex is not ConnectException and (SocketException or OperationCanceledException) && !cancellationToken.IsCancellationRequested)
+        {
+            tcp.Dispose();
+            Stop(forwarded, client);
+            throw new ConnectException(ConnectFailure.Unreachable, $"Couldn't forward to {address}:{port} through the SSH server.");
+        }
+        catch
+        {
+            tcp.Dispose();
+            Stop(forwarded, client);
+            throw;
+        }
+    }
+
+    internal static void Stop(ForwardedPortLocal forwarded, SshClient client)
+    {
+        try
+        {
+            forwarded.Stop();
+            client.RemoveForwardedPort(forwarded);
+        }
+        catch (Exception ex) when (ex is ObjectDisposedException or SshException or InvalidOperationException)
+        {
+            // The connection is closing anyway.
+        }
+
+        forwarded.Dispose();
+    }
+
     public ValueTask DisposeAsync()
     {
         client.Dispose();
         SshConnectivity.Close(forward, jump);
         return ValueTask.CompletedTask;
+    }
+}
+
+/// <summary>A stream through an SSH port forward (SDK 1.11). Disposing it closes the stream and the forward.</summary>
+internal sealed class ForwardedConnection(TcpClient tcp, ForwardedPortLocal forwarded, SshClient client, string address, int port) : ITcpConnection
+{
+    public Stream Stream { get; } = tcp.GetStream();
+
+    public string Address => address;
+
+    public int Port => port;
+
+    public async ValueTask DisposeAsync()
+    {
+        await Stream.DisposeAsync();
+        tcp.Dispose();
+        SshConnection.Stop(forwarded, client);
     }
 }
 

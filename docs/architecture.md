@@ -467,7 +467,13 @@ The connection doesn't need its handle once it's open; the plugin disposes it, w
 - `OpenReadAsync(path)` and `OpenWriteAsync(path, overwrite)`: streams. Without `overwrite`, writing to a file that exists is refused;
 - `CreateDirectoryAsync`, `DeleteFileAsync`, `DeleteDirectoryAsync` (an empty one) and `RenameAsync`.
 
-Paths are absolute: the plugin resolves anything relative against `HomeDirectory`. A failure is an `SftpException` with a reason the plugin can show: `NotFound`, `PermissionDenied`, `AlreadyExists`, `ConnectionLost` or `Failed`, with a message naming the path. A stream's own failures are `IOException`s. Port forwards join with their first user.
+Paths are absolute: the plugin resolves anything relative against `HomeDirectory`. A failure is an `SftpException` with a reason the plugin can show: `NotFound`, `PermissionDenied`, `AlreadyExists`, `ConnectionLost` or `Failed`, with a message naming the path. A stream's own failures are `IOException`s.
+
+**Port forwards (SDK 1.11).** `ISshConnection.ForwardAsync(address, port)` opens a TCP connection from the SSH server to `address:port`, as `ssh -L` does, and gives the plugin its stream. Its first user is the kvm plugin, whose VMs' consoles listen on the hypervisor's own loopback (§7.36):
+- the far end is as the SSH server sees it, so `127.0.0.1` is the SSH server itself;
+- core forwards a loopback port of its own to it, as for a jump host (§7.8), and connects the plugin's stream to that; the port is closed with the stream;
+- the SSH server must allow TCP forwarding. A far end where nothing listens isn't known until the server tries it, so the stream then ends at once, as `ssh -L` does;
+- it rides on the plugin's connection, so it adds no sign-in and no audit of its own; disposing the connection closes its forwards.
 
 **Failures.** Opening throws `ConnectException` with a `ConnectFailure` the plugin can show or act on. Every kind of connection core opens (SSH here, HTTP in §7.16, desktops in §7.20) throws the same exception, with the reasons that apply to it. For SSH:
 - `HostKeyUnknown`, with the presented identity, and `HostKeyChanged` (§7.7). A `PresentedIdentity` names the host and service that presented it, its kind (`SshHostKey` or `TlsCertificate`), algorithm and fingerprint, and for a certificate its subject and expiry. As JSON it's the frontend SDK's `TrustPrompt`, so a plugin endpoint can return it for its view to pass to `confirmTrust` (§7.14);

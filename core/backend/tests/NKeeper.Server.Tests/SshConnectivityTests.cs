@@ -43,6 +43,22 @@ public sealed class SshConnectivityTests(PostgresFixture postgres, SshServerFixt
     }
 
     [Fact]
+    public async Task A_port_on_the_ssh_servers_loopback_is_forwarded_and_one_where_nothing_listens_ends_at_once()
+    {
+        await using var server = await ServerAsync();
+        using var admin = await server.SignedInClientAsync();
+        var host = await CreateTrustedHostAsync(admin, Credential(password: SshServerFixture.Password));
+
+        // The SSH server's own sshd, reached from inside it (SDK 1.11): it greets first.
+        var forwarded = await SshAsync(admin, host, new { serviceId = ServiceId(host), credentialId = CredentialId(host, 0), forwardPort = SshServerFixture.InnerPort });
+        Assert.StartsWith("SSH-2.0-", forwarded.GetProperty("forwarded").GetString(), StringComparison.Ordinal);
+        Assert.Equal(("127.0.0.1", SshServerFixture.InnerPort), (forwarded.GetProperty("address").GetString(), forwarded.GetProperty("port").GetInt32()));
+
+        var nothing = await SshAsync(admin, host, new { serviceId = ServiceId(host), credentialId = CredentialId(host, 0), forwardPort = 1 });
+        Assert.Equal(string.Empty, nothing.GetProperty("forwarded").GetString());
+    }
+
+    [Fact]
     public async Task An_unknown_key_is_presented_then_trusted_through_core_and_the_command_runs()
     {
         await using var server = await ServerAsync();

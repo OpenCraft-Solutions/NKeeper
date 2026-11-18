@@ -160,6 +160,16 @@ public sealed class HelloPlugin : IPlugin
                 await using var ssh = probe.Port is { } port
                     ? await connectivity.OpenSshAsync(host, probe.ServiceId, handle, port)
                     : await connectivity.OpenSshAsync(host, probe.ServiceId, handle);
+                if (probe.ForwardPort is { } forwardPort)
+                {
+                    // A port on the SSH server's own loopback, forwarded (SDK 1.11): what answers there first.
+                    await using var forwarded = await ssh.ForwardAsync("127.0.0.1", forwardPort);
+                    var greeting = new byte[256];
+                    using var waiting = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                    var got = await forwarded.Stream.ReadAsync(greeting, waiting.Token);
+                    return Results.Json(new { forwarded = System.Text.Encoding.ASCII.GetString(greeting, 0, got), address = forwarded.Address, port = forwarded.Port });
+                }
+
                 if (!probe.Shell)
                 {
                     var result = await ssh.RunAsync(probe.Command ?? "true");
@@ -669,7 +679,8 @@ public sealed record SshProbe(
     string? Command = null,
     bool Shell = false,
     string? Expect = null,
-    int? Port = null);
+    int? Port = null,
+    int? ForwardPort = null);
 
 /// <summary>Contributes the service type <c>hello</c> whatever its own ID: the host must refuse it when <c>hello</c> is taken.</summary>
 public sealed class DuplicateServiceTypePlugin : IPlugin
