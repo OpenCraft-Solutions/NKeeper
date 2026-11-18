@@ -957,7 +957,7 @@ var response = await rpc.CallAsync(opnum: 2, stub);
 
 **RPC (`OpenRpcAsync`).**
 - 1.x's `RpcClient`, ported: connection-oriented DCE/RPC over TCP (`ncacn_ip_tcp`), to the service's address and port (135 by default).
-- It binds one interface (its UUID and version), authenticating with NTLM at the "connect" level. That proves the login at bind time, but doesn't sign or encrypt the calls, as in 1.x.
+- It binds one interface (its UUID and version), authenticating with NTLM at the "connect" level. On Linux it uses .NET's managed NTLM (`System.Net.Security.UseManagedNtlm`), which needs no GSSAPI module. That proves the login at bind time, but doesn't sign or encrypt the calls, as in 1.x.
 - `CallAsync(opnum, stub)` sends opaque NDR stubs, in fragments when large, and returns the response's stub. A fault throws `RpcFaultException` with the server's status. A response is at most 4 MB, and a call takes at most 30 seconds.
 
 **Both:**

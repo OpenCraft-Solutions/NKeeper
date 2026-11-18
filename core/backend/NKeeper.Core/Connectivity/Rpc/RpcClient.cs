@@ -23,6 +23,10 @@ internal sealed class RpcClient : IAsyncDisposable
 {
     public const int EndpointMapperPort = 135;
 
+    // On Linux, .NET's NTLM otherwise needs GSSAPI's NTLM module (gss-ntlmssp), which servers rarely have. Its own
+    // managed NTLM needs nothing; it's read when NTLM is first used, so it's set before any bind.
+    static RpcClient() => AppContext.SetSwitch("System.Net.Security.UseManagedNtlm", true);
+
     private const byte PtypeRequest = 0, PtypeResponse = 2, PtypeFault = 3, PtypeBind = 11, PtypeBindAck = 12, PtypeBindNak = 13, PtypeAuth3 = 16;
     private const byte FlagFirst = 0x01, FlagLast = 0x02;
     private const byte AuthTypeWinNt = 10, AuthLevelConnect = 2;
