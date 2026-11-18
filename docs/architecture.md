@@ -469,7 +469,7 @@ The connection doesn't need its handle once it's open; the plugin disposes it, w
 
 Paths are absolute: the plugin resolves anything relative against `HomeDirectory`. A failure is an `SftpException` with a reason the plugin can show: `NotFound`, `PermissionDenied`, `AlreadyExists`, `ConnectionLost` or `Failed`, with a message naming the path. A stream's own failures are `IOException`s.
 
-**Port forwards (SDK 1.11).** `ISshConnection.ForwardAsync(address, port)` opens a TCP connection from the SSH server to `address:port`, as `ssh -L` does, and gives the plugin its stream. Its first user is the kvm plugin, whose VMs' consoles listen on the hypervisor's own loopback (§7.36):
+**Port forwards (SDK 1.11).** `ISshConnection.ForwardAsync(address, port)` opens a TCP connection from the SSH server to `address:port`, as `ssh -L` does, and gives the plugin its stream. Its first user is the kvm plugin, whose VMs' consoles listen on the hypervisor's own loopback (§7.37):
 - the far end is as the SSH server sees it, so `127.0.0.1` is the SSH server itself;
 - core forwards a loopback port of its own to it, as for a jump host (§7.8), and connects the plugin's stream to that; the port is closed with the stream;
 - the SSH server must allow TCP forwarding. A far end where nothing listens isn't known until the server tries it, so the stream then ends at once, as `ssh -L` does;
@@ -1130,6 +1130,32 @@ SAP (Sybase) ASE, ported from 1.x's `Ase/`, in its own repository, `NKeeper-Plug
 - **The dialect**, ported from 1.x: batches split at `GO` as SQL Server's, `PRINT` and the server's messages under Messages, the explorer from each database's system tables, scripts from `syscomments` and `syscolumns`, the blocking chains from `master..sysprocesses` (with the sessions' SQL from `monProcessSQLText` when the login has `mon_role` and monitoring is on), and `kill`. Its driver's errors aren't `DbException`s, which its dialect says (`IsServerError`).
 - **Not yet:** Replication Server (1.x's `rs`, on the same protocol), 1.x's Management reports (Space, Replication Drift, Backups, Error Log, Resources, Logins, Maintenance, License), Copy Database and the insurance survey.
 
+### 7.36 The `virt-core` plugin
+
+What the hypervisor plugins (KVM, later Proxmox) share, ported from 1.x's `Kvm/` and its console views, in its own repository, `NKeeper-Plugin-VirtCore` (§9), on SDK 1.8 (`>=1.8.0 <2.0.0`). It's v2-plan.md's other sub-registry, built as db-core is (§7.32): it contributes nothing itself, and each hypervisor plugin depends on it.
+
+**Who owns what.**
+- **A hypervisor plugin** (`kvm`, say) contributes a session type on the service it reaches the hypervisor by, and a host action that opens it. Its handler is virt-core's `GuestSessionHandler<TProvider>`, registered with `services.AddGuestProvider<TProvider>()`. Its `IGuestProvider` connects to the hypervisor through core and gives an `IGuestConnection`: the guests, their power actions, and a guest's console as a stream.
+- **virt-core** runs the session and draws the tab. Its assembly, `NKeeper.Plugins.Virtualization`, is exported and published as a NuGet package of the same name; its frontend exports `GuestsView` (§5).
+
+**The session** is one stream session (§7.10) on the hypervisor, speaking the linux plugin's request protocol (§7.25):
+- `list`: the guests, each with its ID, name, state, console protocol (`vnc`, `spice` or none) and the power actions it takes now;
+- `power` `{ guest, action }`: one of the provider's actions, such as start, shut down, reboot or force off. It's audited as `<plugin>.power`, with the guest's name;
+- `console` `{ guest }`: opens the guest's console. The reply gives its protocol, and its password when the hypervisor has one for it (a VM's display password, which the browser's console client needs, as in 1.x; never a user's credential). From then on the session's binary frames carry the console's bytes both ways, until `console.close` or the console ends (`consoleClosed`). One console at a time per tab.
+
+**The tab** is 1.x's VM list: the guests with their state and power buttons (asking first for those that cut a guest off), and a guest's console in the same tab, with noVNC for VNC.
+
+**Not yet:** SPICE in the browser (1.x's vendored spice-html5 needs a socket of its own), the VM capacity report, guests' tasks, and linking a guest to its host in the inventory, which needs a host's "runs on" in core (v2-plan.md §5).
+
+### 7.37 The `kvm` plugin
+
+KVM hypervisors, the way virt-manager reaches them, ported from 1.x's `KvmHost`, in its own repository, `NKeeper-Plugin-KVM` (§9), on SDK 1.11 (`>=1.11.0 <2.0.0`). It's a guest provider for virt-core (§7.36), which it depends on.
+
+- **The guests tab** (session type `kvm`, host action `kvm.guests`) opens on the host's SSH service (the `ssh` plugin's service type), with the service's credential (§7.9). It runs `virsh -c qemu:///system`, so the SSH user needs access to it (the `libvirt` group, say).
+- **Guests:** `virsh list --all`, with each one's name, state and display. Power: start, shut down, reboot, pause, resume, hibernate (a managed save), force off (`destroy`) and reset, as 1.x offered.
+- **Consoles:** `virsh domdisplay` gives the display's address on the hypervisor, usually its loopback; the plugin reaches it through an SSH port forward (§7.9, SDK 1.11). A display on every address is reached on the loopback too. A SPICE display that only takes TLS isn't supported, as in 1.x.
+- **Not yet:** SPICE consoles (virt-core), and Proxmox nodes, which 1.x detected on the same SSH service: they come with the `proxmox` plugin.
+
 ## 8. The native install
 
 `deploy/setup.sh` installs NKeeper on a Linux server, from a checkout of the repository, as root. It's an early version of the Phase 6 installer (v2-plan.md §8). NKeeper installs natively only (D8): systemd, nginx and PostgreSQL, no containers.
@@ -1197,7 +1223,7 @@ Each official plugin lives in a repository of its own and is released on its own
 
 **Repositories,** all under `OpenCraft-Solutions`:
 - `NKeeper`, this one: the server, the shell, the SDK, the plugin tooling, the test helpers and the installer.
-- `NKeeper-Plugin-<Name>` for each official plugin: `NKeeper-Plugin-SSH`, `NKeeper-Plugin-Web`, `NKeeper-Plugin-Desktop`, `NKeeper-Plugin-WakeOnLan`, and each new one (`NKeeper-Plugin-Telnet`, `NKeeper-Plugin-VNC`, `NKeeper-Plugin-Linux`, `NKeeper-Plugin-Storage`, `NKeeper-Plugin-Windows`, `NKeeper-Plugin-iDRAC`, `NKeeper-Plugin-DbCore`, `NKeeper-Plugin-MSSQL`, `NKeeper-Plugin-Oracle`, `NKeeper-Plugin-ASE`…). A plugin's ID doesn't change when it moves.
+- `NKeeper-Plugin-<Name>` for each official plugin: `NKeeper-Plugin-SSH`, `NKeeper-Plugin-Web`, `NKeeper-Plugin-Desktop`, `NKeeper-Plugin-WakeOnLan`, and each new one (`NKeeper-Plugin-Telnet`, `NKeeper-Plugin-VNC`, `NKeeper-Plugin-Linux`, `NKeeper-Plugin-Storage`, `NKeeper-Plugin-Windows`, `NKeeper-Plugin-iDRAC`, `NKeeper-Plugin-DbCore`, `NKeeper-Plugin-MSSQL`, `NKeeper-Plugin-Oracle`, `NKeeper-Plugin-ASE`, `NKeeper-Plugin-VirtCore`, `NKeeper-Plugin-KVM`…). A plugin's ID doesn't change when it moves.
 - A plugin repository holds the plugin's backend, frontend, manifest and tests, and its own CI and release workflow. It references nothing of core's but the published packages below.
 
 **What core publishes,** to GitHub Packages under `OpenCraft-Solutions`, versioned with the SDK (§4) and released from this repository by a tag, `sdk-v<version>`:
