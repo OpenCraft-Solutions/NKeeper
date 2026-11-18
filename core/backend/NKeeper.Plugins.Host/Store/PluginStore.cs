@@ -38,6 +38,7 @@ public sealed partial class PluginStore(string pluginDirectory, Uri catalogUrl, 
     private Catalog? _catalog;
     private CatalogResolver? _resolver;
     private readonly Dictionary<string, CatalogPluginStatus> _resolved = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _upgradingFor = new(StringComparer.Ordinal);
 
     public async Task<Catalog> CatalogAsync(CancellationToken cancellationToken)
     {
@@ -92,7 +93,7 @@ public sealed partial class PluginStore(string pluginDirectory, Uri catalogUrl, 
             statuses.Add(await ResolveAsync(entry, cancellationToken));
         }
 
-        return statuses;
+        return CatalogCompatibility.Apply(statuses, InstalledManifests().ToDictionary(m => m.Id, StringComparer.Ordinal));
     }
 
     /// <summary>Installs catalogued plugins by ID (<c>install</c>), each with the plugins it depends on that aren't installed.</summary>
@@ -113,7 +114,10 @@ public sealed partial class PluginStore(string pluginDirectory, Uri catalogUrl, 
         var catalog = await CatalogAsync(cancellationToken);
         var installed = Installed();
         var outcomes = new List<InstallOutcome>();
-        var targets = ids.Count > 0 ? ids : catalog.Entries.Select(e => e.Id).Where(installed.ContainsKey).ToList();
+        // Dependants first: each brings the shared plugin it needs along, which alone their old ranges would refuse (§9.2).
+        var dependants = InstalledManifests().Where(m => m.DependsOn.Count > 0).Select(m => m.Id).ToHashSet(StringComparer.Ordinal);
+        var targets = (ids.Count > 0 ? ids : catalog.Entries.Select(e => e.Id).Where(installed.ContainsKey))
+            .OrderBy(id => dependants.Contains(id) ? 0 : 1).ToList();
         foreach (var id in targets)
         {
             if (!installed.ContainsKey(id))
@@ -204,12 +208,37 @@ public sealed partial class PluginStore(string pluginDirectory, Uri catalogUrl, 
         }
 
         var installed = Installed();
-        foreach (var dependency in candidate.DependsOn.Where(d => !installed.ContainsKey(d)))
+        var outOfRange = candidate.Ranges.Where(r => installed.TryGetValue(r.Key, out var v) && VersionRange.TryParse(r.Value, out var range) && !range.Includes(v)).Select(r => r.Key);
+        foreach (var dependency in candidate.DependsOn.Where(d => !installed.ContainsKey(d)).Concat(outOfRange).Distinct(StringComparer.Ordinal))
         {
+            // Upgraded for this plugin, which is installed right after it, so this plugin's old range doesn't hold it back.
+            _upgradingFor[dependency] = id;
             await InstallAsync(dependency, null, outcomes, visiting, cancellationToken);
             if (outcomes.LastOrDefault(o => o.Id == dependency) is not { Result: InstallResult.Installed or InstallResult.Upgraded })
             {
                 outcomes.Add(new InstallOutcome(id, candidate.Version, InstallResult.Failed, $"{id} needs {dependency}, which couldn't be installed."));
+                return;
+            }
+        }
+
+        // §9.2: never move a shared plugin out of an installed dependant's range, except the one it's upgraded for.
+        var newVersion = SemanticVersion.Parse(candidate.Version);
+        _upgradingFor.TryGetValue(id, out var upgradingFor);
+        var followUps = new List<string>();
+        if (installed.ContainsKey(id))
+        {
+            foreach (var blocking in InstalledManifests().Where(m => m.Id != id && m.Id != upgradingFor && !CatalogCompatibility.Accepts(m, id, newVersion)))
+            {
+                // Upgraded in the same run when it has a release that accepts the new version; otherwise nothing moves.
+                if (upgradingFor is not null && catalog.Find(blocking.Id) is { } blockingEntry
+                    && (await ResolveAsync(blockingEntry, cancellationToken)).Available is { } fix
+                    && (!fix.Ranges.TryGetValue(id, out var range) || (VersionRange.TryParse(range, out var parsed) && parsed.Includes(newVersion))))
+                {
+                    followUps.Add(blocking.Id);
+                    continue;
+                }
+
+                outcomes.Add(new InstallOutcome(id, candidate.Version, InstallResult.Failed, $"{blocking.Id} {blocking.Version.Text} doesn't accept {id} {candidate.Version}; upgrade {blocking.Id} first."));
                 return;
             }
         }
@@ -235,6 +264,10 @@ public sealed partial class PluginStore(string pluginDirectory, Uri catalogUrl, 
             candidate.Version,
             upgraded ? InstallResult.Upgraded : InstallResult.Installed,
             upgraded ? $"{id} upgraded from {status.InstalledVersion} to {candidate.Version}." : $"{id} {candidate.Version} installed."));
+        foreach (var followUp in followUps)
+        {
+            await InstallAsync(followUp, null, outcomes, visiting, cancellationToken);
+        }
     }
 
     private async Task<CatalogPluginStatus> ResolveAsync(CatalogEntry entry, CancellationToken cancellationToken)

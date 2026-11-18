@@ -161,6 +161,9 @@ internal sealed class PluginCatalogService(
                 }
             }
 
+            // §9.2: offers that would break an installed plugin are withdrawn, and say what to upgrade first.
+            var compatible = CatalogCompatibility.Apply([.. listings.Select(l => l.Status)], plugins.Manifests).ToDictionary(s => s.Id, StringComparer.Ordinal);
+            listings = [.. listings.Select(l => l with { Status = compatible[l.Status.Id] })];
             _snapshot = new Snapshot(time.GetUtcNow(), sources, listings, conflicts);
             logger.LogInformation("Refreshed {Catalogs} plugin catalog(s): {Count} plugins, {Offered} installable.", sources.Count, listings.Count, listings.Count(l => l.Status.Available is not null));
         }

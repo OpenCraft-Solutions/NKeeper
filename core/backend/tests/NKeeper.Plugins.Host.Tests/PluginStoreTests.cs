@@ -280,6 +280,40 @@ public sealed class PluginStoreTests : IDisposable
         Assert.Contains(_scenario.Audit.Events, e => e.Action == "plugin.disabled" && e.Target == "oracle" && e.Detail.Contains("which needs db-core", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task A_shared_plugins_new_major_waits_for_its_dependants_and_comes_along_with_them()
+    {
+        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "db-core"));
+        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "mssql", dependsOn: [("db-core", ">=1.0.0 <2.0.0")]));
+        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "oracle", dependsOn: [("db-core", ">=1.0.0 <2.0.0")]));
+        Publish(TestPlugins.Package(_scenario.OfficialKey, id: "db-core", version: "2.0.0"));
+        Publish(TestPlugins.Package(_scenario.OfficialKey, id: "mssql", version: "2.0.0", dependsOn: [("db-core", ">=2.0.0 <3.0.0")]));
+        PublishCatalog(("db-core", "o/db-core"), ("mssql", "o/mssql"), ("oracle", "o/oracle"));
+
+        var statuses = (await Store().UpdateAsync(Ct)).ToDictionary(s => s.Id);
+
+        // oracle has no release for db-core 2 yet: neither db-core 2 nor mssql 2 can be installed without breaking it.
+        Assert.Equal(CatalogCompatibility.DependantsIncompatible, statuses["db-core"].ReasonCode);
+        Assert.Contains("oracle", statuses["db-core"].Message, StringComparison.Ordinal);
+        Assert.Equal(CatalogCompatibility.DependencyUnavailable, statuses["mssql"].ReasonCode);
+        Assert.Contains("oracle doesn't accept", statuses["mssql"].Message, StringComparison.Ordinal);
+        Assert.Equal(InstallResult.Failed, Assert.Single(await Store().UpgradeAsync(["db-core"], Ct), o => o.Id == "db-core").Result);
+
+        Publish(TestPlugins.Package(_scenario.OfficialKey, id: "oracle", version: "2.0.0", dependsOn: [("db-core", ">=2.0.0 <3.0.0")]));
+        statuses = (await Store().UpdateAsync(Ct)).ToDictionary(s => s.Id);
+        Assert.Contains("Upgrade mssql to 2.0.0", statuses["db-core"].Message, StringComparison.Ordinal);
+        Assert.Equal("2.0.0", statuses["mssql"].Available?.Version);
+
+        // Upgrading mssql alone brings db-core 2, and oracle 2 with it, in one run.
+        var outcomes = await Store().UpgradeAsync(["mssql"], Ct);
+
+        Assert.All(outcomes, o => Assert.Equal(InstallResult.Upgraded, o.Result));
+        Assert.Equal(
+            ["db-core-2.0.0.nkp", "mssql-2.0.0.nkp", "oracle-2.0.0.nkp"],
+            Directory.GetFiles(_scenario.Options.Directory, "*.nkp").Select(Path.GetFileName).Order(StringComparer.Ordinal));
+        Assert.Equal(["db-core", "mssql", "oracle"], (await _scenario.LoadAsync()).Loaded.Select(p => p.Manifest.Id));
+    }
+
     [Theory]
     [InlineData("kvm-1.0.0.nkp", "kvm", "1.0.0")]
     [InlineData("virt-core-1.2.0.nkp", "virt-core", "1.2.0")]

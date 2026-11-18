@@ -5,6 +5,7 @@ using NKeeper.Plugins.Packaging;
 namespace NKeeper.Plugins.Host.Store;
 
 /// <summary>A catalogued plugin's newest installable release, verified as it would be at load.</summary>
+/// <param name="Ranges">The range of each plugin it depends on, by ID (docs/architecture.md §9.2).</param>
 public sealed record CatalogCandidate(
     string Id,
     string Name,
@@ -13,7 +14,8 @@ public sealed record CatalogCandidate(
     string KeyId,
     bool BuiltIn,
     IReadOnlyList<string> DependsOn,
-    Uri Package);
+    Uri Package,
+    IReadOnlyDictionary<string, string> Ranges);
 
 /// <summary>What a refresh found for one catalogued plugin (docs/architecture.md §9.1).</summary>
 /// <param name="Available">The newest installable release newer than the installed one; null when there is none.</param>
@@ -151,6 +153,7 @@ public sealed class CatalogResolver(IPluginReleaseSource source, VerificationCon
             verification.KeyId!,
             manifest.BuiltIn,
             [.. manifest.DependsOn.Select(d => d.Id)],
-            release.Package), null);
+            release.Package,
+            manifest.DependsOn.GroupBy(d => d.Id).ToDictionary(g => g.Key, g => string.Join(' ', g.Select(d => d.Version.Text)), StringComparer.Ordinal)), null);
     }
 }
