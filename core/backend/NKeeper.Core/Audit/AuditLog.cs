@@ -70,10 +70,10 @@ public static class AuditActions
     public const string PluginTrustRequested = "plugin.trust_requested";
 
     /// <summary>Root's helper trusted a third-party key.</summary>
-    public const string PluginKeyTrusted = "plugin.key_trusted";
+    public const string PluginSignerTrusted = "plugin.signer_trusted";
 
     /// <summary>Root's helper stopped trusting a third-party key.</summary>
-    public const string PluginKeyUntrusted = "plugin.key_untrusted";
+    public const string PluginSignerUntrusted = "plugin.signer_untrusted";
 }
 
 /// <summary>

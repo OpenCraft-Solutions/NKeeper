@@ -256,7 +256,7 @@ describe('App', () => {
 
   it('shows the plugin catalog’s updates and new plugins, and asks root’s helper to install one', async () => {
     const candidate = (id: string, version: string) => ({ id, name: id.toUpperCase(), version, packageSha256: 'a'.repeat(64), keyId: 'k', builtIn: true, dependsOn: [] as string[] })
-    const listing = (status: object, catalog = 'https://catalog.test/catalog.json') => ({ catalog, official: catalog.startsWith('https://catalog.test'), status })
+    const listing = (status: object, catalog = 'https://catalog.test/catalog.json') => ({ catalog, official: catalog === 'https://catalog.test/catalog.json', status })
     const admin = {
       ...ADMIN_PLUGINS,
       plugins: [
