@@ -82,11 +82,16 @@ function resolve(action: Catalog['actions'][number], host: Host, catalog: Catalo
  * A host's menu (docs/architecture.md §7.12): for each action, one group per service it applies to; with a
  * credential required, an entry per saved credential used with the service, and one to type a credential.
  * A session action whose session type has no view, or can't go through the host's jump host, offers nothing.
+ * With `scans`, it's the Scan dialog's choices instead: the scan actions, in the same shape.
  * Run actions run a plugin's endpoint instead.
  */
-export function connectMenu(host: Host, catalog: Catalog): ConnectGroup[] {
+export function connectMenu(host: Host, catalog: Catalog, scans = false): ConnectGroup[] {
   const groups: ConnectGroup[] = []
   for (const action of catalog.actions) {
+    // Scans (§7.26) are offered in the Scan dialog, with the same entries, never in the menu.
+    if (!!action.scan !== scans) {
+      continue
+    }
     const resolved = resolve(action, host, catalog)
     if (!resolved) {
       continue

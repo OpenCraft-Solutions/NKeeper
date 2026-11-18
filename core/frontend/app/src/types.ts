@@ -53,6 +53,8 @@ export interface HostActionInfo {
   /** For a run action: the service types it applies to. */
   serviceTypes: string[]
   credential: 'required' | 'none'
+  /** For a run action: a scan (docs/architecture.md §7.26), offered in the Scan dialog instead of the menu. */
+  scan: boolean
 }
 
 export interface HostTag {
@@ -107,6 +109,12 @@ export interface Host {
   hostname: string | null
   ipAddress: string | null
   description: string | null
+  /** Hardware (docs/architecture.md §7.1). */
+  macAddress: string | null
+  cpuCores: number | null
+  memoryMiB: number | null
+  serialNumber: string | null
+  isVirtualMachine: boolean
   tags: HostTag[]
   services: HostService[]
   credentials: HostCredential[]
@@ -128,4 +136,20 @@ export interface ServiceHealth {
   /** For a TLS probe that completed its handshake. */
   certificateSubject?: string | null
   certificateExpiresAtUtc?: string | null
+}
+
+/** What a scan found (docs/architecture.md §7.26): a scan action's answer. Every field is optional. */
+export interface ScanFindings {
+  hostname?: string | null
+  ipAddress?: string | null
+  macAddress?: string | null
+  operatingSystem?: string | null
+  cpuCores?: number | null
+  memoryMiB?: number | null
+  serialNumber?: string | null
+  virtualization?: string | null
+  ports?: { port: number; name?: string | null; serviceType?: string | null }[]
+  users?: { username: string; fullName?: string | null }[]
+  neighbors?: { ipAddress: string; macAddress?: string | null }[]
+  notes?: string[]
 }

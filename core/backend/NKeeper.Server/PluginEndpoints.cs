@@ -32,7 +32,8 @@ public sealed record PluginStatusResponse(
 /// <param name="SessionType">For an action that opens a session; null for a run action.</param>
 /// <param name="Endpoint">For a run action: its path in the plugin's host group; null otherwise.</param>
 /// <param name="ServiceTypes">For a run action, the service types it applies to; empty for a session action.</param>
-public sealed record HostActionResponse(string Id, string Label, string? SessionType, string? Endpoint, IReadOnlyList<string> ServiceTypes, HostActionCredential Credential);
+/// <param name="Scan">For a run action: whether it's a scan (§7.26), offered in the Scan dialog.</param>
+public sealed record HostActionResponse(string Id, string Label, string? SessionType, string? Endpoint, IReadOnlyList<string> ServiceTypes, HostActionCredential Credential, bool Scan);
 
 /// <summary>A session type: what it is called, and the service types it opens on.</summary>
 public sealed record SessionTypeResponse(string Id, string Label, IReadOnlyList<string> ServiceTypes, bool SupportsJumpHost);
@@ -114,7 +115,7 @@ internal static class PluginEndpoints
                     entry is null ? null : Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(loaded!.Files[entry].Span)),
                     loaded is null ? null : [.. plugins.ServiceTypes.Where(t => t.PluginId == s.Id).Select(t => ServiceTypeResponse.From(t.Type))],
                     loaded is null ? null : [.. plugins.SessionTypes.Where(t => t.PluginId == s.Id).Select(t => new SessionTypeResponse(t.Type.Id, t.Type.Label, t.Type.ServiceTypes, t.Type.SupportsJumpHost))],
-                    loaded is null ? null : [.. plugins.HostActions.Where(a => a.PluginId == s.Id).Select(a => new HostActionResponse(a.Action.Id, a.Action.Label, a.Action.SessionType, a.Action.Endpoint, a.Action.ServiceTypes, a.Action.Credential))]);
+                    loaded is null ? null : [.. plugins.HostActions.Where(a => a.PluginId == s.Id).Select(a => new HostActionResponse(a.Action.Id, a.Action.Label, a.Action.SessionType, a.Action.Endpoint, a.Action.ServiceTypes, a.Action.Credential, a.Action.Scan))]);
             })
             .ToList());
 

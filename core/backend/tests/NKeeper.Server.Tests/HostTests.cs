@@ -64,6 +64,42 @@ public sealed class HostTests(PostgresFixture postgres) : IClassFixture<Postgres
         Assert.Equal([new Tag("Env", "Prod"), new Tag("env", "test")], host.Tags);
     }
 
+    [Fact]
+    public async Task Hardware_is_kept_with_the_mac_address_tidied()
+    {
+        await using var server = new ServerScenario(await postgres.CreateDatabaseAsync());
+        using var admin = await server.SignedInClientAsync();
+
+        using var response = await admin.SendWithTokenAsync(HttpMethod.Post, "/api/hosts", new
+        {
+            name = "db01",
+            ipAddress = "192.0.2.20",
+            macAddress = " aa-bb-cc-0d-0e-0f ",
+            cpuCores = 16,
+            memoryMiB = 65536,
+            serialNumber = " ABC1234 ",
+            isVirtualMachine = true,
+        });
+        var host = await response.Content.ReadFromJsonAsync<JsonElement>(Token);
+
+        Assert.Equal("AA:BB:CC:0D:0E:0F", host.GetProperty("macAddress").GetString());
+        Assert.Equal(16, host.GetProperty("cpuCores").GetInt32());
+        Assert.Equal(65536, host.GetProperty("memoryMiB").GetInt32());
+        Assert.Equal("ABC1234", host.GetProperty("serialNumber").GetString());
+        Assert.True(host.GetProperty("isVirtualMachine").GetBoolean());
+
+        // An edit that leaves them out clears them, as for every other field.
+        using var cleared = await admin.SendWithTokenAsync(HttpMethod.Put, $"/api/hosts/{host.GetProperty("id").GetGuid()}", new
+        {
+            name = "db01",
+            ipAddress = "192.0.2.20",
+            version = host.GetProperty("version").GetUInt32(),
+        });
+        var after = await cleared.Content.ReadFromJsonAsync<JsonElement>(Token);
+        Assert.Equal(JsonValueKind.Null, after.GetProperty("macAddress").ValueKind);
+        Assert.False(after.GetProperty("isVirtualMachine").GetBoolean());
+    }
+
     [Theory]
     [InlineData("""{"hostname":"web01.example.com"}""", "name")]
     [InlineData("""{"name":"web01"}""", "hostname")]
@@ -73,6 +109,10 @@ public sealed class HostTests(PostgresFixture postgres) : IClassFixture<Postgres
     [InlineData("""{"name":"web01","ipAddress":"192.0.2.10","tags":[{"name":"env:prod"}]}""", "tags[0].name")]
     [InlineData("""{"name":"web01","ipAddress":"192.0.2.10","tags":[{"name":" "}]}""", "tags[0].name")]
     [InlineData("""{"name":"web01","ipAddress":"192.0.2.10","tags":[null]}""", "tags[0].name")]
+    [InlineData("""{"name":"web01","ipAddress":"192.0.2.10","macAddress":"aa:bb:cc:dd:ee"}""", "macAddress")]
+    [InlineData("""{"name":"web01","ipAddress":"192.0.2.10","macAddress":"aa:bb-cc:dd:ee:ff"}""", "macAddress")]
+    [InlineData("""{"name":"web01","ipAddress":"192.0.2.10","cpuCores":0}""", "cpuCores")]
+    [InlineData("""{"name":"web01","ipAddress":"192.0.2.10","memoryMiB":-1}""", "memoryMiB")]
     public async Task An_invalid_host_reports_the_field(string body, string field)
     {
         await using var server = new ServerScenario(await postgres.CreateDatabaseAsync());

@@ -1,7 +1,8 @@
 import { useState, type FormEvent } from 'react'
 import { api, ApiError } from '@nkeeper/sdk'
 import { credentialName, serviceName } from './hosts'
-import type { Host, HostCredential, HostService, ServiceSetting, ServiceTypeInfo, SessionTypeInfo } from './types'
+import { draftOf, newCredentialDraft, newKey, newServiceDraft, requestOf, type CredentialDraft, type Draft, type ServiceDraft } from './hostDraft'
+import type { Host, HostService, ServiceSetting, ServiceTypeInfo, SessionTypeInfo } from './types'
 import { Alert } from './ui/Alert'
 import { Button } from './ui/Button'
 import { Checkbox } from './ui/Checkbox'
@@ -17,134 +18,6 @@ import { TextField } from './ui/TextField'
  * its tags, its services with settings drawn from their types' schemas, and its credentials (secrets write-only). The server's
  * validation is what counts: its field errors are shown next to their fields.
  */
-
-interface ServiceDraft {
-  key: string
-  id: string | null
-  type: string
-  label: string
-  port: string
-  address: string
-  settings: Record<string, unknown>
-  available: boolean
-  disabledTools: string[]
-}
-
-interface CredentialDraft {
-  key: string
-  id: string | null
-  label: string
-  username: string
-  domain: string
-  notes: string
-  hasPassword: boolean
-  hasPrivateKey: boolean
-  password: string
-  clearPassword: boolean
-  privateKey: string
-  clearPrivateKey: boolean
-  allServices: boolean
-  serviceKeys: string[]
-}
-
-interface Draft {
-  name: string
-  hostname: string
-  ipAddress: string
-  description: string
-  tags: { key: string; name: string; value: string }[]
-  services: ServiceDraft[]
-  credentials: CredentialDraft[]
-  jump: { hostId: string; serviceId: string; credentialId: string } | null
-}
-
-let keys = 0
-const newKey = () => `k${++keys}`
-
-function draftOf(host: Host | null): Draft {
-  if (!host) {
-    return { name: '', hostname: '', ipAddress: '', description: '', tags: [], services: [], credentials: [], jump: null }
-  }
-  const services = host.services.map(
-    (s): ServiceDraft => ({
-      key: newKey(),
-      id: s.id,
-      type: s.type,
-      label: s.label ?? '',
-      port: s.port?.toString() ?? '',
-      address: s.address ?? '',
-      settings: { ...s.settings },
-      available: s.available,
-      disabledTools: [...s.disabledTools],
-    }),
-  )
-  return {
-    name: host.name,
-    hostname: host.hostname ?? '',
-    ipAddress: host.ipAddress ?? '',
-    description: host.description ?? '',
-    tags: host.tags.map((t) => ({ key: newKey(), name: t.name, value: t.value ?? '' })),
-    services,
-    credentials: host.credentials.map((c) => credentialDraft(c, services)),
-    jump: host.jump ? { hostId: host.jump.hostId, serviceId: host.jump.serviceId ?? '', credentialId: host.jump.credentialId ?? '' } : null,
-  }
-}
-
-function credentialDraft(c: HostCredential, services: ServiceDraft[]): CredentialDraft {
-  return {
-    key: newKey(),
-    id: c.id,
-    label: c.label ?? '',
-    username: c.username ?? '',
-    domain: c.domain ?? '',
-    notes: c.notes ?? '',
-    hasPassword: c.hasPassword,
-    hasPrivateKey: c.hasPrivateKey,
-    password: '',
-    clearPassword: false,
-    privateKey: '',
-    clearPrivateKey: false,
-    allServices: c.serviceIndexes === null,
-    serviceKeys: (c.serviceIndexes ?? []).map((i) => services[i]?.key).filter((k): k is string => !!k),
-  }
-}
-
-const orNull = (value: string) => (value.trim() === '' ? null : value.trim())
-
-/** The request body: services in order, and each credential's services as positions in that order. */
-function requestOf(draft: Draft, version: number | null) {
-  const positions = new Map(draft.services.map((s, i) => [s.key, i]))
-  return {
-    name: draft.name.trim(),
-    hostname: orNull(draft.hostname),
-    ipAddress: orNull(draft.ipAddress),
-    description: orNull(draft.description),
-    tags: draft.tags.filter((t) => t.name.trim() !== '').map((t) => ({ name: t.name.trim(), value: orNull(t.value) })),
-    services: draft.services.map((s) => ({
-      id: s.id,
-      type: s.type,
-      label: orNull(s.label),
-      port: s.port.trim() === '' ? null : Number(s.port),
-      address: orNull(s.address),
-      settings: s.settings,
-      disabledTools: s.disabledTools,
-    })),
-    credentials: draft.credentials.map((c) => ({
-      id: c.id,
-      label: orNull(c.label),
-      username: orNull(c.username),
-      domain: orNull(c.domain),
-      notes: orNull(c.notes),
-      password: c.password === '' ? null : c.password,
-      clearPassword: c.clearPassword,
-      privateKey: c.privateKey.trim() === '' ? null : c.privateKey,
-      clearPrivateKey: c.clearPrivateKey,
-      serviceIndexes: c.allServices ? null : c.serviceKeys.map((k) => positions.get(k)).filter((i): i is number => i !== undefined),
-    })),
-    jump: draft.jump && draft.jump.hostId ? { hostId: draft.jump.hostId, serviceId: draft.jump.serviceId || null, credentialId: draft.jump.credentialId || null } : null,
-    ...(version === null ? {} : { version }),
-  }
-}
 
 type Errors = Record<string, string[]>
 
@@ -182,9 +55,12 @@ export function HostEditor({ host, hosts, serviceTypes, sessionTypes, onSaved, o
     setMessage(null)
     setConflict(false)
     // A port that isn't a whole number would be sent as no port at all, so it's caught here.
-    const badPorts = Object.fromEntries(
-      draft.services.flatMap((s, i) => (s.port.trim() === '' || /^\d{1,5}$/.test(s.port.trim()) ? [] : [[`services[${i}].port`, ['Enter a port from 1 to 65535.']]])),
-    )
+    const badPorts = Object.fromEntries([
+      ...draft.services.flatMap((s, i) => (s.port.trim() === '' || /^\d{1,5}$/.test(s.port.trim()) ? [] : [[`services[${i}].port`, ['Enter a port from 1 to 65535.']]])),
+      // Numbers that aren't would be sent as none, so they're caught here too.
+      ...(draft.cpuCores.trim() === '' || /^\d{1,5}$/.test(draft.cpuCores.trim()) ? [] : [['cpuCores', ['Enter a number of CPU cores from 1 to 65535.']]]),
+      ...(draft.memoryGiB.trim() === '' || /^\d+(\.\d+)?$/.test(draft.memoryGiB.trim()) ? [] : [['memoryMiB', ['Enter the memory in GiB, such as 16 or 0.5.']]]),
+    ])
     if (Object.keys(badPorts).length > 0) {
       setErrors(badPorts)
       setMessage('Some fields need fixing.')
@@ -228,18 +104,7 @@ export function HostEditor({ host, hosts, serviceTypes, sessionTypes, onSaved, o
       }
       return { ...d, services }
     })
-  const newService = (type: ServiceTypeInfo): ServiceDraft => ({
-    key: newKey(),
-    id: null,
-    type: type.id,
-    label: '',
-    port: '',
-    address: '',
-    // A required switch shows as off, so it starts as off rather than unset.
-    settings: Object.fromEntries(type.settings.filter((s) => s.kind === 'switch' && s.required).map((s) => [s.key, false])),
-    available: true,
-    disabledTools: [],
-  })
+  const newService = (type: ServiceTypeInfo) => newServiceDraft(type)
 
   return (
     <form className={panel.panel} onSubmit={(e) => void submit(e)} noValidate aria-label={title}>
@@ -307,6 +172,42 @@ export function HostEditor({ host, hosts, serviceTypes, sessionTypes, onSaved, o
               autoComplete="off"
               spellCheck={false}
             />
+            <TextField
+              label="MAC address"
+              value={draft.macAddress}
+              onChange={(e) => update({ macAddress: e.target.value })}
+              error={firstError('macAddress')}
+              placeholder="AA:BB:CC:DD:EE:FF"
+              maxLength={17}
+              autoComplete="off"
+              spellCheck={false}
+            />
+            <TextField
+              label="Serial number"
+              value={draft.serialNumber}
+              onChange={(e) => update({ serialNumber: e.target.value })}
+              error={firstError('serialNumber')}
+              maxLength={100}
+              autoComplete="off"
+              spellCheck={false}
+            />
+            <TextField
+              label="CPU cores"
+              inputMode="numeric"
+              value={draft.cpuCores}
+              onChange={(e) => update({ cpuCores: e.target.value })}
+              error={firstError('cpuCores')}
+              autoComplete="off"
+            />
+            <TextField
+              label="Memory (GiB)"
+              inputMode="decimal"
+              value={draft.memoryGiB}
+              onChange={(e) => update({ memoryGiB: e.target.value })}
+              error={firstError('memoryMiB')}
+              autoComplete="off"
+            />
+            <Checkbox className={panel.full} label="Virtual machine" checked={draft.isVirtualMachine} onChange={(e) => update({ isVirtualMachine: e.target.checked })} />
             <TextArea
               className={panel.full}
               label="Description"
@@ -674,22 +575,7 @@ export function HostEditor({ host, hosts, serviceTypes, sessionTypes, onSaved, o
                   update({
                     credentials: [
                       ...draft.credentials,
-                      {
-                        key: newKey(),
-                        id: null,
-                        label: '',
-                        username: '',
-                        domain: '',
-                        notes: '',
-                        hasPassword: false,
-                        hasPrivateKey: false,
-                        password: '',
-                        clearPassword: false,
-                        privateKey: '',
-                        clearPrivateKey: false,
-                        allServices: true,
-                        serviceKeys: [],
-                      },
+                      newCredentialDraft(),
                     ],
                   })
                 }

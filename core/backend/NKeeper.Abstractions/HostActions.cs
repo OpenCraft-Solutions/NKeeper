@@ -31,6 +31,12 @@ public sealed record HostAction(string Id, string Label, string? SessionType = n
 
     /// <summary>For a run action: the service types it applies to. A session action takes them from its session type.</summary>
     public IReadOnlyList<string> ServiceTypes { get; init; } = [];
+
+    /// <summary>
+    /// A run action that scans the host (docs/architecture.md §7.26, SDK 1.4): its endpoint answers a <see cref="ScanFindings"/>,
+    /// and the shell offers it in the Scan dialog instead of the menu. Map the endpoint with <see cref="HostPermission.Manage"/>.
+    /// </summary>
+    public bool Scan { get; init; }
 }
 
 /// <summary>

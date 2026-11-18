@@ -5,6 +5,7 @@ import { useDialogs } from './dialogContext'
 import { HostDetails } from './HostDetails'
 import { HostEditor } from './HostEditor'
 import { HostTree } from './HostTree'
+import { ScanDialog } from './ScanDialog'
 import { groupHosts, matchesSearch, serviceName, tagNames } from './hosts'
 import type { Host, ServiceHealth } from './types'
 import { Alert } from './ui/Alert'
@@ -79,6 +80,8 @@ export function Workspace({
   const [groupBy, setGroupBy] = useState(readGroupBy)
   const [collapsed, setCollapsed] = useState(new Set<string>())
   // The host menu (right-click) or the Connect menu (the details' button), at the pointer or the button.
+  // The host whose Scan dialog is open (§7.26).
+  const [scanning, setScanning] = useState<string | null>(null)
   const [menu, setMenu] = useState<{ hostId: string; x: number; y: number; connectOnly: boolean } | null>(null)
   const dialogs = useDialogs()
   // The latest health check asked for, by host.
@@ -128,6 +131,7 @@ export function Workspace({
   }, [])
 
   const selected = hosts?.find((h) => h.id === selectedId) ?? null
+  const scanHost = hosts?.find((h) => h.id === scanning) ?? null
   // A jump host's key prompt names the jump host, which the user may not be able to see.
   const hostName = useCallback((id: string) => hosts?.find((h) => h.id === id)?.name ?? null, [hosts])
   const canManage = useCallback((id: string) => hosts?.find((h) => h.id === id)?.canManage ?? false, [hosts])
@@ -508,6 +512,7 @@ export function Workspace({
               }
               onCheck={checkSelected}
               connectable={connectMenu(selected, catalog).length > 0}
+              onScan={selected.canManage && connectMenu(selected, catalog, true).length > 0 ? () => setScanning(selected.id) : null}
               onConnectMenu={(anchor) => setMenu({ hostId: selected.id, x: anchor.left, y: anchor.bottom + 4, connectOnly: true })}
             />
           ) : (
@@ -542,6 +547,22 @@ export function Workspace({
         ))}
       </main>
 
+      {scanning && scanHost && (
+        <ScanDialog
+          host={scanHost}
+          hosts={hosts ?? []}
+          catalog={catalog}
+          canCreateHosts={canCreate}
+          onClose={() => setScanning(null)}
+          onApplied={(updated, created) => {
+            setHosts((current) => [...(current ?? []).map((h) => (updated && h.id === updated.id ? updated : h)), ...created].sort((a, b) => a.name.localeCompare(b.name)))
+            if (updated) {
+              checkSaved(updated)
+            }
+            created.forEach(checkSaved)
+          }}
+        />
+      )}
       {menu && menuHost && (
         <ContextMenu
           label={`Actions for ${menuHost.name}`}

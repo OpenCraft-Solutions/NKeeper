@@ -11,6 +11,8 @@ public sealed class Host
     public const int IpAddressMaxLength = 45;
     public const int DescriptionMaxLength = 4000;
     public const int MaxTags = 100;
+    public const int SerialNumberMaxLength = 100;
+    public const int MacAddressLength = 17;
 
     public Guid Id { get; set; }
 
@@ -23,6 +25,18 @@ public sealed class Host
     public string? IpAddress { get; set; }
 
     public string? Description { get; set; }
+
+    /// <summary>Hardware (docs/architecture.md §7.1): <c>AA:BB:CC:DD:EE:FF</c>, upper-case with colons.</summary>
+    public string? MacAddress { get; set; }
+
+    public int? CpuCores { get; set; }
+
+    public int? MemoryMiB { get; set; }
+
+    /// <summary>Physical hardware's serial number, such as a Dell service tag.</summary>
+    public string? SerialNumber { get; set; }
+
+    public bool IsVirtualMachine { get; set; }
 
     public List<HostTag> Tags { get; set; } = [];
 

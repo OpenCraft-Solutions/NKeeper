@@ -3,6 +3,7 @@ import { api, ApiError } from '@nkeeper/sdk'
 import type { Catalog } from './catalog'
 import { CERTIFICATE_WARNING_DAYS, daysUntil } from './health'
 import { credentialName, usedWith } from './hosts'
+import { formatMemory } from './scanProposals'
 import type { Host, ServiceHealth } from './types'
 import { Alert } from './ui/Alert'
 import { Badge } from './ui/Badge'
@@ -28,6 +29,7 @@ export function HostDetails({
   onCheck,
   connectable,
   onConnectMenu,
+  onScan,
 }: {
   host: Host
   hosts: Host[]
@@ -42,6 +44,8 @@ export function HostDetails({
   connectable: boolean
   /** Opens the Connect menu under the button. */
   onConnectMenu: (anchor: DOMRect) => void
+  /** Opens the Scan dialog (§7.26); null when no loaded plugin scans the host's services. */
+  onScan: (() => void) | null
 }) {
   const [error, setError] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
@@ -96,6 +100,11 @@ export function HostDetails({
           {host.canManage && (
             <>
               <DeleteButton question="Delete this host?" onConfirm={() => void remove()} loading={deleting} />
+              {onScan && (
+                <Button variant="secondary" onClick={onScan} disabled={deleting}>
+                  Scan
+                </Button>
+              )}
               <Button variant="secondary" onClick={onEdit} disabled={deleting}>
                 Edit
               </Button>
@@ -130,6 +139,32 @@ export function HostDetails({
             <dd>
               <time dateTime={host.updatedAtUtc}>{dateTimeFormat.format(new Date(host.updatedAtUtc))}</time>
             </dd>
+            {host.macAddress && (
+              <>
+                <dt>MAC address</dt>
+                <dd className={styles.mono}>{host.macAddress}</dd>
+              </>
+            )}
+            {(host.cpuCores || host.memoryMiB || host.isVirtualMachine) && (
+              <>
+                <dt>Hardware</dt>
+                <dd>
+                  {[
+                    host.isVirtualMachine ? 'Virtual machine' : null,
+                    host.cpuCores ? `${host.cpuCores} CPU core${host.cpuCores === 1 ? '' : 's'}` : null,
+                    host.memoryMiB ? `${formatMemory(host.memoryMiB)} memory` : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </dd>
+              </>
+            )}
+            {host.serialNumber && (
+              <>
+                <dt>Serial number</dt>
+                <dd className={styles.mono}>{host.serialNumber}</dd>
+              </>
+            )}
             {host.description && (
               <>
                 <dt>Description</dt>

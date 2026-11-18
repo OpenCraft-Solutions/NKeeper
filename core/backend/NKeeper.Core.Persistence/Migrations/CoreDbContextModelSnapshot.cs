@@ -405,6 +405,10 @@ namespace NKeeper.Core.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.Property<int?>("CpuCores")
+                        .HasColumnType("integer")
+                        .HasColumnName("cpu_cores");
+
                     b.Property<DateTimeOffset>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at_utc");
@@ -428,6 +432,10 @@ namespace NKeeper.Core.Persistence.Migrations
                         .HasColumnType("character varying(45)")
                         .HasColumnName("ip_address");
 
+                    b.Property<bool>("IsVirtualMachine")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_virtual_machine");
+
                     b.Property<Guid?>("JumpCredentialId")
                         .HasColumnType("uuid")
                         .HasColumnName("jump_credential_id");
@@ -440,11 +448,25 @@ namespace NKeeper.Core.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("jump_service_id");
 
+                    b.Property<string>("MacAddress")
+                        .HasMaxLength(17)
+                        .HasColumnType("character varying(17)")
+                        .HasColumnName("mac_address");
+
+                    b.Property<int?>("MemoryMiB")
+                        .HasColumnType("integer")
+                        .HasColumnName("memory_mib");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)")
                         .HasColumnName("name");
+
+                    b.Property<string>("SerialNumber")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("serial_number");
 
                     b.Property<DateTimeOffset>("UpdatedAtUtc")
                         .HasColumnType("timestamp with time zone")
