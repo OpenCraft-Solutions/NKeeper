@@ -365,7 +365,9 @@ public sealed class WindowsConnectivityTests(PostgresFixture postgres) : IClassF
             Pair(1, name); // NetBIOS computer
             Pair(7, BitConverter.GetBytes(DateTime.UtcNow.ToFileTimeUtc())); // timestamp
             Pair(0, []);
-            const uint Flags = 0x00000001 | 0x00000004 | 0x00000200 | 0x00008000 | 0x00010000 | 0x00080000 | 0x00800000 | 0x02000000 | 0x20000000 | 0x80000000;
+            // What Windows answers a client asking for signing, which .NET's managed NTLM requires: unicode, target, sign, NTLM,
+            // always sign, target type domain, extended session security, target info, version, 128-bit and key exchange.
+            const uint Flags = 0x628A8215;
             var message = new byte[56 + name.Length + info.Count];
             Encoding.ASCII.GetBytes("NTLMSSP\0").CopyTo(message, 0);
             BinaryPrimitives.WriteUInt32LittleEndian(message.AsSpan(8), 2);
