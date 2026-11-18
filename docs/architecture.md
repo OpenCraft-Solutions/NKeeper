@@ -71,7 +71,7 @@ public sealed class WakeOnLanPlugin : IPlugin
 - More contracts (plugin settings, scanners, reports) arrive with their first real users ([v2-plan.md §4.2](v2-plan.md#42-contribution-catalogue)), as additions to SDK v1.
 - **SDK versions.** A manifest declares the SDK range it supports, and a package outside the server's `SdkVersion` is refused. Within v0, an addition raises the patch number (`0.1.1` added the host scope, `0.1.2` service types, `0.1.3` the credential broker, `0.1.4` SSH connections, `0.1.5` stream sessions, `0.1.6` host actions, health probes and, in the frontend SDK, session views, `0.1.7` run actions and plugin audit events, `0.1.8` HTTPS connections, stateful sessions, session origins and, in the frontend SDK, `confirmTrust`, `0.1.9` desktop connections) and a breaking change raises the minor one.
 - **SDK v1 (1.0.0)** froze the SDK at the end of Phase 3, after a review of what Phases 1 and 2 used ([v2-plan.md, Phase 3](v2-plan.md#phase-3-freeze-sdk-v1)). From v1, a fix that changes no API raises the patch number, an addition the minor number, and a breaking change the major one, which the plan avoids. So a plugin built for `>=1.0.0 <2.0.0` keeps loading, and one that uses an addition declares the version that brought it. The frontend SDK, `@nkeeper/sdk`, is versioned with it. [plugin-authoring.md](plugin-authoring.md) shows how to write a plugin against it.
-- **Since v1:** `1.0.1` fixed `NKeeper.Testing`'s `TestPlugins` outside this repository; `1.1.0` adds Telnet connections (§7.22); `1.2.0` adds VNC desktops (§7.20). `NKeeper.Testing`'s helpers that packaged the built-in plugins from this repository's build (`TestPlugins.SshPackage` and the like) went with them: they only ever worked here.
+- **Since v1:** `1.0.1` fixed `NKeeper.Testing`'s `TestPlugins` outside this repository; `1.1.0` adds Telnet connections (§7.22); `1.2.0` adds VNC desktops (§7.20); `1.12.0` adds a streaming command's standard input (§7.9). `NKeeper.Testing`'s helpers that packaged the built-in plugins from this repository's build (`TestPlugins.SshPackage` and the like) went with them: they only ever worked here.
 
 ## 5. Frontend extension point
 
@@ -458,6 +458,7 @@ The connection doesn't need its handle once it's open; the plugin disposes it, w
 - `Output` is the command's standard output, read as it comes; it ends when the command does;
 - `WaitAsync` waits for the command to end and returns its exit status and error output (at most 64 KB of it);
 - disposing it before then stops the command: core closes its channel, which ends the remote process, even under `sudo`. The connection stays open.
+- **`Input` (SDK 1.12)** is the command's standard input: what the plugin writes reaches the command as it's written, and disposing `Input` ends it (end of file), as closing a pipe does. There's no pseudo-terminal, so bytes pass both ways unchanged. Its first user is the `proxmox` plugin, whose consoles are `qm vncproxy`, which relays a VM's display on its standard input and output (§7.38).
 
 **Another port (SDK 1.6).** `IConnectivity.OpenSshAsync(host, serviceId, handle, port)` connects to the service's address on another port, with every other check the same. A service's port is what it's for, and some devices offer SSH beside it: an iDRAC's RACADM listens on 22, beside its HTTPS service on 443 (§7.30). The server's key is trusted for that address and port, so it's asked for and recorded apart from the service's own.
 
@@ -1155,7 +1156,19 @@ KVM hypervisors, the way virt-manager reaches them, ported from 1.x's `KvmHost`,
 - **The guests tab** (session type `kvm`, host action `kvm.guests`) opens SSH to that service, with its credential (§7.9). It runs `virsh -c qemu:///system`, so the SSH user needs access to it (the `libvirt` group, say).
 - **Guests:** `virsh list --all`, with each one's name, state and display. Power: start, shut down, reboot, pause, resume, hibernate (a managed save), force off (`destroy`) and reset, as 1.x offered.
 - **Consoles:** `virsh domdisplay` gives the display's address on the hypervisor, usually its loopback; the plugin reaches it through an SSH port forward (§7.9, SDK 1.11). A display on every address is reached on the loopback too. A SPICE display that only takes TLS isn't supported, as in 1.x.
-- **Not yet:** SPICE consoles (virt-core), and Proxmox nodes, which 1.x detected on the same service: they come with the `proxmox` plugin.
+- **Not yet:** SPICE consoles (virt-core), and Proxmox nodes, which 1.x detected on the same service: they come with the `proxmox` plugin (§7.38).
+
+### 7.38 The `proxmox` plugin
+
+Proxmox VE nodes and their clusters' QEMU virtual machines, the way Proxmox's own web console reaches them, ported from 1.x's `ProxmoxHost`, in its own repository, `NKeeper-Plugin-Proxmox` (§9), on SDK 1.12 (`>=1.12.0 <2.0.0`). It's a guest provider for virt-core (§7.36), which it depends on.
+
+- **Service type `proxmox`** ("Proxmox VE"): a node's SSH, default port 22, health by TCP. A host offers its guests only when it has one. It's SSH, not the web API on port 8006, as in 1.x: core signs in to SSH with the service's credential (§7.9), so the plugin never sees a password, and the API's tickets and tokens never come into it.
+- **The guests tab** (session type `proxmox`, host action `proxmox.guests`) runs `pvesh` and `qm` on the node, which need root: the SSH user is root, or may use `sudo` without a password. Otherwise the tab says so, as 1.x did.
+- **Guests:** `pvesh get /cluster/resources --type vm`: every QEMU VM of the cluster, not templates, by name, with its state and the node it runs on. Each one's console is VNC unless its configuration's `vga` is `none` or a serial terminal. Containers (LXC) aren't listed yet.
+- **Power:** through `pvesh create /nodes/<node>/qemu/<vmid>/status/<action>`, which reaches a VM on any node of the cluster: `start`, `shutdown`, `reboot`, `suspend` (pause), `resume`, `suspend --todisk 1` (hibernate), `stop` (force off) and `reset`. The cluster's listing doesn't tell a paused VM from a running one, so a running VM offers both pause and resume.
+- **Consoles:** `qm vncproxy <vmid>` relays the VM's display on its standard input and output, with a one-time VNC password (`LC_PVE_TICKET`, valid for 30 seconds), as Proxmox's web console does. The plugin starts it with `StartAsync` and relays both ways through `Input` and `Output` (§7.9, SDK 1.12), giving virt-core the password, which noVNC answers.
+- **Other nodes of the cluster:** a VM on another node is reached as Proxmox reaches it: over SSH as root from the signed-in node to that node's address in `pvesh get /cluster/status`, with the cluster's own host keys (`/etc/pve/nodes/<node>/ssh_known_hosts`, or the cluster-wide known hosts on older versions), never accepting a new key. Node names and VM IDs come from `pvesh` and are checked before they're used in a command line.
+- **Not yet:** containers, SPICE consoles, and linking a guest to its host in NKeeper's inventory.
 
 ## 8. The native install
 

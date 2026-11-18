@@ -279,6 +279,23 @@ public sealed class SshConnectivityTests(PostgresFixture postgres, SshServerFixt
     }
 
     [Fact]
+    public async Task A_started_commands_input_reaches_it_unchanged_and_its_end_ends_it()
+    {
+        await using var server = await ServerAsync();
+        using var admin = await server.SignedInClientAsync();
+        var host = await CreateTrustedHostAsync(admin, Credential(password: SshServerFixture.Password));
+        // Every byte value, line endings and NUL included: no pseudo-terminal may change any (SDK 1.12).
+        var input = Enumerable.Range(0, 256).Select(i => (byte)i).Concat("\r\n\r\x00"u8.ToArray()).Concat(System.Security.Cryptography.RandomNumberGenerator.GetBytes(64 * 1024)).ToArray();
+
+        // sha256sum answers only at the end of its input.
+        var ran = await SshAsync(admin, host, new { serviceId = ServiceId(host), credentialId = CredentialId(host, 0), command = "sha256sum", inputBase64 = Convert.ToBase64String(input) }, endpoint: "stream");
+
+        var line = Assert.Single(ran.GetProperty("lines").EnumerateArray()).GetString()!.Split(" at ")[0];
+        Assert.Equal($"{Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(input))}  -", line);
+        Assert.Equal(0, ran.GetProperty("exitStatus").GetInt32());
+    }
+
+    [Fact]
     public async Task Sftp_works_with_files_and_folders_and_says_why_it_cannot()
     {
         await using var server = await ServerAsync();

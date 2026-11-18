@@ -476,6 +476,14 @@ public sealed class HelloPlugin : IPlugin
             await using var ssh = await connectivity.OpenSshAsync(host, probe.ServiceId, handle);
             var started = System.Diagnostics.Stopwatch.StartNew();
             var command = await ssh.StartAsync(probe.Command ?? "true");
+            if (probe.InputBase64 is { } input)
+            {
+                // SDK 1.12: the command's input, then its end, as a pipe's.
+                await command.Input.WriteAsync(Convert.FromBase64String(input));
+                await command.Input.FlushAsync();
+                await command.Input.DisposeAsync();
+            }
+
             using var reader = new StreamReader(command.Output);
             var lines = new List<string>();
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
@@ -680,7 +688,8 @@ public sealed record SshProbe(
     bool Shell = false,
     string? Expect = null,
     int? Port = null,
-    int? ForwardPort = null);
+    int? ForwardPort = null,
+    string? InputBase64 = null);
 
 /// <summary>Contributes the service type <c>hello</c> whatever its own ID: the host must refuse it when <c>hello</c> is taken.</summary>
 public sealed class DuplicateServiceTypePlugin : IPlugin

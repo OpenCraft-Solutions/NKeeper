@@ -303,6 +303,12 @@ public interface ISshCommand : IAsyncDisposable
     /// <summary>The command's standard output, as it comes. It ends when the command does.</summary>
     Stream Output { get; }
 
+    /// <summary>
+    /// The command's standard input (docs/architecture.md §7.9, SDK 1.12): writes reach the command as they're made,
+    /// with no pseudo-terminal, so bytes pass unchanged. Disposing it ends the input, as closing a pipe does.
+    /// </summary>
+    Stream Input => throw new NotSupportedException("This command takes no input.");
+
     /// <summary>Waits for the command to end: its exit status and error output (at most 64 KB), with no output (that was <see cref="Output"/>).</summary>
     Task<SshCommandResult> WaitAsync(CancellationToken cancellationToken = default);
 }
