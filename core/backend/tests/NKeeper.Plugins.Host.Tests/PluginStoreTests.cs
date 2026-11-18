@@ -199,6 +199,87 @@ public sealed class PluginStoreTests : IDisposable
         Assert.Empty(Directory.GetFiles(_requests, "*.json"));
     }
 
+    [Fact]
+    public async Task Removing_a_plugin_keeps_the_plugins_that_need_it_and_remembers_the_removal()
+    {
+        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "db-core"));
+        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "mssql", dependsOn: [("db-core", ">=1.0.0 <2.0.0")]));
+        File.WriteAllText(Path.Combine(_requests, "a.json"), "{ \"action\": \"remove\", \"id\": \"db-core\", \"requestedBy\": \"admin\" }");
+
+        var refused = Assert.Single(await Store().ApplyRequestsAsync(_requests, Ct));
+
+        Assert.Equal(InstallResult.Failed, refused.Result);
+        Assert.Contains("mssql depends on db-core", refused.Message, StringComparison.Ordinal);
+        Assert.Equal(InstallResult.Removed, Store().Remove("mssql").Result);
+        Assert.Equal(InstallResult.Removed, Store().Remove("db-core").Result);
+        Assert.Empty(Directory.GetFiles(_scenario.Options.Directory, "*.nkp"));
+        Assert.Equal(["db-core", "mssql"], File.ReadAllLines(Path.Combine(_scenario.Options.Directory, PluginStore.RemovedFileName)));
+
+        Publish(TestPlugins.Package(_scenario.OfficialKey, id: "db-core"));
+        PublishCatalog(("db-core", "o/db-core"));
+        await Store().InstallAsync(["db-core"], Ct);
+        Assert.Equal(["mssql"], File.ReadAllLines(Path.Combine(_scenario.Options.Directory, PluginStore.RemovedFileName)));
+    }
+
+    [Fact]
+    public async Task An_uploaded_package_installs_only_if_its_the_one_checked_and_verifies_with_roots_trust()
+    {
+        var good = TestPlugins.Package(_scenario.ThirdPartyKey, id: "com.example.netbox", builtIn: false);
+        var stranger = TestPlugins.Package(PluginSigningKey.Generate(), id: "com.other.thing", builtIn: false);
+        Upload("a", good, Sha(good.Content));
+        Upload("b", good, new string('d', 64));
+        Upload("c", stranger, Sha(stranger.Content));
+
+        var outcomes = await Store().ApplyRequestsAsync(_requests, Ct);
+
+        Assert.Equal([InstallResult.Installed, InstallResult.Failed, InstallResult.Failed], outcomes.Select(o => o.Result));
+        Assert.Contains(ReasonCodes.UntrustedKey, outcomes[2].Message, StringComparison.Ordinal);
+        Assert.Equal(["com.example.netbox-1.0.0.nkp"], Directory.GetFiles(_scenario.Options.Directory, "*.nkp").Select(Path.GetFileName));
+        Assert.Empty(Directory.GetFiles(_requests, "*.nkp"));
+    }
+
+    [Fact]
+    public async Task Keys_are_trusted_from_the_page_only_where_root_allowed_it_and_only_third_party_ones()
+    {
+        using var publisher = PluginSigningKey.Generate();
+        var keyFile = Encoding.UTF8.GetString(TrustedKey.ThirdParty(publisher.PublicKey.Span, ["org.publisher.*"]).ToKeyFile());
+        var development = Encoding.UTF8.GetString(TrustedKey.Development(publisher.PublicKey.Span).ToKeyFile());
+        void Ask(string name, string keyFile) => File.WriteAllText(
+            Path.Combine(_requests, name + ".json"),
+            System.Text.Json.JsonSerializer.Serialize(new { action = "trust", keyFile, requestedBy = "admin" }));
+
+        Ask("a", keyFile);
+        Assert.Contains("doesn't allow", Assert.Single(await Store().ApplyRequestsAsync(_requests, Ct)).Message, StringComparison.Ordinal);
+        Ask("b", keyFile);
+        Ask("c", development);
+        var outcomes = await Store(webTrust: true).ApplyRequestsAsync(_requests, Ct);
+
+        Assert.Equal([InstallResult.Trusted, InstallResult.Failed], outcomes.Select(o => o.Result));
+        var trusted = Assert.Single(Store().TrustedKeys(), k => k.Key.KeyId == SigningKeys.ComputeKeyId(publisher.PublicKey.Span)).Key;
+        Assert.Equal(["org.publisher.*"], trusted.AllowedIds);
+        Assert.Equal(InstallResult.Untrusted, Store().Untrust(trusted.KeyId).Result);
+        Assert.DoesNotContain(Store().TrustedKeys(), k => k.Key.KeyId == trusted.KeyId);
+    }
+
+    [Fact]
+    public async Task Enabling_brings_the_shared_plugin_and_disabling_a_shared_plugin_takes_its_dependants()
+    {
+        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "db-core"));
+        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "mssql", dependsOn: [("db-core", ">=1.0.0 <2.0.0")]));
+        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "oracle", dependsOn: [("db-core", ">=1.0.0 <2.0.0")]));
+        var loaded = await _scenario.LoadAsync();
+        var switches = new PluginSwitches(_scenario.Store, _scenario.Audit, TimeProvider.System);
+
+        Assert.Equal(["mssql", "oracle", "db-core"], await switches.SwitchAsync("db-core", enable: false, "admin", loaded.Manifests, Ct));
+        Assert.Empty((await _scenario.LoadAsync()).Loaded);
+        Assert.Equal(["db-core", "mssql"], await switches.SwitchAsync("mssql", enable: true, "admin", loaded.Manifests, Ct));
+
+        var result = await _scenario.LoadAsync();
+        Assert.Equal(["db-core", "mssql"], result.Loaded.Select(p => p.Manifest.Id));
+        Assert.Equal(PluginState.Disabled, Assert.Single(result.Statuses, s => s.Id == "oracle").State);
+        Assert.Contains(_scenario.Audit.Events, e => e.Action == "plugin.disabled" && e.Target == "oracle" && e.Detail.Contains("which needs db-core", StringComparison.Ordinal));
+    }
+
     [Theory]
     [InlineData("kvm-1.0.0.nkp", "kvm", "1.0.0")]
     [InlineData("virt-core-1.2.0.nkp", "virt-core", "1.2.0")]
@@ -212,7 +293,7 @@ public sealed class PluginStoreTests : IDisposable
         Assert.Equal(version, parsed?.Version.Text);
     }
 
-    private PluginStore Store() => new(
+    private PluginStore Store(bool webTrust = false) => new(
         _scenario.Options.Directory,
         CatalogUrl,
         _releases,
@@ -221,7 +302,11 @@ public sealed class PluginStoreTests : IDisposable
             IsDevelopment: false,
             SemanticVersion.Parse(SdkVersion.Current),
             SharedAssemblies.OfCurrentProcess(),
-            TimeProvider.System));
+            TimeProvider.System))
+    {
+        TrustDirectory = _scenario.Options.TrustDirectory,
+        AllowWebTrust = webTrust,
+    };
 
     private void Publish(BuiltPackage package, string? checksum = null)
     {
@@ -238,6 +323,14 @@ public sealed class PluginStoreTests : IDisposable
 
     private void Request(string name, string id, string version, string sha) =>
         File.WriteAllText(Path.Combine(_requests, name + ".json"), $"{{ \"id\": \"{id}\", \"version\": \"{version}\", \"packageSha256\": \"{sha}\", \"requestedBy\": \"admin\" }}");
+
+    private void Upload(string name, BuiltPackage package, string sha)
+    {
+        var (id, version) = PluginStore.ParsePackageName(package.FileName)!.Value;
+        File.WriteAllBytes(Path.Combine(_requests, name + ".nkp"), package.Content);
+        File.WriteAllText(Path.Combine(_requests, name + ".json"), $"{{ \"action\": \"upload\", \"id\": \"{id}\", \"version\": \"{version.Text}\", \"packageSha256\": \"{sha}\", \"requestedBy\": \"admin\" }}");
+        File.SetLastWriteTimeUtc(Path.Combine(_requests, name + ".json"), DateTime.UtcNow.AddSeconds(name[0]));
+    }
 
     private static string Sha(byte[] content) => Convert.ToHexStringLower(SHA256.HashData(content));
 

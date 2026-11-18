@@ -30,6 +30,7 @@ public sealed class PluginHostResult
     private readonly List<ContributedSessionType> _sessionTypes = [];
     private readonly List<ContributedHostAction> _hostActions = [];
     private readonly List<ContributedSessionOrigin> _sessionOrigins = [];
+    private readonly Dictionary<string, PluginManifest> _manifests = new(StringComparer.Ordinal);
 
     public IReadOnlyList<PluginStatus> Statuses => _statuses;
 
@@ -52,6 +53,12 @@ public sealed class PluginHostResult
     /// <summary>Loaded plugins, dependencies before dependants.</summary>
     public IReadOnlyList<LoadedPlugin> Loaded => _loaded;
 
+    /// <summary>
+    /// The manifests of the installed plugins that verified, enabled or not, by ID: what enabling and disabling follow
+    /// dependencies by (docs/architecture.md §9.2).
+    /// </summary>
+    public IReadOnlyDictionary<string, PluginManifest> Manifests => _manifests;
+
     /// <summary>Security alerts for administrators (§9): every refusal and every blocked startup step.</summary>
     public IReadOnlyList<string> Alerts => _alerts;
 
@@ -61,6 +68,8 @@ public sealed class PluginHostResult
     internal HashSet<string> BuiltInIds { get; } = new(StringComparer.Ordinal);
 
     internal void Add(PluginStatus status) => _statuses.Add(status);
+
+    internal void AddManifest(PluginManifest manifest) => _manifests[manifest.Id] = manifest;
 
     internal void AddLoaded(LoadedPlugin plugin) => _loaded.Add(plugin);
 
@@ -135,7 +144,7 @@ public sealed class PluginHost(
     {
         var result = new PluginHostResult();
         var records = new Dictionary<string, PluginRecord>(await store.LoadAsync(cancellationToken), StringComparer.Ordinal);
-        result.EnabledIds.UnionWith(records.Values.Where(r => r.Enabled || r.BuiltIn).Select(r => r.Id));
+        result.EnabledIds.UnionWith(records.Values.Where(r => r.Enabled).Select(r => r.Id));
         var packages = Directory.Exists(options.Directory)
             ? Directory.EnumerateFiles(options.Directory, "*" + PackageFormat.Extension).Order(StringComparer.Ordinal).ToList()
             : [];
@@ -448,7 +457,7 @@ public sealed class PluginHost(
             var fileName = PackageFormat.FileName(manifest.Id, version);
             var kind = trust.Find(v.KeyId!)!.Kind;
 
-            // §3: builtIn counts only from an official key, an install key, or a development key in Development.
+            // §3: builtIn (on by default) counts only from an official key, an install key, or a development key in Development.
             var builtIn = manifest.BuiltIn && (kind is TrustedKeyKind.Official or TrustedKeyKind.Install || (kind == TrustedKeyKind.Development && environment.IsDevelopment));
 
             // §8: the installer re-signs what it builds with a new install key each time, often at the same version.
@@ -502,9 +511,7 @@ public sealed class PluginHost(
                     PackageSha256 = v.PackageSha256!,
                     KeyId = v.KeyId!,
                     BuiltIn = builtIn,
-                    Enabled = record.Enabled || builtIn,
-                    EnabledBy = record.Enabled ? record.EnabledBy : builtIn ? BuiltInEnabler : null,
-                    EnabledAtUtc = record.Enabled ? record.EnabledAtUtc : builtIn ? now : null,
+                    // On by default only when first seen (architecture.md §9.2): an administrator's disable sticks.
                     UpdatedAtUtc = now,
                 };
                 if (updated != record)
@@ -514,6 +521,7 @@ public sealed class PluginHost(
                 }
             }
 
+            result.AddManifest(manifest);
             if (record.BuiltIn)
             {
                 result.BuiltInIds.Add(manifest.Id);
@@ -546,6 +554,23 @@ public sealed class PluginHost(
             changed = false;
             foreach (var (id, v) in candidates.Where(c => !refused.Contains(c.Key)))
             {
+                // architecture.md §9.2: one major version, and one layer deep, so dependency hell has nowhere to start.
+                if (v.Manifest!.DependsOn.FirstOrDefault(d => !d.Version.IsWithinOneMajor()) is { } open)
+                {
+                    refused.Add(id);
+                    changed = true;
+                    await RefuseAsync(result, id, v.Manifest.Version.Text, HostReasonCodes.DependencyRange, $"Its range for {open.Id}, {open.Version}, must name one major version, such as >=1.0.0 <2.0.0.", v.PackageSha256, v.KeyId, null, cancellationToken);
+                    continue;
+                }
+
+                if (v.Manifest.DependsOn.FirstOrDefault(d => candidates.TryGetValue(d.Id, out var dependency) && dependency.Manifest!.DependsOn.Count > 0) is { } deep)
+                {
+                    refused.Add(id);
+                    changed = true;
+                    await RefuseAsync(result, id, v.Manifest.Version.Text, HostReasonCodes.DependencyDepth, $"It depends on {deep.Id}, which has dependencies of its own. A plugin may depend only on shared plugins, which depend on nothing.", v.PackageSha256, v.KeyId, null, cancellationToken);
+                    continue;
+                }
+
                 var missing = v.Manifest!.DependsOn.FirstOrDefault(d =>
                     !candidates.TryGetValue(d.Id, out var dependency) || refused.Contains(d.Id) || !d.Version.Includes(dependency.Manifest!.Version));
                 if (missing is not null)

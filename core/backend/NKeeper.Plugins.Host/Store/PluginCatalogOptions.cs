@@ -13,6 +13,15 @@ public sealed class PluginCatalogOptions
     /// <summary>Where the plugins page leaves requests for root's helper, in the service's own directory.</summary>
     public string RequestDirectory { get; set; } = "/var/lib/nkeeper/plugin-requests";
 
+    /// <summary>The catalogs administrators added on the plugins page (§9.3), in the service's own directory.</summary>
+    public string CatalogsFile { get; set; } = "/var/lib/nkeeper/plugin-catalogs.json";
+
+    /// <summary>
+    /// Whether root allowed the plugins page to trust third-party keys on this server (<c>setup.sh --allow-web-trust</c>,
+    /// §9.3). Read by the server, which offers it, and by root's helper, which refuses trust requests without it.
+    /// </summary>
+    public bool AllowWebTrust { get; set; }
+
     /// <summary>The catalog's URL, if the store is on: only an absolute HTTPS URL counts.</summary>
     public Uri? CatalogUri =>
         Uri.TryCreate(Url, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps ? uri : null;

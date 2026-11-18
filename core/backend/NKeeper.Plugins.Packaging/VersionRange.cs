@@ -58,5 +58,22 @@ public sealed class VersionRange
         _ => version == c.Version,
     });
 
+    /// <summary>
+    /// Whether every version the range includes has one major version: a lower bound, and an upper bound no higher than
+    /// the next major version, e.g. <c>&gt;=1.2.0 &lt;2.0.0</c> (docs/architecture.md §9.2).
+    /// </summary>
+    public bool IsWithinOneMajor()
+    {
+        var lower = _comparators.Where(c => c.Operator is ">=" or ">" or "=").Select(c => c.Version).OrderDescending().FirstOrDefault();
+        var upper = _comparators.Where(c => c.Operator is "<" or "<=" or "=").OrderBy(c => c.Version).FirstOrDefault();
+        if (lower is null || upper.Version is null)
+        {
+            return false;
+        }
+
+        return upper.Version.Major == lower.Major
+            || (upper.Operator == "<" && upper.Version.Major == lower.Major + 1 && upper.Version is { Minor: 0, Patch: 0, IsPrerelease: false });
+    }
+
     public override string ToString() => Text;
 }

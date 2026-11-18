@@ -35,4 +35,10 @@ public static class HostReasonCodes
 
     /// <summary>The plugin is part of a dependency cycle.</summary>
     public const string DependencyCycle = "dependency_cycle";
+
+    /// <summary>It depends on a plugin that has dependencies of its own: dependencies are one layer deep (architecture.md §9.2).</summary>
+    public const string DependencyDepth = "dependency_depth";
+
+    /// <summary>A dependency's range is open at the top or spans major versions (architecture.md §9.2).</summary>
+    public const string DependencyRange = "dependency_range";
 }
