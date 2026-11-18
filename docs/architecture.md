@@ -1046,7 +1046,7 @@ DbConnection connection = login.Connection;
   - `Connection`, open;
   - `OpenAnotherAsync()`, for another connection with the same login, as 1.x's database tools opened beside the query window;
   - disposing it closes every connection it opened, and the tunnel.
-- It's audited as `credential.use` (`database to service …`). Failures are `ConnectException`: `AuthenticationFailed` for a login the server refused (the driver's message, without the password), `Unreachable`, `TimedOut`, `JumpHostUnavailable` or `NoSecret`.
+- It's audited as `credential.use` (`database to service …`). Failures are `ConnectException`: `AuthenticationFailed` for a login the server refused (the driver's message, with its inner exceptions' since SDK 1.9, without the password), `Unreachable`, `TimedOut`, `JumpHostUnavailable` or `NoSecret`.
 
 **Server identities a plugin reads (SDK 1.7).** Some servers prove themselves inside their own protocol, as SQL Server sends its certificate inside TDS. Core can't read those, so the plugin does, and asks core about what it read: `IConnectivity.CheckIdentityAsync(host, serviceId, identity, publiclyValid)`.
 - `identity` is a `PresentedIdentity` of kind `TlsCertificate`, with its algorithm `x509`, the certificate's SHA-256 fingerprint, its subject and expiry. `publiclyValid` says whether the certificate chained to a trusted root for the address.
