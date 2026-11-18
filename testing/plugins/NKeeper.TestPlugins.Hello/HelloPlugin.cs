@@ -309,6 +309,29 @@ public sealed class HelloPlugin : IPlugin
             }
         });
 
+        // Opens a plain TCP connection to a service (SDK 1.9), sends a line and reads the answer, as a plugin reading a
+        // server's pre-login would.
+        use.MapPost("/tcp", async (HostContext host, TcpProbe? probe, IConnectivity connectivity) =>
+        {
+            if (probe is null)
+            {
+                return Results.Text("no probe");
+            }
+
+            try
+            {
+                await using var tcp = await connectivity.OpenTcpAsync(host, probe.ServiceId);
+                await tcp.Stream.WriteAsync(System.Text.Encoding.ASCII.GetBytes(probe.Send + "\n"));
+                var buffer = new byte[256];
+                var read = await tcp.Stream.ReadAsync(buffer);
+                return Results.Json(new { address = tcp.Address, port = tcp.Port, answer = System.Text.Encoding.ASCII.GetString(buffer, 0, read) });
+            }
+            catch (ConnectException ex)
+            {
+                return Results.Json(new { reason = ex.Reason.ToString(), message = ex.Message }, statusCode: StatusCodes.Status502BadGateway);
+            }
+        });
+
         // Checks a made-up certificate against the trust store, as a plugin does with one it read in its own protocol (SDK 1.7).
         use.MapPost("/identity", async (HostContext host, IdentityProbe? probe, IConnectivity connectivity) =>
         {
@@ -579,6 +602,8 @@ public sealed record DesktopProbe(Guid ServiceId, Guid CredentialId, DesktopProt
 public sealed record TelnetStep(string Expect, string? Send = null);
 
 public sealed record DatabaseProbe(Guid ServiceId, Guid? CredentialId = null, string? Database = null, bool Keep = false);
+
+public sealed record TcpProbe(Guid ServiceId, string Send = "ping");
 
 public sealed record IdentityProbe(Guid ServiceId, string Fingerprint, bool PubliclyValid = false);
 

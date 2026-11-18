@@ -64,6 +64,15 @@ public interface IConnectivity
         => throw new NotSupportedException("This server doesn't check identities for plugins: it needs SDK 1.7.");
 
     /// <summary>
+    /// A plain TCP connection to a service (docs/architecture.md §7.31, SDK 1.9), through its jump host when it has one,
+    /// for a plugin that speaks the server's own protocol before core signs in, as SQL Server's pre-login hands over its
+    /// certificate. Core sends nothing on it.
+    /// </summary>
+    /// <exception cref="ConnectException">The service can't be reached; <see cref="ConnectException.Reason"/> says why.</exception>
+    Task<ITcpConnection> OpenTcpAsync(HostContext host, Guid serviceId, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("This server doesn't open TCP connections for plugins: it needs SDK 1.9.");
+
+    /// <summary>
     /// A remote desktop through guacd (docs/architecture.md §7.20, SDK 0.1.9): RDP, or VNC with
     /// <see cref="DesktopOptions.Protocol"/> (SDK 1.2). Core checks the handle and, for RDP, the server's certificate,
     /// and does the Guacamole handshake with the credential, which the plugin never sees.
@@ -249,6 +258,18 @@ public interface IHttpConnection : IAsyncDisposable
 }
 
 /// <summary>An open, authenticated SSH connection. Disposing it closes it, and its jump host tunnel.</summary>
+/// <summary>A plain TCP connection to a service (SDK 1.9). Disposing it closes it, and its jump host tunnel.</summary>
+public interface ITcpConnection : IAsyncDisposable
+{
+    Stream Stream { get; }
+
+    /// <summary>The service's own address, which its certificate is checked against, even when the connection goes through a tunnel.</summary>
+    string Address { get; }
+
+    /// <summary>The service's port.</summary>
+    int Port { get; }
+}
+
 public interface ISshConnection : IAsyncDisposable
 {
     /// <summary>Runs a command and waits for it to finish.</summary>

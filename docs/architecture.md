@@ -1057,6 +1057,13 @@ DbConnection connection = login.Connection;
   - a changed one throws `HostKeyChanged`, audited as `trust.mismatch`.
 - The plugin then pins its driver to exactly that certificate, as 1.x's SQL Server connector did. Core can't check that it does: the plugin's own driver makes the TLS connection. A plugin that skips the check, or pins nothing, is a plugin bug core can't catch, as for any code in process (plugin-security.md §12.4).
 
+**A plain TCP connection (SDK 1.9).** A plugin that reads a server's identity in the server's own protocol needs to reach the server first, before core signs in, as SQL Server's pre-login hands over its certificate. `IConnectivity.OpenTcpAsync(host, serviceId)` opens a TCP connection to the service's address and port for it:
+- through the host's jump host when it has one (§7.8), as for HTTP (§7.16);
+- only from the plugin's own host-scoped endpoint, for the host core authorized, as for every connection here;
+- core sends nothing on it and reads nothing from it. It carries no credential, so it isn't audited;
+- it gives the stream, and the service's own address and port, which a certificate is checked against even through a tunnel;
+- disposing it closes the connection and the tunnel. Failures are `ConnectException`: `Unreachable`, `TimedOut` or `JumpHostUnavailable`.
+
 ### 7.32 The `db-core` plugin
 
 What the database engine plugins (SQL Server, Oracle, SAP ASE) share, ported from 1.x's `Databases/` and `features/databases`, in its own repository, `NKeeper-Plugin-DbCore` (§9), on SDK 1.8 (`>=1.8.0 <2.0.0`). It's v2-plan.md's sub-registry: db-core contributes nothing itself, and each engine plugin depends on it (`dependsOn`, v2-plan.md §4.5) and brings its own driver.
