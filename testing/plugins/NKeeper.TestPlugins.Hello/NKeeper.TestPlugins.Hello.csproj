@@ -16,4 +16,9 @@
     <ProjectReference Include="..\..\..\core\backend\NKeeper.Abstractions\NKeeper.Abstractions.csproj" Private="false" ExcludeAssets="runtime" />
   </ItemGroup>
 
+  <!-- The server's own Npgsql, as a database driver for core's database connections (SDK 1.7), not copied. -->
+  <ItemGroup>
+    <PackageReference Include="Npgsql" ExcludeAssets="runtime" />
+  </ItemGroup>
+
 </Project>

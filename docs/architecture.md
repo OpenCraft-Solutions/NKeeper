@@ -1005,6 +1005,39 @@ Dell iDRACs, at their own management address, ported from 1.x's `IdracController
 - **Scanner** (scan action `idrac.scan`, §7.26): the server's hardware over Redfish. That's its host name, its service tag (else its serial number) as the serial number, its CPU threads and its memory, with the model in a note, as 1.x's `idracHardware`. The iDRAC's own address and MAC address are the BMC's, not the server's, so they're left out.
 - **Not yet:** the HTML5 virtual console. It needs a web session through the iDRAC, as the web plugin's (§7.19), and arrives with a way for one plugin to open another's sessions.
 
+### 7.31 Database connections
+
+Database drivers sign in with the password in their connection string. A plugin never sees one (D13), so core opens database connections too, as plugin-security.md §12.3 planned (SDK 1.7). Core knows no database: the plugin brings its driver, and core only fills in the login and opens it.
+
+```csharp
+await using var login = await connectivity.OpenDatabaseAsync(host, serviceId, handle, new DatabaseConnectRequest(
+    SqlClientFactory.Instance,
+    endpoint => new SqlConnectionStringBuilder { DataSource = $"tcp:{endpoint.Address},{endpoint.Port}", Encrypt = true, Pooling = false },
+    UserKeyword: "User ID", PasswordKeyword: "Password"));
+DbConnection connection = login.Connection;
+```
+
+**`OpenDatabaseAsync(host, serviceId, handle, request)`:**
+- It checks the handle as for SSH (§7.9). The credential needs a user name and a password, or it's refused with `NoSecret`.
+- **Through a jump host** (§7.8), core forwards a loopback port to the service, as for HTTP (§7.16). The plugin's builder is given the address and port to dial: the service's own, or the tunnel's.
+- Core sets the user name and password under the keywords the plugin names, and `Persist Security Info=false` when the driver has that keyword. A domain, when the credential has one, is set under `DomainKeyword` if the plugin names one, or else prefixed to the user name (`DOMAIN\user`).
+- It opens the connection with the plugin's `DbProviderFactory`, in the plugin's own load context.
+- **Then it checks** that the driver forgot the password: if the open connection's `ConnectionString` still contains it, core closes the connection and refuses it. That keeps the password from reaching the plugin through its own driver, as §12.3 asks.
+- It returns an `IDatabaseLogin`:
+  - `Connection`, open;
+  - `OpenAnotherAsync()`, for another connection with the same login, as 1.x's database tools opened beside the query window;
+  - disposing it closes every connection it opened, and the tunnel.
+- It's audited as `credential.use` (`database to service …`). Failures are `ConnectException`: `AuthenticationFailed` for a login the server refused (the driver's message, without the password), `Unreachable`, `TimedOut`, `JumpHostUnavailable` or `NoSecret`.
+
+**Server identities a plugin reads (SDK 1.7).** Some servers prove themselves inside their own protocol, as SQL Server sends its certificate inside TDS. Core can't read those, so the plugin does, and asks core about what it read: `IConnectivity.CheckIdentityAsync(host, serviceId, identity, publiclyValid)`.
+- `identity` is a `PresentedIdentity` of kind `TlsCertificate`, with its algorithm `x509`, the certificate's SHA-256 fingerprint, its subject and expiry. `publiclyValid` says whether the certificate chained to a trusted root for the address.
+- Core applies the trust store's rules (§7.7), as for an HTTPS certificate (§7.16):
+  - a publicly valid one passes;
+  - a trusted one passes;
+  - an unknown one throws `ConnectException` with `HostKeyUnknown` and the identity, which core remembers it presented, so the user can trust it;
+  - a changed one throws `HostKeyChanged`, audited as `trust.mismatch`.
+- The plugin then pins its driver to exactly that certificate, as 1.x's SQL Server connector did. Core can't check that it does: the plugin's own driver makes the TLS connection. A plugin that skips the check, or pins nothing, is a plugin bug core can't catch, as for any code in process (plugin-security.md §12.4).
+
 ## 8. The native install
 
 `deploy/setup.sh` installs NKeeper on a Linux server, from a checkout of the repository, as root. It's an early version of the Phase 6 installer (v2-plan.md §8). NKeeper installs natively only (D8): systemd, nginx and PostgreSQL, no containers.

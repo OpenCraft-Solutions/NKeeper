@@ -45,6 +45,25 @@ public interface IConnectivity
         => throw new NotSupportedException("This server doesn't open SSH on another port: it needs SDK 1.6.");
 
     /// <summary>
+    /// A database connection with the plugin's own driver (docs/architecture.md §7.31, SDK 1.7): core adds the handle's
+    /// login, opens it through the jump host if there is one, and refuses it if the driver kept the password.
+    /// </summary>
+    /// <exception cref="CredentialDeniedException">The handle isn't valid here.</exception>
+    /// <exception cref="ConnectException">The connection couldn't be opened; <see cref="ConnectException.Reason"/> says why.</exception>
+    Task<IDatabaseLogin> OpenDatabaseAsync(HostContext host, Guid serviceId, CredentialHandle handle, DatabaseConnectRequest request, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("This server doesn't open database connections: it needs SDK 1.7.");
+
+    /// <summary>
+    /// Checks a server identity the plugin read in its own protocol (docs/architecture.md §7.31, SDK 1.7), such as SQL
+    /// Server's certificate inside TDS, against the trust store, as for an HTTPS certificate. It returns when the identity
+    /// may be used; the plugin then pins its driver to it.
+    /// </summary>
+    /// <param name="publiclyValid">Whether the certificate chained to a trusted root for the service's address.</param>
+    /// <exception cref="ConnectException"><see cref="ConnectFailure.HostKeyUnknown"/> with the identity, or <see cref="ConnectFailure.HostKeyChanged"/>.</exception>
+    Task CheckIdentityAsync(HostContext host, Guid serviceId, PresentedIdentity identity, bool publiclyValid, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("This server doesn't check identities for plugins: it needs SDK 1.7.");
+
+    /// <summary>
     /// A remote desktop through guacd (docs/architecture.md §7.20, SDK 0.1.9): RDP, or VNC with
     /// <see cref="DesktopOptions.Protocol"/> (SDK 1.2). Core checks the handle and, for RDP, the server's certificate,
     /// and does the Guacamole handshake with the credential, which the plugin never sees.

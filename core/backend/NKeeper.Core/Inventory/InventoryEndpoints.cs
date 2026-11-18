@@ -46,6 +46,7 @@ public static class InventoryEndpoints
             .AddScoped<NKeeper.Core.Connectivity.DesktopConnector>()
             .AddScoped<NKeeper.Core.Connectivity.Telnet.TelnetConnector>()
             .AddScoped<NKeeper.Core.Connectivity.Rpc.RpcConnector>()
+            .AddScoped<NKeeper.Core.Connectivity.DatabaseConnector>()
             .AddScoped<NKeeper.Core.Connectivity.Wmi.WmiConnector>()
             .AddScoped<NKeeper.Core.Connectivity.IJumpTunnels, NKeeper.Core.Connectivity.NoJumpTunnels>()
             .AddSingleton<TrustPresentationStore>()

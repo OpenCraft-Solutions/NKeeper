@@ -34,6 +34,14 @@ public sealed class SshConnectivity(SshConnectionPlanner planner, TrustStore tru
     public Task<ITelnetConnection> OpenTelnetAsync(HostContext host, Guid serviceId, CredentialHandle? handle, TerminalSize size, CancellationToken cancellationToken = default) =>
         services.GetRequiredService<NKeeper.Core.Connectivity.Telnet.TelnetConnector>().OpenAsync(host, serviceId, handle, size, cancellationToken);
 
+    /// <summary>Databases are core's own too (docs/architecture.md §7.31), with the plugin's driver, tunnelled like HTTP.</summary>
+    public Task<IDatabaseLogin> OpenDatabaseAsync(HostContext host, Guid serviceId, CredentialHandle handle, DatabaseConnectRequest request, CancellationToken cancellationToken = default) =>
+        services.GetRequiredService<DatabaseConnector>().OpenAsync(host, serviceId, handle, request, cancellationToken);
+
+    /// <inheritdoc />
+    public Task CheckIdentityAsync(HostContext host, Guid serviceId, PresentedIdentity identity, bool publiclyValid, CancellationToken cancellationToken = default) =>
+        services.GetRequiredService<DatabaseConnector>().CheckIdentityAsync(host, serviceId, identity, publiclyValid, cancellationToken);
+
     /// <summary>WMI and RPC are core's own (docs/architecture.md §7.28): no SSH, and no jump hosts.</summary>
     public Task<IWmiConnection> OpenWmiAsync(HostContext host, Guid serviceId, CredentialHandle handle, CancellationToken cancellationToken = default) =>
         services.GetRequiredService<NKeeper.Core.Connectivity.Wmi.WmiConnector>().OpenAsync(host, serviceId, handle, cancellationToken);
