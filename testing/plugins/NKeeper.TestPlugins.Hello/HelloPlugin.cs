@@ -285,7 +285,7 @@ public sealed class HelloPlugin : IPlugin
             {
                 var handle = await broker.ResolveSavedAsync(host, probe.ServiceId, probe.CredentialId ?? Guid.Empty);
                 var request = new DatabaseConnectRequest(
-                    probe.Keep ? KeepingFactory.Instance : Npgsql.NpgsqlFactory.Instance,
+                    probe.Throw ? KeepingFactory.Throwing : probe.Keep ? KeepingFactory.Instance : Npgsql.NpgsqlFactory.Instance,
                     endpoint => new Npgsql.NpgsqlConnectionStringBuilder { Host = endpoint.Address, Port = endpoint.Port, Database = probe.Database, Pooling = false, PersistSecurityInfo = true },
                     "Username",
                     "Password");
@@ -601,7 +601,7 @@ public sealed record DesktopProbe(Guid ServiceId, Guid CredentialId, DesktopProt
 /// <summary>Waits for <paramref name="Expect"/> in the terminal, then types <paramref name="Send"/> and Enter.</summary>
 public sealed record TelnetStep(string Expect, string? Send = null);
 
-public sealed record DatabaseProbe(Guid ServiceId, Guid? CredentialId = null, string? Database = null, bool Keep = false);
+public sealed record DatabaseProbe(Guid ServiceId, Guid? CredentialId = null, string? Database = null, bool Keep = false, bool Throw = false);
 
 public sealed record TcpProbe(Guid ServiceId, string Send = "ping");
 
@@ -610,11 +610,18 @@ public sealed record IdentityProbe(Guid ServiceId, string Fingerprint, bool Publ
 /// <summary>A driver that keeps the password in its connection string after opening, as core must refuse (SDK 1.7).</summary>
 public sealed class KeepingFactory : System.Data.Common.DbProviderFactory
 {
-    public static readonly KeepingFactory Instance = new();
+    public static readonly KeepingFactory Instance = new(throwing: false);
 
-    public override System.Data.Common.DbConnection CreateConnection() => new KeepingConnection();
+    /// <summary>A driver whose error isn't a DbException, and repeats the connection string, password and all (SDK 1.9).</summary>
+    public static readonly KeepingFactory Throwing = new(throwing: true);
 
-    private sealed class KeepingConnection : System.Data.Common.DbConnection
+    private readonly bool _throwing;
+
+    private KeepingFactory(bool throwing) => _throwing = throwing;
+
+    public override System.Data.Common.DbConnection CreateConnection() => new KeepingConnection(_throwing);
+
+    private sealed class KeepingConnection(bool throwing) : System.Data.Common.DbConnection
     {
         private System.Data.ConnectionState _state = System.Data.ConnectionState.Closed;
 
@@ -635,7 +642,7 @@ public sealed class KeepingFactory : System.Data.Common.DbProviderFactory
 
         public override void Close() => _state = System.Data.ConnectionState.Closed;
 
-        public override void Open() => _state = System.Data.ConnectionState.Open;
+        public override void Open() => _state = throwing ? throw new InvalidOperationException($"Refused: {ConnectionString}") : System.Data.ConnectionState.Open;
 
         protected override System.Data.Common.DbTransaction BeginDbTransaction(System.Data.IsolationLevel isolationLevel) => throw new NotSupportedException();
 

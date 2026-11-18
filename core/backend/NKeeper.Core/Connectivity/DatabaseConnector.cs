@@ -173,15 +173,17 @@ public sealed class DatabaseConnector(
                 {
                     throw new ConnectException(ConnectFailure.TimedOut, $"{display} didn't answer in time.");
                 }
-                catch (DbException ex)
-                {
-                    throw new ConnectException(
-                        ex.InnerException is SocketException || ex.GetBaseException() is SocketException ? ConnectFailure.Unreachable : ConnectFailure.AuthenticationFailed,
-                        $"{display}: {Scrub(Messages(ex))}");
-                }
                 catch (SocketException)
                 {
                     throw new ConnectException(ConnectFailure.Unreachable, $"Couldn't connect to {display}.");
+                }
+                catch (Exception ex) when (ex is not (OperationCanceledException or OutOfMemoryException))
+                {
+                    // Most drivers' errors are DbExceptions, but not every driver's (AdoNetCore.AseClient's derive from
+                    // SystemException): whatever it threw, the plugin gets the driver's words, without the password.
+                    throw new ConnectException(
+                        ex.InnerException is SocketException || ex.GetBaseException() is SocketException ? ConnectFailure.Unreachable : ConnectFailure.AuthenticationFailed,
+                        $"{display}: {Scrub(Messages(ex))}");
                 }
 
                 // The driver must have forgotten the password (plugin-security.md §12.3): read with its own parser, so a user

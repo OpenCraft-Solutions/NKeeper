@@ -50,6 +50,12 @@ public sealed class DatabaseConnectivityTests(PostgresFixture postgres) : IClass
         var kept = await ProbeAsync(admin, host, "db", new { serviceId = ServiceId(host), credentialId = CredentialId(host), keep = true }, HttpStatusCode.BadGateway);
         Assert.Equal("SecurityNegotiationFailed", kept.GetProperty("reason").GetString());
 
+        // A driver whose error isn't a DbException, repeating the password: refused, in its words, without the password.
+        var thrown = await ProbeAsync(admin, host, "db", new { serviceId = ServiceId(host), credentialId = CredentialId(host), @throw = true }, HttpStatusCode.BadGateway);
+        Assert.Equal("AuthenticationFailed", thrown.GetProperty("reason").GetString());
+        Assert.Contains("Refused:", thrown.GetProperty("message").GetString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(database.Password!, thrown.GetProperty("message").GetString(), StringComparison.Ordinal);
+
         var none = await CreateHostAsync(admin, database.Port, database.Username!, null);
         Assert.Equal("NoSecret", (await ProbeAsync(admin, none, "db", new { serviceId = ServiceId(none), credentialId = CredentialId(none) }, HttpStatusCode.BadGateway)).GetProperty("reason").GetString());
         Assert.Empty(await AuditAsync(server, AuditActions.CredentialUse));
