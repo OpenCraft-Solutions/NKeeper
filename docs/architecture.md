@@ -997,12 +997,12 @@ Windows hosts over RPC, ported from 1.x's `Rpc/`, `EventLogs/` and `WindowsInter
 
 Dell iDRACs, at their own management address, ported from 1.x's `IdracController`, `IdracRedfish` and `RedfishClient`, in its own repository, `NKeeper-Plugin-iDRAC` (§9), on SDK 1.6 (`>=1.6.0 <2.0.0`).
 
-- **Service type `idrac`** ("iDRAC"): default port 443, health by TLS.
+- **Service type `idrac`** ("iDRAC"): default port 443, health by TLS. Its one setting is RACADM's SSH port, 22 when it's left empty.
 - **Overview and power** (session type `idrac-status`, host action `idrac.status`), a stream session over one HTTPS connection core signs in to (§7.16), as 1.x's iDRAC view. It speaks the linux plugin's request protocol (§7.25):
   - `overview`: the server as Redfish reports it. That's the model, service tag, serial number, power state, health, BIOS, processors, memory, the manager's model and firmware, and the power actions it accepts. Resources are found from the service root rather than assumed, so other Redfish BMCs work too;
   - `power` `{ resetType }`: presses one of the server's power buttons (`ComputerSystem.Reset`), one of the reset types the server lists. It's audited as `idrac.power`. The view asks before every action but switching on.
-- **RACADM** (session type `idrac-racadm`, host action `idrac.racadm`): the iDRAC's SSH command line, a terminal on the same service's address at port 22 (§7.9, another port). It's 1.x's RACADM session, with its key trusted for port 22.
-- **Scanner** (scan action `idrac.scan`, §7.26): the server's hardware over Redfish. That's its serial number, model (as the operating system's place, "PowerEdge R650"), CPU threads, memory, and the iDRAC's own MAC address and hostname.
+- **RACADM** (session type `idrac-racadm`, host action `idrac.racadm`): the iDRAC's SSH command line, a terminal on the same service's address at its RACADM port (§7.9, another port), drawn by the ssh plugin's terminal view. It's 1.x's RACADM session, with its key trusted for that port.
+- **Scanner** (scan action `idrac.scan`, §7.26): the server's hardware over Redfish. That's its host name, its service tag (else its serial number) as the serial number, its CPU threads and its memory, with the model in a note, as 1.x's `idracHardware`. The iDRAC's own address and MAC address are the BMC's, not the server's, so they're left out.
 - **Not yet:** the HTML5 virtual console. It needs a web session through the iDRAC, as the web plugin's (§7.19), and arrives with a way for one plugin to open another's sessions.
 
 ## 8. The native install
