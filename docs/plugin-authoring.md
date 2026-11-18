@@ -70,7 +70,7 @@ The manifest:
 }
 ```
 
-A plugin with a frontend adds `"frontend": { "entry": "frontend/index.js" }`. The ID is lower-case letters, digits and `-`; plugin-security.md §5 has every rule the server checks. Built-in plugins also say `"builtIn": true`.
+A plugin with a frontend adds `"frontend": { "entry": "frontend/index.js" }`. The ID is lower-case letters, digits and `-`; plugin-security.md §5 has every rule the server checks. Official plugins also say `"builtIn": true`: on by default (architecture.md §9.2). A plugin may depend only on a shared plugin, such as db-core, within one major version (`>=1.0.0 <2.0.0`); architecture.md §9.2 has the rules.
 
 ## 3. The backend contract
 

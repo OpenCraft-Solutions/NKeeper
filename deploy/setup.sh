@@ -49,6 +49,9 @@ NKeeper's native installer (docs/architecture.md §8).
         --no-guacd              don't build or run guacd: remote desktops then say the gateway is unavailable
         --no-store-requests     the plugins page shows the command to install a plugin from the catalog, instead
                                 of asking root's helper to (docs/architecture.md §9.1). Kept on upgrade.
+        --allow-web-trust       lets administrators trust third-party signing keys from the plugins page
+                                (docs/architecture.md §9.3). An administrator account can then run code of its own
+                                choosing on this server. Off by default; kept on upgrade.
         --web-domain <domain>   where web pages open: nkw-<id>.<domain> (docs/architecture.md §7.18). Needs a
                                 wildcard DNS record, *.<domain>, pointing at this server. Kept on upgrade.
         --yes                   don't ask anything
@@ -91,7 +94,7 @@ selinux() { command -v selinuxenabled >/dev/null 2>&1 && selinuxenabled; }
 
 command=${1:-}
 [ $# -gt 0 ] && shift
-names=() cert="" key="" admin_user=admin admin_email="" admin_password="" assume_yes=false purge=false web_domain="" no_guacd=false no_store_requests=false
+names=() cert="" key="" admin_user=admin admin_email="" admin_password="" assume_yes=false purge=false web_domain="" no_guacd=false no_store_requests=false allow_web_trust=false
 while [ $# -gt 0 ]; do
     case $1 in
         --server-name) names+=("${2:?--server-name needs a value}"); shift 2 ;;
@@ -104,6 +107,7 @@ while [ $# -gt 0 ]; do
         --yes) assume_yes=true; shift ;;
         --no-guacd) no_guacd=true; shift ;;
         --no-store-requests) no_store_requests=true; shift ;;
+        --allow-web-trust) allow_web_trust=true; shift ;;
         --purge) purge=true; shift ;;
         -h|--help) usage; exit 0 ;;
         *) die "Unknown option: $1 (see --help)" ;;
@@ -280,7 +284,15 @@ replace_dir() {
 # The packages the plugin catalog installed (docs/architecture.md §9.1) survive a reinstall: a plugin the lock file
 # doesn't name, or a newer version than the lock file's, is carried into the new plugin directory.
 keep_store_plugins() {
-    local file name lock_id lock_version version found kept=()
+    local file name lock_id lock_version version found kept=() removed_id
+    # The lock file's plugins an administrator removed (docs/architecture.md §9.2) stay removed.
+    if [ -f "$PREFIX/plugins/.removed" ]; then
+        while read -r removed_id; do
+            [[ $removed_id =~ ^[a-z0-9][a-z0-9.-]*$ ]] || continue
+            rm -f "$build_dir/out/plugins/$removed_id"-[0-9]*.nkp
+        done <"$PREFIX/plugins/.removed"
+        cp "$PREFIX/plugins/.removed" "$build_dir/out/plugins/.removed"
+    fi
     for file in "$PREFIX"/plugins/*.nkp; do
         [ -f "$file" ] || continue
         name=$(basename "$file" .nkp) found="" lock_version=""
@@ -406,6 +418,18 @@ configure_store_requests() {
     install -d -o nkeeper -g nkeeper -m 0750 "$STATE/plugin-requests"
     install -o root -g root -m 0644 "$REPO/deploy/systemd/nkeeper-plugin-requests.path" /etc/systemd/system/
     install -o root -g root -m 0644 "$REPO/deploy/systemd/nkeeper-plugin-requests.service" /etc/systemd/system/
+
+    # Web trust (§9.3): both locks, the setting the helper checks and the unit's write access to the trust directory.
+    $allow_web_trust && set_env "$ENV_FILE" Plugins__Catalog__AllowWebTrust true
+    local dropin=/etc/systemd/system/nkeeper-plugin-requests.service.d
+    if [ "$(get_env "$ENV_FILE" Plugins__Catalog__AllowWebTrust)" = true ]; then
+        install -d -o root -g root -m 0755 "$dropin"
+        printf '[Service]\nReadWritePaths=%s\n' "$TRUST" >"$dropin/web-trust.conf"
+        chmod 0644 "$dropin/web-trust.conf"
+        warn "Administrators can trust plugin signing keys from the plugins page (--allow-web-trust): an administrator account can run code of its own choosing on this server."
+    else
+        rm -rf "$dropin"
+    fi
     systemctl daemon-reload
     systemctl enable --now nkeeper-plugin-requests.path >/dev/null 2>&1
 }
@@ -685,6 +709,7 @@ do_uninstall() {
     systemctl disable --now nkeeper nkeeper-guacd nkeeper-plugin-requests.path >/dev/null 2>&1 || true
     rm -f /etc/systemd/system/nkeeper.service /etc/systemd/system/nkeeper-guacd.service /usr/bin/nkeeper \
         /etc/systemd/system/nkeeper-plugin-requests.path /etc/systemd/system/nkeeper-plugin-requests.service
+    rm -rf /etc/systemd/system/nkeeper-plugin-requests.service.d
     systemctl daemon-reload
     rm -rf "$PREFIX" "$CACHE" /etc/nginx/conf.d/nkeeper.conf
     systemctl reload nginx >/dev/null 2>&1 || true

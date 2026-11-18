@@ -113,8 +113,11 @@ catch (TrustConfigurationException ex)
     pluginLogger.LogWarning("The plugin catalog is off: the trust directory can't be used ({Message}).", ex.Message);
 }
 
+builder.Services.AddSingleton<IPluginStateStore>(new DbPluginStateStore(database));
+builder.Services.AddSingleton<IPluginAuditSink>(new DbPluginAuditSink(database, TimeProvider.System));
 builder.Services.AddSingleton(provider => new PluginCatalogService(
     catalogOptions,
+    builder.Configuration.GetSection(PluginHostOptions.SectionName).Get<PluginHostOptions>() ?? new PluginHostOptions(),
     plugins,
     catalogContext,
     provider.GetRequiredService<IServiceScopeFactory>(),

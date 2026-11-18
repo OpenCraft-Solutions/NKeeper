@@ -7,6 +7,21 @@ import { App } from './App'
 import { loadPluginFrontends } from './plugins'
 import { ADMIN, bodyOf, credential, FakeSocket, fakeApi, host, problem, service, status, terminalPlugin } from './test/fixtures'
 
+/** Plugin administration with nothing in it: the catalog on, root's helper set up, no keys trusted from the page. */
+const ADMIN_PLUGINS = {
+  enabled: true,
+  canRequest: true,
+  canTrust: false,
+  refreshedAt: '2026-11-18T12:00:00Z',
+  catalogs: [{ url: 'https://catalog.test/catalog.json', official: true, error: null, warnings: [] }],
+  plugins: [],
+  conflicts: [],
+  switches: {},
+  keys: [],
+  pending: [],
+  results: [],
+}
+
 describe('loadPluginFrontends', () => {
   it('imports and activates a loaded plugin', async () => {
     const activate = vi.fn()
@@ -233,36 +248,31 @@ describe('App', () => {
     render(<App importer={vi.fn(async () => ({ default: definePlugin({ id: 'hello' }) }))} />)
     await user.click(await screen.findByRole('button', { name: 'Settings' }))
 
-    expect(screen.getByText('hello (built in)')).toBeInTheDocument()
+    expect(screen.getByText('hello (on by default)')).toBeInTheDocument()
     expect(screen.getByText('Can see passwords: Its driver keeps the password.')).toBeInTheDocument()
     expect(screen.getByText('Active')).toBeInTheDocument()
     expect(screen.getByText('Refused (hash_mismatch)')).toBeInTheDocument()
   })
 
   it('shows the plugin catalog’s updates and new plugins, and asks root’s helper to install one', async () => {
-    const candidate = (id: string, version: string) => ({ id, name: id.toUpperCase(), version, packageSha256: 'a'.repeat(64), keyId: 'k', builtIn: true, dependsOn: [] })
-    const catalog = {
-      enabled: true,
-      canRequest: true,
-      catalogUrl: 'https://catalog.test/catalog.json',
-      refreshedAt: '2026-11-18T12:00:00Z',
-      error: null,
-      warnings: [],
+    const candidate = (id: string, version: string) => ({ id, name: id.toUpperCase(), version, packageSha256: 'a'.repeat(64), keyId: 'k', builtIn: true, dependsOn: [] as string[] })
+    const listing = (status: object, catalog = 'https://catalog.test/catalog.json') => ({ catalog, official: catalog === 'https://catalog.test/catalog.json', status })
+    const admin = {
+      ...ADMIN_PLUGINS,
       plugins: [
-        { id: 'ssh', repository: 'o/ssh', summary: null, installedVersion: '1.0.0', available: candidate('ssh', '1.1.0'), reasonCode: null, message: null },
-        { id: 'kvm', repository: 'o/kvm', summary: 'KVM guests', installedVersion: null, available: { ...candidate('kvm', '1.0.0'), dependsOn: ['virt-core'] }, reasonCode: null, message: null },
-        { id: 'zabbix', repository: 'o/zabbix', summary: null, installedVersion: null, available: null, reasonCode: 'sdk_incompatible', message: 'Needs SDK 2.' },
+        listing({ id: 'ssh', repository: 'o/ssh', summary: null, installedVersion: '1.0.0', available: candidate('ssh', '1.1.0'), reasonCode: null, message: null }),
+        listing({ id: 'kvm', repository: 'o/kvm', summary: 'KVM guests', installedVersion: null, available: { ...candidate('kvm', '1.0.0'), dependsOn: ['virt-core'] }, reasonCode: null, message: null }),
+        listing({ id: 'zabbix', repository: 'o/zabbix', summary: null, installedVersion: null, available: null, reasonCode: 'sdk_incompatible', message: 'Needs SDK 2.' }),
+        listing({ id: 'com.example.netbox', repository: 'example/netbox', summary: null, installedVersion: null, available: candidate('com.example.netbox', '2.0.0'), reasonCode: null, message: null }, 'https://example.com/catalog.json'),
       ],
-      pending: [],
-      results: [],
     }
     const fetch = fakeApi({
       'GET /api/auth/me': ADMIN,
       'GET /api/plugins': [status()],
       'GET /api/hosts': [],
       'GET /api/health': [],
-      'GET /api/plugins/catalog': catalog,
-      'POST /api/plugins/catalog/requests': { ...catalog, pending: ['kvm'] },
+      'GET /api/plugins/catalog': admin,
+      'POST /api/plugins/catalog/requests': { ...admin, pending: ['kvm'] },
     })
     const user = userEvent.setup()
 
@@ -273,14 +283,40 @@ describe('App', () => {
     expect(within(updates).getByText('1.0.0 → 1.1.0')).toBeInTheDocument()
     const available = screen.getByRole('table', { name: 'Available' })
     expect(within(available).getByText('KVM guests')).toBeInTheDocument()
+    expect(within(available).getByText('https://example.com/catalog.json')).toBeInTheDocument()
     expect(screen.getByText('zabbix: Needs SDK 2. (sdk_incompatible)')).toBeInTheDocument()
 
-    await user.click(within(available).getByRole('button', { name: 'Install' }))
+    await user.click(within(available).getAllByRole('button', { name: 'Install' })[0]!)
     expect(screen.getByText(/with virt-core if missing/)).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Install and restart' }))
 
     expect(bodyOf(fetch, 'POST /api/plugins/catalog/requests')).toEqual({ id: 'kvm' })
     expect(await within(screen.getByRole('table', { name: 'Available' })).findByRole('button', { name: 'Waiting…' })).toBeDisabled()
+  })
+
+  it('turns a plugin off with the plugins that need it, at the next restart, and offers the restart', async () => {
+    const admin = { ...ADMIN_PLUGINS, switches: { 'db-core': true, mssql: true } }
+    const fetch = fakeApi({
+      'GET /api/auth/me': ADMIN,
+      'GET /api/plugins': [status({ id: 'db-core', frontendEntry: null }), status({ id: 'mssql', frontendEntry: null, dependsOn: ['db-core'] })],
+      'GET /api/hosts': [],
+      'GET /api/health': [],
+      'GET /api/plugins/catalog': admin,
+      'POST /api/plugins/db-core/disable': { changed: ['mssql', 'db-core'], catalog: { ...admin, switches: { 'db-core': false, mssql: false } } },
+    })
+    const user = userEvent.setup()
+
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: 'Settings' }))
+    const row = (await screen.findByText('db-core (on by default)')).closest('tr')!
+    await user.click(within(row).getByRole('button', { name: 'Turn off' }))
+
+    expect(screen.getByText(/mssql needs it and turn off too/)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Turn db-core off' }))
+
+    expect(fetch).toHaveBeenCalledWith('/api/plugins/db-core/disable', expect.objectContaining({ method: 'POST' }))
+    expect(await screen.findAllByText('Off at the next restart')).toHaveLength(2)
+    expect(screen.getByRole('button', { name: 'Restart now (ends every open session)' })).toBeInTheDocument()
   })
 
   it('hides plugins and creating hosts from other users', async () => {

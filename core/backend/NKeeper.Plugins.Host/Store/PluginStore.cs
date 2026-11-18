@@ -14,24 +14,24 @@ public enum InstallResult
     Upgraded,
     UpToDate,
     Failed,
+    Removed,
+    Trusted,
+    Untrusted,
+    Restarting,
 }
-
-/// <summary>An administrator's request from the plugins page, which root's helper applies (docs/architecture.md §9.1).</summary>
-public sealed record InstallRequest(string Id, string Version, string PackageSha256, string RequestedBy);
 
 /// <summary>
 /// Root's side of the catalog (docs/architecture.md §9.1): refreshing it, and installing and upgrading from it into the
 /// plugin directory. It trusts nothing the service wrote: it fetches the catalog and packages itself, and verifies them
 /// with root's own trust configuration.
 /// </summary>
-public sealed class PluginStore(string pluginDirectory, Uri catalogUrl, IPluginReleaseSource source, VerificationContext context)
+public sealed partial class PluginStore(string pluginDirectory, Uri catalogUrl, IPluginReleaseSource source, VerificationContext context)
 {
     /// <summary>The most requests one run of the helper applies; any more are refused.</summary>
     public const int MaxRequestsPerRun = 10;
 
     public const string RequestExtension = ".json";
     public const string ResultExtension = ".result";
-    private const int MaxRequestBytes = 4096;
 
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = false };
 
@@ -157,15 +157,7 @@ public sealed class PluginStore(string pluginDirectory, Uri catalogUrl, IPluginR
             }
             else
             {
-                var these = new List<InstallOutcome>();
-                await InstallAsync(request.Id, request, these, [], cancellationToken);
-                outcomes.AddRange(these);
-                outcome = these.LastOrDefault(o => o.Id == request.Id) ?? new InstallOutcome(request.Id, request.Version, InstallResult.Failed, "Nothing was installed.");
-                if (these.Count > 1)
-                {
-                    var dependencies = string.Join(", ", these.Where(o => o.Id != request.Id).Select(o => $"{o.Id} {o.Version}: {o.Result}"));
-                    outcome = outcome with { Message = $"{outcome.Message} Dependencies: {dependencies}." };
-                }
+                outcome = await ApplyAsync(file, request, outcomes, cancellationToken);
             }
 
             WriteResult(file, request, outcome);
@@ -180,9 +172,9 @@ public sealed class PluginStore(string pluginDirectory, Uri catalogUrl, IPluginR
 
     /// <summary>Whether any outcome put a package in the plugin directory, so NKeeper needs a restart.</summary>
     public static bool Changed(IEnumerable<InstallOutcome> outcomes) =>
-        outcomes.Any(o => o.Result is InstallResult.Installed or InstallResult.Upgraded);
+        outcomes.Any(o => o.Result is InstallResult.Installed or InstallResult.Upgraded or InstallResult.Removed or InstallResult.Trusted or InstallResult.Untrusted or InstallResult.Restarting);
 
-    private async Task InstallAsync(string id, InstallRequest? request, List<InstallOutcome> outcomes, HashSet<string> visiting, CancellationToken cancellationToken)
+    private async Task InstallAsync(string id, PluginRequest? request, List<InstallOutcome> outcomes, HashSet<string> visiting, CancellationToken cancellationToken)
     {
         if (outcomes.Any(o => o.Id == id) || !visiting.Add(id))
         {
@@ -275,6 +267,7 @@ public sealed class PluginStore(string pluginDirectory, Uri catalogUrl, IPluginR
         }
 
         File.Move(part, path, overwrite: true);
+        MarkRemoved(id, removed: false);
         foreach (var other in Directory.EnumerateFiles(pluginDirectory, "*" + PackageFormat.Extension))
         {
             if (Path.GetFileName(other) != name && ParsePackageName(Path.GetFileName(other)) is var (otherId, _) && otherId == id)
@@ -320,35 +313,10 @@ public sealed class PluginStore(string pluginDirectory, Uri catalogUrl, IPluginR
     }
 
     /// <summary>
-    /// A request as the service wrote it: a regular file (never a link), small, with every field. Anything else is
-    /// treated as no request.
-    /// </summary>
-    private static InstallRequest? ReadRequest(FileInfo file)
-    {
-        try
-        {
-            if (file.LinkTarget is not null || file.Length > MaxRequestBytes)
-            {
-                return null;
-            }
-
-            var request = JsonSerializer.Deserialize<InstallRequest>(File.ReadAllBytes(file.FullName), Json);
-            return request is { Id: { } id, Version: { } version, PackageSha256: { Length: 64 } sha, RequestedBy: not null }
-                   && PluginId.IsValid(id) && SemanticVersion.TryParse(version, out _) && sha.All(char.IsAsciiHexDigit)
-                ? request
-                : null;
-        }
-        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
-        {
-            return null;
-        }
-    }
-
-    /// <summary>
     /// Replaces a request with its result. The result is created exclusively, so a link the service put in its place
     /// is never written through; the request is removed either way.
     /// </summary>
-    private static void WriteResult(FileInfo file, InstallRequest? request, InstallOutcome outcome)
+    private static void WriteResult(FileInfo file, PluginRequest? request, InstallOutcome outcome)
     {
         var result = Path.ChangeExtension(file.FullName, ResultExtension);
         try

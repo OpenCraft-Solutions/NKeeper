@@ -16,13 +16,17 @@ internal static class PluginCommand
     private const string Usage = """
         Usage: nkeeper plugin <command>
 
-          list                   the installed plugin packages
-          update                 refreshes the catalog: what can be installed or upgraded
-          upgrade [<id>...]      upgrades every installed plugin with a newer release, or those named
-          install <id>...        installs catalogued plugins, with the plugins they depend on
-          apply-requests         applies the plugins page's requests (run by nkeeper-plugin-requests.service)
+          list                       the installed plugin packages
+          update                     refreshes the catalog: what can be installed or upgraded
+          upgrade [<id>...]          upgrades every installed plugin with a newer release, or those named
+          install <id>...            installs catalogued plugins, with the plugins they depend on
+          remove <id>...             removes plugins' packages; their data is kept
+          trust list                 the keys in the trust directory
+          trust add <key file>       trusts a third-party publisher's key, for the IDs it names
+          trust remove <key ID>      stops trusting a third-party key
+          apply-requests             applies the plugins page's requests (run by nkeeper-plugin-requests.service)
 
-        install, upgrade and apply-requests need root. Add --restart to restart NKeeper after a change.
+        All but list, update and trust list need root. Add --restart to restart NKeeper after a change.
         """;
 
     public static async Task<int> RunAsync(string[] args, CancellationToken cancellationToken)
@@ -38,7 +42,7 @@ internal static class PluginCommand
 
         var command = args.FirstOrDefault();
         var restart = args.Contains("--restart");
-        var ids = args.Skip(1).Where(a => a != "--restart").ToList();
+        var rest = args.Skip(1).Where(a => a != "--restart").ToList();
         if (command is null or "help" or "--help" or "-h")
         {
             Console.WriteLine(Usage);
@@ -55,21 +59,32 @@ internal static class PluginCommand
             return 0;
         }
 
-        if (command is not ("update" or "upgrade" or "install" or "apply-requests") || (command == "install" && ids.Count == 0))
+        if (command == "trust" && rest is ["list"])
+        {
+            foreach (var (_, key) in PluginStore.TrustedKeysIn(options.TrustDirectory))
+            {
+                Console.WriteLine($"{key.KeyId} {key.Kind}: {string.Join(", ", key.AllowedIds)}{(key.Comment is null ? string.Empty : $" ({key.Comment})")}");
+            }
+
+            return 0;
+        }
+
+        var valid = command switch
+        {
+            "update" or "upgrade" or "apply-requests" => true,
+            "install" or "remove" => rest.Count > 0,
+            "trust" => rest is ["add", _] or ["remove", _],
+            _ => false,
+        };
+        if (!valid)
         {
             Console.Error.WriteLine(Usage);
             return 2;
         }
 
-        if (catalogOptions.CatalogUri is null)
-        {
-            Console.Error.WriteLine("The plugin catalog is off: Plugins:Catalog:Url isn't an https:// URL.");
-            return 1;
-        }
-
         if (command != "update" && !isDevelopment && OperatingSystem.IsLinux() && new LinuxFileSystem().EffectiveUserId != 0)
         {
-            Console.Error.WriteLine("Only root can install plugins (docs/plugin-security.md §1). Run it with sudo.");
+            Console.Error.WriteLine("Only root can change the installed plugins or trusted keys (docs/plugin-security.md §1). Run it with sudo.");
             return 1;
         }
 
@@ -86,13 +101,31 @@ internal static class PluginCommand
 
         var context = new VerificationContext(trust, isDevelopment, SemanticVersion.Parse(SdkVersion.Current), SharedAssemblies.OfCurrentProcess(), TimeProvider.System);
         using var http = GitHubReleases.CreateClient();
-        var store = new PluginStore(options.Directory, catalogOptions.CatalogUri, new GitHubReleases(http), context);
+        var releases = new GitHubReleases(http);
+        PluginStore Store(Uri catalog) => new(options.Directory, catalog, releases, context)
+        {
+            TrustDirectory = options.TrustDirectory,
+            AllowWebTrust = catalogOptions.AllowWebTrust,
+            OtherCatalog = other => new PluginStore(options.Directory, other, releases, context) { TrustDirectory = options.TrustDirectory },
+        };
+
+        // Removing, trusting and the page's requests work without the catalog; the rest need it.
+        var needsCatalog = command is "update" or "upgrade" or "install";
+        if (needsCatalog && catalogOptions.CatalogUri is null)
+        {
+            Console.Error.WriteLine("The plugin catalog is off: Plugins:Catalog:Url isn't an https:// URL.");
+            return 1;
+        }
+
+        var store = Store(catalogOptions.CatalogUri ?? new Uri(PluginCatalogOptions.DefaultUrl));
         try
         {
-            var catalog = await store.CatalogAsync(cancellationToken);
-            foreach (var warning in catalog.Warnings)
+            if (needsCatalog)
             {
-                Console.Error.WriteLine($"Catalog: {warning}");
+                foreach (var warning in (await store.CatalogAsync(cancellationToken)).Warnings)
+                {
+                    Console.Error.WriteLine($"Catalog: {warning}");
+                }
             }
 
             if (command == "update")
@@ -105,10 +138,13 @@ internal static class PluginCommand
                 return 0;
             }
 
-            var outcomes = command switch
+            IReadOnlyList<InstallOutcome> outcomes = command switch
             {
-                "install" => await store.InstallAsync(ids, cancellationToken),
-                "upgrade" => await store.UpgradeAsync(ids, cancellationToken),
+                "install" => await store.InstallAsync(rest, cancellationToken),
+                "upgrade" => await store.UpgradeAsync(rest, cancellationToken),
+                "remove" => [.. rest.Select(store.Remove)],
+                "trust" when rest[0] == "add" => [store.Trust(await File.ReadAllTextAsync(rest[1], cancellationToken))],
+                "trust" => [store.Untrust(rest[1])],
                 _ => await store.ApplyRequestsAsync(catalogOptions.RequestDirectory, cancellationToken),
             };
             foreach (var outcome in outcomes)
@@ -124,7 +160,7 @@ internal static class PluginCommand
                 }
                 else
                 {
-                    Console.WriteLine("Restart NKeeper to load it: systemctl restart nkeeper");
+                    Console.WriteLine("Restart NKeeper for it to take effect: systemctl restart nkeeper");
                 }
             }
 
@@ -132,6 +168,11 @@ internal static class PluginCommand
             return command != "apply-requests" && outcomes.Any(o => o.Result == InstallResult.Failed) ? 1 : 0;
         }
         catch (CatalogException ex)
+        {
+            Console.Error.WriteLine(ex.Message);
+            return 1;
+        }
+        catch (IOException ex)
         {
             Console.Error.WriteLine(ex.Message);
             return 1;
