@@ -1302,6 +1302,8 @@ inventoryTools: { 'network-scan': { label: 'Scan network', title: 'Find the mach
 5. Lays out the files below, and writes the settings file (with `Origins:BaseDomain` when given `--web-domain`, §7.18), the key ring certificate (on a fresh install only), the systemd unit and nginx's site. nginx gets a self-signed certificate unless one is given (`--cert`, `--key`).
 6. **Starts NKeeper.** On a fresh install it creates the first administrator: the installer asks for a password, or generates one and prints it once. Once the server is up, it turns the bootstrap off and removes the password from the settings file.
 
+**A lost password.** The installer keeps no copy of the first administrator's password, and nobody can reset an account without signing in. So root can: `sudo nkeeper admin reset-password <user name>` sets a new random password for the account, prints it once, and requires the user to change it at the next sign-in. As the Users page's reset does (§6.1), it clears a lockout, ends the account's sessions and is audited (`user.credential_reset`, by `system`). It needs the settings file, which only root can read, and the database.
+
 | Path | Owner / mode | Contents |
 | --- | --- | --- |
 | `/usr/lib/nkeeper/server/` | `root:root` `0755` | the server |
