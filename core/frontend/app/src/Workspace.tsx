@@ -11,7 +11,9 @@ import type { Host, ServiceHealth } from './types'
 import { Alert } from './ui/Alert'
 import { Button } from './ui/Button'
 import { ContextMenu, type MenuEntry } from './ui/ContextMenu'
+import { Dialog } from './ui/Dialog'
 import picker from './ui/GroupByPicker.module.css'
+import { PluginBoundary } from './ui/PluginBoundary'
 import { Spinner } from './ui/Spinner'
 import layout from './ui/Workspace.module.css'
 
@@ -87,6 +89,7 @@ export function Workspace({
   // The latest health check asked for, by host.
   const checks = useRef(new Map<string, number>())
 
+  const [tool, setTool] = useState<Catalog['inventoryTools'][number] | null>(null)
   const [reloads, setReloads] = useState(0)
   const loadHosts = useCallback(() => setReloads((n) => n + 1), [])
 
@@ -336,6 +339,12 @@ export function Workspace({
             <Button size="sm" onClick={createHost}>
               New host
             </Button>
+            {/* The plugins' tools, side by side with it, as 1.x's Import and Scan network (SDK 1.14). */}
+            {catalog.inventoryTools.map((t) => (
+              <Button key={`${t.pluginId}/${t.id}`} size="sm" variant="secondary" title={t.title} onClick={() => setTool(t)}>
+                {t.label}
+              </Button>
+            ))}
           </div>
         )}
 
@@ -547,6 +556,11 @@ export function Workspace({
         ))}
       </main>
 
+      {tool && canCreate && (
+        <Dialog title={tool.label} onClose={() => setTool(null)} size="lg">
+          <PluginBoundary pluginId={tool.pluginId}>{createElement(tool.view, { close: () => setTool(null), hostsChanged: loadHosts })}</PluginBoundary>
+        </Dialog>
+      )}
       {scanning && scanHost && (
         <ScanDialog
           host={scanHost}

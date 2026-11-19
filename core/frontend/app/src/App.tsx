@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createElement, useEffect, useMemo, useRef, useState } from 'react'
 import { api, ApiError, onUnauthorized, resetAntiforgeryToken } from '@nkeeper/sdk'
 import { ColorSchemeDialog } from './appearance/ColorSchemeDialog'
 import { applyColorScheme, tokensFor, type ColorSchemePreferences } from './appearance/colorSchemes'
-import { buildCatalog } from './catalog'
+import { buildCatalog, type Catalog } from './catalog'
 import { ChangePassword } from './ChangePassword'
 import { DialogProvider } from './Dialogs'
 import { loadPluginFrontends, type FrontendState, type ModuleImporter, type PluginStatus } from './plugins'
@@ -17,6 +17,7 @@ import frame from './ui/AppLayout.module.css'
 import { AuthLayout } from './ui/AuthLayout'
 import { ContextMenu } from './ui/ContextMenu'
 import { Logo } from './ui/Logo'
+import { PluginBoundary } from './ui/PluginBoundary'
 import reports from './ui/Reports.module.css'
 import { Spinner } from './ui/Spinner'
 
@@ -180,15 +181,14 @@ export function App({ importer }: { importer?: ModuleImporter }) {
       <main className={frame.content}>
         <DialogProvider>
           {view === 'reports' && (
-            <ReportsPage>
-              <HealthView
-                catalog={catalog}
-                onShowHost={(hostId) => {
-                  setFocus((current) => ({ hostId, n: (current?.n ?? 0) + 1 }))
-                  setView('workspace')
-                }}
-              />
-            </ReportsPage>
+            <ReportsPage
+              catalog={catalog}
+              isAdministrator={isAdministrator}
+              showHost={(hostId) => {
+                setFocus((current) => ({ hostId, n: (current?.n ?? 0) + 1 }))
+                setView('workspace')
+              }}
+            />
           )}
           {view === 'users' && isAdministrator && <UsersView currentUserId={load.user.id} />}
           {view === 'settings' && isAdministrator && <PluginsView plugins={load.plugins} frontends={load.frontends} catalog={catalog} />}
@@ -218,21 +218,42 @@ export function App({ importer }: { importer?: ModuleImporter }) {
 }
 
 /** 1.x's Reports page: the list of reports on the left, the chosen one on the right. Health is the only one so far. */
-function ReportsPage({ children }: { children: ReactNode }) {
+/** 1.x's Reports page: core's Health, then the plugins' reports (docs/architecture.md §7.41), each in the report area. */
+function ReportsPage({ catalog, isAdministrator, showHost }: { catalog: Catalog; isAdministrator: boolean; showHost: (hostId: string) => void }) {
+  const [selected, setSelected] = useState('health')
+  const listed = catalog.reports.filter((r) => isAdministrator || !r.administrators)
+  const report = listed.find((r) => `${r.pluginId}/${r.id}` === selected)
+  const entry = (key: string, label: string, description: string) => (
+    <li key={key}>
+      <button
+        type="button"
+        className={`${reports.reportLink} ${(report ? selected : 'health') === key ? reports.reportLinkActive : ''}`}
+        aria-current={(report ? selected : 'health') === key ? 'page' : undefined}
+        onClick={() => setSelected(key)}
+      >
+        <span>{label}</span>
+        <span className={reports.reportDescription}>{description}</span>
+      </button>
+    </li>
+  )
   return (
     <div className={reports.page}>
       <nav className={reports.sidebar} aria-label="Reports">
         <h1 className={reports.title}>Reports</h1>
         <ul className={reports.reportList}>
-          <li>
-            <button type="button" className={`${reports.reportLink} ${reports.reportLinkActive}`} aria-current="page">
-              <span>Health</span>
-              <span className={reports.reportDescription}>What’s down, and certificates about to expire</span>
-            </button>
-          </li>
+          {entry('health', 'Health', 'What’s down, and certificates about to expire')}
+          {listed.map((r) => entry(`${r.pluginId}/${r.id}`, r.label, r.description))}
         </ul>
       </nav>
-      <section className={reports.report}>{children}</section>
+      <section className={reports.report}>
+        {report ? (
+          <PluginBoundary key={selected} pluginId={report.pluginId}>
+            {createElement(report.view, { showHost })}
+          </PluginBoundary>
+        ) : (
+          <HealthView catalog={catalog} onShowHost={showHost} />
+        )}
+      </section>
     </div>
   )
 }

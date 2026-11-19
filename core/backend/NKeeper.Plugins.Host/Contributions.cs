@@ -245,9 +245,15 @@ public static partial class ContributionRules
                 return $"Host action '{action.Id}' runs '{action.Endpoint}', which isn't a path of lower-case segments such as 'wake' or 'power/on'.";
             }
 
-            if (action.ServiceTypes is null || action.ServiceTypes.Count == 0)
+            if (action.ServiceTypes is null || (action.ServiceTypes.Count == 0 && !action.Scan))
             {
                 return $"Host action '{action.Id}' runs an endpoint, so it must name the service types it applies to.";
+            }
+
+            // A host-wide scanner (SDK 1.14, §7.41) scans the host itself, with no service and so no credential.
+            if (action.Scan && action.ServiceTypes.Count == 0 && action.Credential != HostActionCredential.None)
+            {
+                return $"Host action '{action.Id}' scans the host itself (no service types), so it can't take a credential: set Credential to None.";
             }
 
             if (action.ServiceTypes.FirstOrDefault(t => t is null || !TypeId().IsMatch(t)) is var invalid && action.ServiceTypes.Any(t => t is null || !TypeId().IsMatch(t)))

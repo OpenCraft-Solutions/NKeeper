@@ -45,7 +45,8 @@ export function ScanDialog({
     if (entry.target.kind !== 'run') {
       return
     }
-    const body: Record<string, unknown> = { serviceId: entry.serviceId }
+    // A host-wide scanner takes no service (SDK 1.14).
+    const body: Record<string, unknown> = entry.serviceId ? { serviceId: entry.serviceId } : {}
     if (entry.credential.kind === 'saved') {
       body.credentialId = entry.credential.id
     }

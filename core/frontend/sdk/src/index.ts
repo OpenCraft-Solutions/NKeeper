@@ -3,7 +3,18 @@
  * by the shell through the import map, so every plugin and the shell see the same instance.
  */
 export { SDK_VERSION, definePlugin, isPluginDefinition } from './plugin'
-export type { HostPanelProps, IntegrationState, PluginContext, PluginDefinition, SessionViewProps, SettingsPanelProps } from './plugin'
+export type {
+  HostPanelProps,
+  IntegrationState,
+  InventoryTool,
+  InventoryToolProps,
+  PluginContext,
+  PluginDefinition,
+  PluginReport,
+  ReportViewProps,
+  SessionViewProps,
+  SettingsPanelProps,
+} from './plugin'
 export { ApiError, api, apiWebSocketUrl, onUnauthorized, readJsonLines, resetAntiforgeryToken } from './api'
 export type { ProblemDetails, RequestOptions } from './api'
 export { SessionError, openStreamSession } from './sessions'
