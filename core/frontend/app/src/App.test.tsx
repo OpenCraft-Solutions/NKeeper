@@ -330,6 +330,60 @@ describe('App', () => {
   })
 })
 
+describe('the audit log page', () => {
+  it('lists events for administrators, filters them, loads older ones and links hosts', async () => {
+    const event = (id: number, action: string, target = '', hostName: string | null = null) => ({
+      id,
+      occurredAtUtc: '2026-11-18T12:00:00Z',
+      actor: 'admin',
+      userId: 'u1',
+      clientAddress: '192.0.2.5',
+      action,
+      target,
+      hostName,
+      detail: `detail ${id}`,
+    })
+    const fetch = fakeApi({
+      'GET /api/auth/me': ADMIN,
+      'GET /api/plugins': [],
+      'GET /api/hosts': [host({ id: 'h1', name: 'web01' })],
+      'GET /api/health': [],
+      'GET /api/audit/categories': ['auth', 'host'],
+      'GET /api/audit/events': { events: [event(3, 'host.update', 'h1', 'web01'), event(2, 'auth.login')], next: 2 },
+      'GET /api/audit/events?before=2': { events: [event(1, 'auth.login')], next: null },
+      'GET /api/audit/events?q=web&category=host': { events: [event(3, 'host.update', 'h1', 'web01')], next: null },
+    })
+    const user = userEvent.setup()
+
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: 'Reports' }))
+    await user.click(within(screen.getByRole('navigation', { name: 'Reports' })).getByRole('button', { name: /Audit log/ }))
+    const table = await screen.findByRole('table', { name: 'Audit events' })
+    expect(within(table).getAllByRole('row')).toHaveLength(3)
+    await user.click(screen.getByRole('button', { name: 'Load older' }))
+    expect(await within(table).findByText('detail 1')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Load older' })).not.toBeInTheDocument()
+
+    await user.type(screen.getByRole('searchbox', { name: 'Search' }), 'web')
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Category' }), 'host')
+    await user.click(screen.getByRole('button', { name: 'Apply' }))
+    await waitFor(() => expect(within(screen.getByRole('table', { name: 'Audit events' })).getAllByRole('row')).toHaveLength(2))
+    expect(fetch.mock.calls.some(([url]) => url === '/api/audit/events?q=web&category=host')).toBe(true)
+
+    await user.click(screen.getByRole('button', { name: 'web01' }))
+    expect(await screen.findByRole('article', { name: 'web01' })).toBeInTheDocument()
+  })
+
+  it('isn’t listed for other users', async () => {
+    fakeApi({ 'GET /api/auth/me': { ...ADMIN, roles: [] }, 'GET /api/plugins': [], 'GET /api/hosts': [], 'GET /api/health': [] })
+    const user = userEvent.setup()
+
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: 'Reports' }))
+    expect(within(screen.getByRole('navigation', { name: 'Reports' })).queryByRole('button', { name: /Audit log/ })).not.toBeInTheDocument()
+  })
+})
+
 describe('the users page', () => {
   it('creates a user, and grants them a host and a tag group', async () => {
     const created = { id: 'u2', userName: 'bob', email: 'bob@example.com', role: 'user', isDisabled: false, mustChangePassword: true, isLockedOut: false, createdAtUtc: '2026-01-01T00:00:00Z' }

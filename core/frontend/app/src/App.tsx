@@ -6,6 +6,7 @@ import { buildCatalog, type Catalog } from './catalog'
 import { ChangePassword } from './ChangePassword'
 import { DialogProvider } from './Dialogs'
 import { loadPluginFrontends, type FrontendState, type ModuleImporter, type PluginStatus } from './plugins'
+import { AuditView } from './AuditView'
 import { HealthView } from './HealthView'
 import { PluginsView } from './PluginsView'
 import { UsersView } from './UsersView'
@@ -223,12 +224,13 @@ function ReportsPage({ catalog, isAdministrator, showHost }: { catalog: Catalog;
   const [selected, setSelected] = useState('health')
   const listed = catalog.reports.filter((r) => isAdministrator || !r.administrators)
   const report = listed.find((r) => `${r.pluginId}/${r.id}` === selected)
+  const current = report ? selected : selected === 'audit' && isAdministrator ? 'audit' : 'health'
   const entry = (key: string, label: string, description: string) => (
     <li key={key}>
       <button
         type="button"
-        className={`${reports.reportLink} ${(report ? selected : 'health') === key ? reports.reportLinkActive : ''}`}
-        aria-current={(report ? selected : 'health') === key ? 'page' : undefined}
+        className={`${reports.reportLink} ${current === key ? reports.reportLinkActive : ''}`}
+        aria-current={current === key ? 'page' : undefined}
         onClick={() => setSelected(key)}
       >
         <span>{label}</span>
@@ -242,6 +244,7 @@ function ReportsPage({ catalog, isAdministrator, showHost }: { catalog: Catalog;
         <h1 className={reports.title}>Reports</h1>
         <ul className={reports.reportList}>
           {entry('health', 'Health', 'What’s down, and certificates about to expire')}
+          {isAdministrator ? entry('audit', 'Audit log', 'What happened, and who did it') : null}
           {listed.map((r) => entry(`${r.pluginId}/${r.id}`, r.label, r.description))}
         </ul>
       </nav>
@@ -250,6 +253,8 @@ function ReportsPage({ catalog, isAdministrator, showHost }: { catalog: Catalog;
           <PluginBoundary key={selected} pluginId={report.pluginId}>
             {createElement(report.view, { showHost })}
           </PluginBoundary>
+        ) : current === 'audit' ? (
+          <AuditView onShowHost={showHost} />
         ) : (
           <HealthView catalog={catalog} onShowHost={showHost} />
         )}
