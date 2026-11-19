@@ -294,6 +294,40 @@ describe('App', () => {
     expect(await within(screen.getByRole('table', { name: 'Available' })).findByRole('button', { name: 'Waiting…' })).toBeDisabled()
   })
 
+  it('installs several ticked plugins with one request, so NKeeper restarts once', async () => {
+    const candidate = (id: string, version: string) => ({ id, name: id.toUpperCase(), version, packageSha256: 'a'.repeat(64), keyId: 'k', builtIn: true, dependsOn: [] as string[] })
+    const listing = (status: object) => ({ catalog: 'https://catalog.test/catalog.json', official: true, status })
+    const admin = {
+      ...ADMIN_PLUGINS,
+      plugins: [
+        listing({ id: 'ssh', repository: 'o/ssh', summary: null, installedVersion: '1.0.0', available: candidate('ssh', '1.1.0'), reasonCode: null, message: null }),
+        listing({ id: 'kvm', repository: 'o/kvm', summary: null, installedVersion: null, available: candidate('kvm', '1.0.0'), reasonCode: null, message: null }),
+        listing({ id: 'zabbix', repository: 'o/zabbix', summary: null, installedVersion: null, available: candidate('zabbix', '1.0.0'), reasonCode: null, message: null }),
+      ],
+    }
+    const fetch = fakeApi({
+      'GET /api/auth/me': ADMIN,
+      'GET /api/plugins': [status()],
+      'GET /api/hosts': [],
+      'GET /api/health': [],
+      'GET /api/plugins/catalog': admin,
+      'POST /api/plugins/catalog/requests': { ...admin, pending: ['ssh', 'zabbix'] },
+    })
+    const user = userEvent.setup()
+
+    render(<App importer={vi.fn(async () => ({ default: definePlugin({ id: 'hello' }) }))} />)
+    await user.click(await screen.findByRole('button', { name: 'Settings' }))
+    expect(await screen.findByRole('button', { name: 'Install selected' })).toBeDisabled()
+    await user.click(screen.getByRole('checkbox', { name: 'Select ssh' }))
+    await user.click(screen.getByRole('checkbox', { name: 'Select zabbix' }))
+    await user.click(screen.getByRole('button', { name: 'Install 2 selected' }))
+    expect(screen.getByText(/ssh 1\.1\.0, zabbix 1\.0\.0\? NKeeper restarts once/)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Install 2 and restart' }))
+
+    expect(bodyOf(fetch, 'POST /api/plugins/catalog/requests')).toEqual({ ids: ['ssh', 'zabbix'] })
+    expect(await screen.findByRole('checkbox', { name: 'Select zabbix' })).toBeDisabled()
+  })
+
   it('turns a plugin off with the plugins that need it, at the next restart, and offers the restart', async () => {
     const admin = { ...ADMIN_PLUGINS, switches: { 'db-core': true, mssql: true } }
     const fetch = fakeApi({

@@ -44,7 +44,8 @@ public sealed record CatalogResponse(
 /// <summary>What root's helper did with a request.</summary>
 public sealed record CatalogRequestResult(string Id, string? Version, string Result, string Message, string? RequestedBy, DateTimeOffset At);
 
-public sealed record CatalogInstallRequest(string Id);
+/// <summary>One plugin to install or upgrade (<see cref="Id"/>), or several at once (<see cref="Ids"/>), for one restart.</summary>
+public sealed record CatalogInstallRequest(string? Id, IReadOnlyList<string>? Ids = null);
 
 public sealed record CatalogAddRequest(string Url);
 
@@ -235,15 +236,61 @@ internal sealed class PluginCatalogService(
     /// Asks root's helper to install or upgrade a catalogued plugin: the version and package the last refresh offered,
     /// so the helper installs exactly what the administrator saw, or nothing.
     /// </summary>
-    public async Task<IResult> RequestInstallAsync(string id, ClaimsPrincipal user, CancellationToken cancellationToken)
+    public Task<IResult> RequestInstallAsync(string id, ClaimsPrincipal user, CancellationToken cancellationToken) =>
+        RequestInstallsAsync([id], user, cancellationToken);
+
+    /// <summary>
+    /// Asks root's helper to install or upgrade several catalogued plugins at once, so it applies them in one run with
+    /// one restart. Every one must be on offer, or none is asked for. At most what the helper applies in a run.
+    /// </summary>
+    public async Task<IResult> RequestInstallsAsync(IReadOnlyList<string> ids, ClaimsPrincipal user, CancellationToken cancellationToken)
     {
-        if (!PluginId.IsValid(id) || _snapshot.Plugins.FirstOrDefault(p => p.Status.Id == id) is not { Status.Available: { } candidate } listing)
+        var wanted = ids.Distinct(StringComparer.Ordinal).ToList();
+        if (wanted.Count is 0 or > PluginStore.MaxRequestsPerRun)
         {
-            return Results.Problem("The catalog offers nothing to install for that plugin. Check for updates first.", statusCode: StatusCodes.Status404NotFound);
+            return Results.Problem($"Choose between 1 and {PluginStore.MaxRequestsPerRun} plugins at a time.", statusCode: StatusCodes.Status400BadRequest);
         }
 
-        var request = new PluginRequest(Name(user), PluginRequestActions.Install, candidate.Id, candidate.Version, candidate.PackageSha256, listing.Official ? null : listing.Catalog);
-        return await RequestAsync(candidate.Id, request, null, new AuditEntry(AuditActions.PluginInstallRequested, candidate.Id, $"{candidate.Version}, package {candidate.PackageSha256}, from {listing.Catalog}"), cancellationToken);
+        var chosen = new List<(PluginRequest Request, AuditEntry Audit)>();
+        foreach (var id in wanted)
+        {
+            if (!PluginId.IsValid(id) || _snapshot.Plugins.FirstOrDefault(p => p.Status.Id == id) is not { Status.Available: { } candidate } listing)
+            {
+                return Results.Problem($"The catalog offers nothing to install for {(PluginId.IsValid(id) ? id : "that plugin")}. Check for updates first.", statusCode: StatusCodes.Status404NotFound);
+            }
+
+            chosen.Add((
+                new PluginRequest(Name(user), PluginRequestActions.Install, candidate.Id, candidate.Version, candidate.PackageSha256, listing.Official ? null : listing.Catalog),
+                new AuditEntry(AuditActions.PluginInstallRequested, candidate.Id, $"{candidate.Version}, package {candidate.PackageSha256}, from {listing.Catalog}")));
+        }
+
+        if (!CanRequest)
+        {
+            return Results.Problem("This server's installer didn't set up requests to root's helper. Run the nkeeper plugin command as root instead.", statusCode: StatusCodes.Status409Conflict);
+        }
+
+        // Every request written first, then all made visible together, so the helper finds them in one run.
+        var parts = new List<(string Part, string Path)>();
+        foreach (var (request, _) in chosen)
+        {
+            var path = Path.Combine(options.RequestDirectory, request.Id + PluginStore.RequestExtension);
+            var part = Path.Combine(options.RequestDirectory, $".{Path.GetFileName(path)}.part");
+            File.Delete(part);
+            await File.WriteAllBytesAsync(part, JsonSerializer.SerializeToUtf8Bytes(request, Json), cancellationToken);
+            parts.Add((part, path));
+        }
+
+        foreach (var (part, path) in parts)
+        {
+            File.Move(part, path, overwrite: true);
+        }
+
+        foreach (var (_, audit) in chosen)
+        {
+            await AuditAsync(audit, cancellationToken);
+        }
+
+        return Results.Accepted(value: await ResponseAsync(cancellationToken));
     }
 
     /// <summary>Verifies an uploaded package as at load and, if it verifies, asks root's helper to install it (§9.3).</summary>
@@ -563,7 +610,9 @@ internal static class PluginCatalogEndpoints
         });
         admin.MapPost("/catalog/catalogs", (CatalogAddRequest body, PluginCatalogService service, CancellationToken ct) => service.AddCatalogAsync(body.Url, ct));
         admin.MapDelete("/catalog/catalogs", (string url, PluginCatalogService service, CancellationToken ct) => service.RemoveCatalogAsync(url, ct));
-        admin.MapPost("/catalog/requests", (CatalogInstallRequest body, PluginCatalogService service, ClaimsPrincipal user, CancellationToken ct) => service.RequestInstallAsync(body.Id, user, ct));
+        admin.MapPost("/catalog/requests", (CatalogInstallRequest body, PluginCatalogService service, ClaimsPrincipal user, CancellationToken ct) => body.Ids is { Count: > 0 } ids
+                ? service.RequestInstallsAsync(ids, user, ct)
+                : service.RequestInstallAsync(body.Id ?? string.Empty, user, ct));
         admin.MapPost("/upload", (HttpRequest request, PluginCatalogService service, ClaimsPrincipal user, CancellationToken ct) => service.UploadAsync(request, user, ct))
             .WithMetadata(new Microsoft.AspNetCore.Mvc.RequestSizeLimitAttribute(PackageLimits.Default.MaxPackageBytes));
         admin.MapPost("/{id}/enable", (string id, PluginCatalogService service, ClaimsPrincipal user, CancellationToken ct) => service.SwitchAsync(id, true, user, ct));

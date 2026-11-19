@@ -15,6 +15,9 @@ export function PluginCatalog({ admin, onChange }: { admin: PluginAdmin; onChang
   const [notice, setNotice] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [asking, setAsking] = useState<CatalogListing | null>(null)
+  /** Plugins ticked to install or upgrade together, in one restart. */
+  const [chosen, setChosen] = useState<ReadonlySet<string>>(new Set())
+  const [askingSeveral, setAskingSeveral] = useState(false)
 
   async function run(key: string, action: () => Promise<PluginAdmin | void>, fallback: string) {
     setBusy(key)
@@ -35,6 +38,18 @@ export function PluginCatalog({ admin, onChange }: { admin: PluginAdmin; onChang
   const updates = admin.plugins.filter((p) => p.status.installedVersion && p.status.available)
   const available = admin.plugins.filter((p) => !p.status.installedVersion && p.status.available)
   const problems = admin.plugins.filter((p) => p.status.reasonCode && !p.status.available)
+  // What's ticked and still on offer; root's helper applies at most ten requests in one run.
+  const ticked = [...updates, ...available].filter((p) => chosen.has(p.status.id) && !admin.pending.includes(p.status.id))
+  const toggle = (id: string, on: boolean) =>
+    setChosen((current) => {
+      const next = new Set(current)
+      if (on) {
+        next.add(id)
+      } else {
+        next.delete(id)
+      }
+      return next
+    })
 
   return (
     <section className={page.panel} aria-label="Plugin catalog">
@@ -99,10 +114,53 @@ export function PluginCatalog({ admin, onChange }: { admin: PluginAdmin; onChang
           </Button>
         </Alert>
       ) : null}
+      {askingSeveral && ticked.length > 0 ? (
+        <Alert variant="warning">
+          Install or upgrade {ticked.map((p) => `${p.status.id} ${p.status.available?.version}`).join(', ')}
+          {ticked.some((p) => p.status.available?.dependsOn.length) ? ', with what they depend on if missing' : ''}? NKeeper restarts once to load them, which ends
+          every open session.{' '}
+          <Button
+            size="sm"
+            loading={busy === 'install-several'}
+            onClick={() =>
+              void run(
+                'install-several',
+                async () => {
+                  const next = await api.post<PluginAdmin>('/api/plugins/catalog/requests', { ids: ticked.map((p) => p.status.id) })
+                  setAskingSeveral(false)
+                  setChosen(new Set())
+                  return next
+                },
+                'Couldn’t ask for those plugins.',
+              )
+            }
+          >
+            Install {ticked.length} and restart
+          </Button>{' '}
+          <Button size="sm" variant="ghost" onClick={() => setAskingSeveral(false)}>
+            Cancel
+          </Button>
+        </Alert>
+      ) : null}
       {admin.enabled || admin.catalogs.length > 0 ? (
         <>
-          <CatalogTable title="Updates" plugins={updates} admin={admin} onAsk={setAsking} />
-          <CatalogTable title="Available" plugins={available} admin={admin} onAsk={setAsking} />
+          {admin.canRequest && updates.length + available.length > 1 ? (
+            <div>
+              <Button
+                size="sm"
+                disabled={ticked.length === 0 || ticked.length > MAX_AT_ONCE}
+                onClick={() => {
+                  setAsking(null)
+                  setAskingSeveral(true)
+                }}
+              >
+                {ticked.length === 0 ? 'Install selected' : `Install ${ticked.length} selected`}
+              </Button>{' '}
+              {ticked.length > MAX_AT_ONCE ? <span className={page.hint}>At most {MAX_AT_ONCE} at a time.</span> : null}
+            </div>
+          ) : null}
+          <CatalogTable title="Updates" plugins={updates} admin={admin} onAsk={setAsking} chosen={chosen} onChoose={toggle} />
+          <CatalogTable title="Available" plugins={available} admin={admin} onAsk={setAsking} chosen={chosen} onChoose={toggle} />
         </>
       ) : (
         <p className={page.hint}>NKeeper’s catalog is off on this server (Plugins:Catalog:Url).</p>
@@ -140,7 +198,24 @@ export function PluginCatalog({ admin, onChange }: { admin: PluginAdmin; onChang
 
 type Run = (key: string, action: () => Promise<PluginAdmin | void>, fallback: string) => Promise<void>
 
-function CatalogTable({ title, plugins, admin, onAsk }: { title: string; plugins: CatalogListing[]; admin: PluginAdmin; onAsk: (plugin: CatalogListing) => void }) {
+/** What root's helper applies in one run (PluginStore.MaxRequestsPerRun). */
+const MAX_AT_ONCE = 10
+
+function CatalogTable({
+  title,
+  plugins,
+  admin,
+  onAsk,
+  chosen,
+  onChoose,
+}: {
+  title: string
+  plugins: CatalogListing[]
+  admin: PluginAdmin
+  onAsk: (plugin: CatalogListing) => void
+  chosen: ReadonlySet<string>
+  onChoose: (id: string, on: boolean) => void
+}) {
   if (plugins.length === 0) {
     return null
   }
@@ -150,6 +225,11 @@ function CatalogTable({ title, plugins, admin, onAsk }: { title: string; plugins
       <caption className={page.hint}>{title}</caption>
       <thead>
         <tr>
+          {admin.canRequest ? (
+            <th scope="col">
+              <span className="visually-hidden">Select</span>
+            </th>
+          ) : null}
           <th scope="col">Plugin</th>
           <th scope="col">Version</th>
           <th scope="col">From</th>
@@ -162,6 +242,17 @@ function CatalogTable({ title, plugins, admin, onAsk }: { title: string; plugins
           const waiting = admin.pending.includes(status.id)
           return (
             <tr key={status.id}>
+              {admin.canRequest ? (
+                <td>
+                  <input
+                    type="checkbox"
+                    aria-label={`Select ${status.id}`}
+                    disabled={waiting}
+                    checked={chosen.has(status.id) && !waiting}
+                    onChange={(e) => onChoose(status.id, e.target.checked)}
+                  />
+                </td>
+              ) : null}
               <td>
                 {status.available?.name ?? status.id}
                 {status.summary ? <p className={page.hint}>{status.summary}</p> : null}

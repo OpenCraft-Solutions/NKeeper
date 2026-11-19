@@ -45,6 +45,19 @@ public sealed class PluginCatalogTests(PostgresFixture postgres) : IClassFixture
 
             Assert.Equal(HttpStatusCode.NotFound, request.StatusCode);
             Assert.Empty(Directory.GetFiles(requests));
+
+            // Several at once: every one must be on offer, or none is asked for; at most what the helper applies in a run.
+            using (var several = await admin.SendWithTokenAsync(HttpMethod.Post, "/api/plugins/catalog/requests", new { ids = new[] { "kvm", "proxmox" } }))
+            {
+                Assert.Equal(HttpStatusCode.NotFound, several.StatusCode);
+            }
+
+            using (var tooMany = await admin.SendWithTokenAsync(HttpMethod.Post, "/api/plugins/catalog/requests", new { ids = Enumerable.Range(1, 11).Select(i => $"p{i}").ToArray() }))
+            {
+                Assert.Equal(HttpStatusCode.BadRequest, tooMany.StatusCode);
+            }
+
+            Assert.Empty(Directory.GetFiles(requests, "*", SearchOption.AllDirectories));
         }
         finally
         {
