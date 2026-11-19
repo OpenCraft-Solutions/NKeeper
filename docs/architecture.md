@@ -71,7 +71,7 @@ public sealed class WakeOnLanPlugin : IPlugin
 - More contracts (plugin settings, scanners, reports) arrive with their first real users ([v2-plan.md §4.2](v2-plan.md#42-contribution-catalogue)), as additions to SDK v1.
 - **SDK versions.** A manifest declares the SDK range it supports, and a package outside the server's `SdkVersion` is refused. Within v0, an addition raises the patch number (`0.1.1` added the host scope, `0.1.2` service types, `0.1.3` the credential broker, `0.1.4` SSH connections, `0.1.5` stream sessions, `0.1.6` host actions, health probes and, in the frontend SDK, session views, `0.1.7` run actions and plugin audit events, `0.1.8` HTTPS connections, stateful sessions, session origins and, in the frontend SDK, `confirmTrust`, `0.1.9` desktop connections) and a breaking change raises the minor one.
 - **SDK v1 (1.0.0)** froze the SDK at the end of Phase 3, after a review of what Phases 1 and 2 used ([v2-plan.md, Phase 3](v2-plan.md#phase-3-freeze-sdk-v1)). From v1, a fix that changes no API raises the patch number, an addition the minor number, and a breaking change the major one, which the plan avoids. So a plugin built for `>=1.0.0 <2.0.0` keeps loading, and one that uses an addition declares the version that brought it. The frontend SDK, `@nkeeper/sdk`, is versioned with it. [plugin-authoring.md](plugin-authoring.md) shows how to write a plugin against it.
-- **Since v1:** `1.0.1` fixed `NKeeper.Testing`'s `TestPlugins` outside this repository; `1.1.0` adds Telnet connections (§7.22); `1.2.0` adds VNC desktops (§7.20); `1.12.0` adds a streaming command's standard input (§7.9). `NKeeper.Testing`'s helpers that packaged the built-in plugins from this repository's build (`TestPlugins.SshPackage` and the like) went with them: they only ever worked here.
+- **Since v1:** `1.0.1` fixed `NKeeper.Testing`'s `TestPlugins` outside this repository; `1.1.0` adds Telnet connections (§7.22); `1.2.0` adds VNC desktops (§7.20); `1.12.0` adds a streaming command's standard input (§7.9); `1.13.0` adds integrations: bindings, bearer sign-in, plugin settings, host data, administrator endpoints, host panels and a settings panel (§7.39). `NKeeper.Testing`'s helpers that packaged the built-in plugins from this repository's build (`TestPlugins.SshPackage` and the like) went with them: they only ever worked here.
 
 ## 5. Frontend extension point
 
@@ -1169,6 +1169,46 @@ Proxmox VE nodes and their clusters' QEMU virtual machines, the way Proxmox's ow
 - **Consoles:** `qm vncproxy <vmid>` relays the VM's display on its standard input and output, with a one-time VNC password (`LC_PVE_TICKET`, valid for 30 seconds), as Proxmox's web console does. The plugin starts it with `StartAsync` and relays both ways through `Input` and `Output` (§7.9, SDK 1.12), giving virt-core the password, which noVNC answers.
 - **Other nodes of the cluster:** a VM on another node is reached as Proxmox reaches it: over SSH as root from the signed-in node to that node's address in `pvesh get /cluster/status`, with the cluster's own host keys (`/etc/pve/nodes/<node>/ssh_known_hosts`, or the cluster-wide known hosts on older versions), never accepting a new key. Node names and VM IDs come from `pvesh` and are checked before they're used in a command line.
 - **Not yet:** containers, SPICE consoles, and linking a guest to its host in NKeeper's inventory.
+
+### 7.39 Integrations (SDK 1.13)
+
+Some plugins work with one outside system for the whole instance, not with a host at a time: Zabbix, later a ticketing or IPAM system. 1.x kept their settings in core tables (`ZabbixSettings`, `Host.ZabbixHostId`), which v2-plan.md P3 and P8 retired. SDK 1.13 gives plugins what they need instead, all of it core's, so secrets and trust stay where they are:
+
+**The outside system is a host.** Its address, its certificate and its credential are an ordinary host's (§7.1, §7.5, §7.16): a Zabbix server is a host with a `zabbix` service and a credential whose password is the API token. So it gets the vault, write-only secrets, certificate trust, jump hosts and the audit like any service. Nothing about it is stored by the plugin.
+
+**An integration binding.** The plugin declares a named integration and the service types it takes:
+
+```csharp
+contributions.AddIntegration(new Integration("server", "Zabbix server", ServiceTypes: ["zabbix"]));
+```
+
+- An administrator binds it, on the plugin's settings (below), to one host, one of its services of those types, and one credential used with that service. Core stores the binding (`core.plugin_integrations`: plugin, name, host, service, credential, who set it and when) and audits it (`integration.set`, `integration.cleared`). Deleting the host, service or credential clears it.
+- `ICredentialBroker.ResolveIntegrationAsync(name)` gives the plugin a handle for the bound credential, with the host and service as a `HostContext`. It's bound to the plugin and the request like any handle (§7.6), and every use is audited as `credential.use` (`integration <plugin>/<name>`).
+- **What this allows, deliberately:** the handle is used on behalf of whoever made the request, whether or not they may use the bound host, as 1.x used its one Zabbix token for everyone. The administrator who binds it decides that, for that plugin only, and the plugin's own endpoints decide who may ask (a host's Zabbix panel needs Use on that host). A user who can't see the Zabbix server's host still can't open its credentials, connect to it, or see its secrets.
+
+**HTTPS with a bearer token.** `IConnectivity.OpenHttpAsync(host, serviceId, handle, HttpSignIn.Bearer)` signs every request in with `Authorization: Bearer <password>`, as `HttpSignIn.Basic` (§7.16, SDK 1.6) does with Basic authentication. TLS only, the certificate checked the same way, the plugin never seeing the token.
+
+**Plugin settings.** `IPluginSettings` keeps one JSON document per plugin, with its schema version (`{ "v": 1, "data": … }`, v2-plan.md §5): `GetAsync<T>()` and `SetAsync(value)`. It holds no secrets: those are credentials. Stored in `core.plugin_settings`, audited as `plugin.settings_changed` with the plugin's ID.
+
+**Host data.** `IHostData` keeps one small JSON document per plugin and host (at most 16 KB), such as the Zabbix host a host is linked to: `GetAsync<T>(hostId)`, `SetAsync(hostId, value)`, `ClearAsync(hostId)`, and `FindAsync<T>()` for every host's. Stored in `core.host_data`, deleted with the host, kept when the plugin is disabled (§9.2).
+
+**Administrator endpoints.** `endpoints.MapAdministratorGroup()` gives a group only administrators reach, as core's own settings endpoints are.
+
+**Frontend (SDK 1.13).** A plugin's definition can also draw:
+- `hostPanels`: a panel in a host's details, `(props: { host, canManage }) => …`, under the plugin's name. The shell shows it for every host; the panel draws nothing for a host it has nothing to say about.
+- `settingsPanel`: a section of the Settings page, for administrators. The shell draws the plugin's integration bindings above it, with core's own host, service and credential pickers, so no plugin draws a credential picker.
+
+A plugin's frontend calls core's API as the signed-in user, as the shell does (`api` from `@nkeeper/sdk`), so creating hosts, say, is core's ordinary `POST /api/hosts`, with the user's own rights and audit.
+
+### 7.40 The `zabbix` plugin
+
+Zabbix, read only, ported from 1.x's `ZabbixController` and `Zabbix/`, in its own repository, `NKeeper-Plugin-Zabbix` (§9), on SDK 1.13 (`>=1.13.0 <2.0.0`). NKeeper never writes to Zabbix.
+
+- **Service type `zabbix`** ("Zabbix"): the Zabbix frontend over HTTPS, default port 443, with one setting, `path` (default `/zabbix`), under which the API is `api_jsonrpc.php`. Health by TLS (§7.13). The credential's password is a Zabbix API token, which needs Zabbix 6.4 or later (bearer tokens).
+- **Integration `server`:** the Zabbix service to read from (§7.39), bound on the plugin's settings. Its settings panel shows the binding, tests it (the API version, then the token), and holds the comparison below.
+- **A host's Zabbix panel** (`hostPanels`), for a host linked to a Zabbix host: its availability, interfaces, inventory, latest values and open problems, as 1.x's overview showed. Anyone who can use the host sees it. Someone who can manage the host can link it (searching Zabbix by name, technical name, IP address or DNS name) or unlink it. A link is host data (§7.39): the Zabbix host's ID.
+- **The comparison** (administrators): Zabbix's hosts next to NKeeper's, as 1.x's `ZabbixMatcher` sorted them: linked, probably the same machine (by name or address), only in Zabbix, and only in NKeeper. From it, an administrator links pairs, or adds hosts for Zabbix hosts NKeeper doesn't have, from Zabbix's names and interfaces. Adding goes through core's `POST /api/hosts`, linked once created.
+- **Audit:** `zabbix.link` and `zabbix.unlink` with the host and Zabbix host ID. Reads aren't audited beyond the credential's use.
 
 ## 8. The native install
 
