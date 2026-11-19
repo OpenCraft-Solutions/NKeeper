@@ -167,6 +167,7 @@ api.MapPluginStatus();
 api.MapPluginCatalog();
 api.MapPluginIntegrations();
 api.MapAuditLog();
+api.MapTransfer();
 app.MapPluginFrontends();
 PluginHost.MapEndpoints(plugins, api, builder.Configuration, (group, id) => group.WithMetadata(new NKeeper.Core.Credentials.PluginEndpointMetadata(id)));
 if (shell is not null)
