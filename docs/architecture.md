@@ -1268,6 +1268,28 @@ inventoryTools: { 'network-scan': { label: 'Scan network', title: 'Find the mach
 - Two hosts at one address are a conflict, marked. Rows can be limited to addresses in use, and the grid downloads as CSV.
 - Selecting a host shows it in the workspace.
 
+### 7.45 Moving an instance to a new server
+
+1.x's instance transfer, ported from `InstanceTransferController` and `Transfer/`: everything an instance holds, exported into one file encrypted with a passphrase, and imported on a fresh NKeeper. Settings, Administrators only. It's for moving servers; a backup is still the database and the key ring certificate (§8).
+
+**Why a file, not the database.** Credentials are encrypted with this server's key ring (§6.3, §7.5), which a new server doesn't have. The file carries them decrypted, inside its own encryption, and the import encrypts them again with the new server's key ring. So nothing moves that only the old server could read, and the old key ring never leaves it.
+
+**The file** is 1.x's bundle format, version 2: `NKEEPERB`, a plain header (format, NKeeper's version, the core schema's latest migration, the key derivation's salt and iterations), then the data in 64 KiB chunks, each AES-256-GCM. The key is PBKDF2-HMAC-SHA512 of the passphrase (600,000 iterations, at least 16 characters). The nonces number the chunks and mark the last, with the magic and header as associated data, so the header can't be altered and chunks can't be reordered, dropped or added. Nothing is used until every chunk is authenticated.
+
+**What it holds:**
+- the users: names, emails, roles, password hashes (so everyone signs in as before), whether they must change their password, and their color schemes;
+- the hosts with their tags, services and settings, credentials (secrets decrypted), trusted keys and jump hosts, and the grants;
+- the plugins' data: integration bindings (§7.39), settings and host data;
+- which plugins were installed and turned on, by ID and version, so the import can say which the new server lacks. Packages don't move: the new server installs them from its catalog (§9.1).
+
+It holds no sessions, no audit log (the new server's starts with the import) and no key ring.
+
+**Exporting** (`POST /api/transfer/export`): the administrator confirms with their own password and gives the passphrase twice. The file downloads. Optionally, the instance is then **locked**: hosts, users and credentials can't change, so nothing is lost between the export and the move, until an administrator unlocks it (`POST /api/transfer/unlock`). Both are audited (`transfer.export`, `transfer.unlock`).
+
+**Importing**, only into a fresh instance: no hosts, and no users but the one importing.
+- **Preview** (`POST /api/transfer/import/preview`, the file and passphrase): decrypts and checks the file and says what it holds: how many users, hosts and credentials, and the plugins it used that this server doesn't have. Nothing changes.
+- **Import** (`POST /api/transfer/import`, with a confirmation): in one transaction, replaces this instance's users, hosts and plugin data with the file's, encrypting each secret again. It refuses a file from a newer core schema than this server's. Every session ends, the importer's included: they sign in again with their account from the old server. Audited as `transfer.import`, which is the new audit log's first event.
+
 ## 8. The native install
 
 `deploy/setup.sh` installs NKeeper on a Linux server, from a checkout of the repository, as root. It's an early version of the Phase 6 installer (v2-plan.md §8). NKeeper installs natively only (D8): systemd, nginx and PostgreSQL, no containers.
