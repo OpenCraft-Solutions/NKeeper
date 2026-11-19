@@ -665,7 +665,7 @@ The single-page app in `core/frontend/app`. It knows no service type, session ty
   - **group by** a tag name gives one group per value, plus "No <name>" for hosts without it. The other choice is no grouping. The choice is kept in the browser;
   - each host shows its services' health (§7.13). The shell checks a host when it's created or saved, rather than waiting for the next background round;
   - selecting a host shows its details. Its Connect menu (§7.12) is on the host's row and in its details;
-  - right-clicking a host's row opens 1.x's host menu there: Connect, Edit and Copy. Double-clicking it opens the menu's first entry: the first action on the first service it applies to, with the first saved credential used with that service, or the typed-credential dialog when there's none;
+  - right-clicking a host's row opens 1.x's host menu there: Connect, Edit and Copy. Double-clicking it opens a session: the one the service's own plugin offers on the first service it can (ssh's terminal on an SSH service, rather than another plugin's tool on it, as 1.x opened the terminal), else the menu's first session; with the first saved credential used with that service, or the typed-credential dialog when there's none;
   - a host's details say why there's nothing to connect with: it has no services, or no loaded plugin opens a session on them.
 - **Tabs**, on the right. The first tab is always the selected host's details. Every session opens in a tab of its own. A tab stays mounted while another is showing, so a terminal keeps running. Closing a tab ends its session.
 - **Reports**, for everyone: 1.x's list of reports on the left, with the report on the right. So far it lists one:

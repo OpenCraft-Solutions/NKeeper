@@ -1,6 +1,6 @@
 import { createElement, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, ApiError, openStreamSession, SessionError, type StreamStart, type TrustPrompt } from '@nkeeper/sdk'
-import { connectMenu, type Catalog, type ConnectEntry, type ConnectGroup, type SessionCredential } from './catalog'
+import { connectMenu, defaultEntry, type Catalog, type ConnectEntry, type ConnectGroup, type SessionCredential } from './catalog'
 import { useDialogs } from './dialogContext'
 import { HostDetails } from './HostDetails'
 import { HostEditor } from './HostEditor'
@@ -282,12 +282,11 @@ export function Workspace({
     ]
   }
 
-  /** Double-click: the first session entry, with the first saved credential if there is one. Never a run action. */
+  /** Double-click: the service's own plugin's session (the terminal on SSH), with the first saved credential if there is one. Never a run action. */
   function activate(host: Host) {
-    const first = connectMenu(host, catalog).find((g) => g.entries[0]?.target.kind === 'session')
-    const entry = first?.entries[0]
-    if (first && entry) {
-      open(host, first, entry)
+    const chosen = defaultEntry(connectMenu(host, catalog), catalog)
+    if (chosen) {
+      open(host, chosen.group, chosen.entry)
     }
   }
 
