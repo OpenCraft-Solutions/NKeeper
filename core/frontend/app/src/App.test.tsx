@@ -415,6 +415,9 @@ describe('the audit log page', () => {
     render(<App />)
     await user.click(await screen.findByRole('button', { name: 'Reports' }))
     expect(within(screen.getByRole('navigation', { name: 'Reports' })).queryByRole('button', { name: /Audit log/ })).not.toBeInTheDocument()
+  })
+})
+
 const ADMIN_PASSWORD_FOR_TEST = 'Admin-Passw0rd-1'
 
 describe('moving an instance', () => {
