@@ -2,6 +2,8 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
+using System.Xml;
+using System.Xml.Linq;
 using NKeeper.Plugins.Packaging;
 
 namespace NKeeper.Plugins.Host.Store;
@@ -24,11 +26,13 @@ public sealed class ReleaseSourceException(string message, Exception? innerExcep
 
 /// <summary>
 /// GitHub's releases, through its REST API without a token (docs/architecture.md §9.1). Each repository's listing is
-/// kept with its ETag, so asking again about an unchanged repository costs nothing against the rate limit.
+/// kept with its ETag, so asking again about an unchanged repository costs nothing against the rate limit. When the
+/// API's allowance for this address is used up, the repository's release feed is read instead.
 /// </summary>
 public sealed class GitHubReleases(HttpClient http) : IPluginReleaseSource
 {
     public const int MaxListingBytes = 4 * 1024 * 1024;
+    public const int MaxFeedBytes = 2 * 1024 * 1024;
     private const int PageSize = 30;
 
     private readonly ConcurrentDictionary<string, (string ETag, byte[] Body)> _listings = new(StringComparer.OrdinalIgnoreCase);
@@ -69,12 +73,14 @@ public sealed class GitHubReleases(HttpClient http) : IPluginReleaseSource
             {
                 throw new ReleaseSourceException($"GitHub has no repository {entry.Repository}.");
             }
+            else if (response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.TooManyRequests)
+            {
+                // The API's 60 requests an hour for this address (shared by every machine behind it) are used up.
+                return await ListFromFeedAsync(entry, cancellationToken);
+            }
             else if (!response.IsSuccessStatusCode)
             {
-                throw new ReleaseSourceException(
-                    response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.TooManyRequests
-                        ? "GitHub's rate limit for this server's address is used up; try again in an hour."
-                        : $"GitHub answered {(int)response.StatusCode} for {entry.Repository}'s releases.");
+                throw new ReleaseSourceException($"GitHub answered {(int)response.StatusCode} for {entry.Repository}'s releases.");
             }
             else
             {
@@ -91,6 +97,83 @@ public sealed class GitHubReleases(HttpClient http) : IPluginReleaseSource
         }
 
         return ParseReleases(entry.Id, body);
+    }
+
+    /// <summary>The repository's release feed, which isn't part of the API's allowance; the files are at their conventional addresses.</summary>
+    private async Task<IReadOnlyList<PluginRelease>> ListFromFeedAsync(CatalogEntry entry, CancellationToken cancellationToken)
+    {
+        byte[] feed;
+        try
+        {
+            using var response = await http.GetAsync(new Uri($"https://github.com/{entry.Repository}/releases.atom"), HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            if (response.StatusCode == HttpStatusCode.NotFound)
+            {
+                throw new ReleaseSourceException($"GitHub has no repository {entry.Repository}.");
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new ReleaseSourceException(
+                    response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.TooManyRequests
+                        ? "GitHub's rate limit for this server's address is used up, for its release feeds too; try again in an hour."
+                        : $"GitHub answered {(int)response.StatusCode} for {entry.Repository}'s release feed.");
+            }
+
+            feed = await ReadAsync(response, MaxFeedBytes, cancellationToken);
+        }
+        catch (HttpRequestException ex)
+        {
+            throw new ReleaseSourceException($"Couldn't reach GitHub: {ex.Message}", ex);
+        }
+
+        return ParseFeed(entry.Id, entry.Repository, feed);
+    }
+
+    /// <summary>
+    /// A release feed (Atom), as the plugin's releases: each entry's link to <c>releases/tag/v&lt;version&gt;</c> of this
+    /// repository, with the package and its SHA-256 at their conventional download addresses. The feed doesn't say which
+    /// are pre-releases, so a version with a pre-release part is left out, as the release workflow marks those.
+    /// </summary>
+    internal static IReadOnlyList<PluginRelease> ParseFeed(string id, string repository, byte[] atom)
+    {
+        XDocument document;
+        try
+        {
+            using var stream = new MemoryStream(atom);
+            using var reader = XmlReader.Create(stream, new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null });
+            document = XDocument.Load(reader);
+        }
+        catch (XmlException ex)
+        {
+            throw new ReleaseSourceException($"{repository}'s release feed isn't a feed.", ex);
+        }
+
+        XNamespace atomNs = "http://www.w3.org/2005/Atom";
+        var prefix = $"https://github.com/{repository}/releases/tag/";
+        var releases = new List<PluginRelease>();
+        foreach (var link in document.Descendants(atomNs + "entry").SelectMany(e => e.Elements(atomNs + "link")))
+        {
+            var href = (string?)link.Attribute("href");
+            if (href is null || !href.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var tag = Uri.UnescapeDataString(href[prefix.Length..]);
+            if (!tag.StartsWith('v') || !SemanticVersion.TryParse(tag[1..], out var version) || version.IsPrerelease)
+            {
+                continue;
+            }
+
+            var name = PackageFormat.FileName(id, version.Text);
+            var download = $"https://github.com/{repository}/releases/download/{Uri.EscapeDataString(tag)}/{name}";
+            if (releases.All(r => r.Version != version))
+            {
+                releases.Add(new PluginRelease(version, new Uri(download), name, new Uri(download + ".sha256")));
+            }
+        }
+
+        return [.. releases.OrderByDescending(r => r.Version)];
     }
 
     public async Task<byte[]> DownloadAsync(Uri uri, long maxBytes, CancellationToken cancellationToken)
