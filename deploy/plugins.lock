@@ -11,3 +11,17 @@ desktop 1.0.0 https://github.com/OpenCraft-Solutions/NKeeper-Plugin-Desktop/rele
 wake-on-lan 1.0.0 https://github.com/OpenCraft-Solutions/NKeeper-Plugin-WakeOnLan/releases/download/v1.0.0/wake-on-lan-1.0.0.nkp 2d0487c979b285885e81fe3161313e39252bddf002752fc47744b638ab34b49f
 telnet 1.0.0 https://github.com/OpenCraft-Solutions/NKeeper-Plugin-Telnet/releases/download/v1.0.0/telnet-1.0.0.nkp 0347a56de03a0cf98d2052c77feac001f1e93cc7e81dd44bbf4bace5a7f3ee0e
 vnc 1.0.0 https://github.com/OpenCraft-Solutions/NKeeper-Plugin-VNC/releases/download/v1.0.0/vnc-1.0.0.nkp 730d9a4cca33b79c06374bb51d461fc73bd898ffdce8586b30ac174a00e10e3d
+linux 1.1.0 https://github.com/OpenCraft-Solutions/NKeeper-Plugin-Linux/releases/download/v1.1.0/linux-1.1.0.nkp 5bb413bc8c3afc159f435b5f446ff7ed76f7ec1b29f1780b05c815145acb076c
+storage 1.0.0 https://github.com/OpenCraft-Solutions/NKeeper-Plugin-Storage/releases/download/v1.0.0/storage-1.0.0.nkp d115ac044aec83c89866a5a817d79b126b22ce66a74be0312f147b8bea47e436
+windows 1.0.0 https://github.com/OpenCraft-Solutions/NKeeper-Plugin-Windows/releases/download/v1.0.0/windows-1.0.0.nkp 1d4329bbe5419e5d0bcf6097fd0f4218f26d3e31ae1dea269940da3013852fd7
+idrac 1.0.0 https://github.com/OpenCraft-Solutions/NKeeper-Plugin-iDRAC/releases/download/v1.0.0/idrac-1.0.0.nkp 9df48ef9f15b7a3a2456fe6cf89822eafecbb94eb0e0f6e477fe1776e3e70a32
+db-core 1.0.0 https://github.com/OpenCraft-Solutions/NKeeper-Plugin-DbCore/releases/download/v1.0.0/db-core-1.0.0.nkp 6f99d6311eb53b383f66ed9f87968e102d09b3164354cd43c22058cd0d78ffbc
+mssql 1.0.0 https://github.com/OpenCraft-Solutions/NKeeper-Plugin-MSSQL/releases/download/v1.0.0/mssql-1.0.0.nkp 781f93ec848de8268901049e69d00d0d7ab04b4bb6f8d9e61486d9edd5ea8426
+oracle 1.0.0 https://github.com/OpenCraft-Solutions/NKeeper-Plugin-Oracle/releases/download/v1.0.0/oracle-1.0.0.nkp 28281c206e34770bef7c46700e67cb95eb9a0a3d54406e2bf44e1020ecb6029c
+ase 1.0.0 https://github.com/OpenCraft-Solutions/NKeeper-Plugin-ASE/releases/download/v1.0.0/ase-1.0.0.nkp ce564ae9f478ae20a2b50d3f1fc184cebaaa8b18678b92838cac9c1e6cc608ab
+virt-core 1.0.0 https://github.com/OpenCraft-Solutions/NKeeper-Plugin-VirtCore/releases/download/v1.0.0/virt-core-1.0.0.nkp 18d36894def019025fc121dba08ab5687791e89345abfa3979ea6c129e6ff236
+kvm 1.0.0 https://github.com/OpenCraft-Solutions/NKeeper-Plugin-KVM/releases/download/v1.0.0/kvm-1.0.0.nkp a525b1b6c2e26b866985dedd0001ac15b1963068a77932f9ffbf130b1dea919b
+proxmox 1.0.0 https://github.com/OpenCraft-Solutions/NKeeper-Plugin-Proxmox/releases/download/v1.0.0/proxmox-1.0.0.nkp 235cf8a81ced64658ff1f8b9e8b151139408a9305ff112ef9fa98adaa2fe4116
+zabbix 1.0.0 https://github.com/OpenCraft-Solutions/NKeeper-Plugin-Zabbix/releases/download/v1.0.0/zabbix-1.0.0.nkp e23243b5cda2c691b27562d5c94f60a759a66f730584e23b9d405784db2f4c61
+network-scan 1.0.0 https://github.com/OpenCraft-Solutions/NKeeper-Plugin-NetworkScan/releases/download/v1.0.0/network-scan-1.0.0.nkp f509da17b2839fce17feb6b5bec0605237f389b63de4a255a766371397373c7e
+reports-ip 1.0.0 https://github.com/OpenCraft-Solutions/NKeeper-Plugin-ReportsIp/releases/download/v1.0.0/reports-ip-1.0.0.nkp 78538c6d0923f4e6bd6edb5c30601dd9e072deabcae2706313449c42a8cde006
