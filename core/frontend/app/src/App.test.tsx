@@ -364,6 +364,54 @@ describe('App', () => {
   })
 })
 
+const ADMIN_PASSWORD_FOR_TEST = 'Admin-Passw0rd-1'
+
+describe('moving an instance', () => {
+  it('exports with the administrator’s password and a long passphrase, and checks a file before importing it', async () => {
+    const fetch = fakeApi({
+      'GET /api/auth/me': ADMIN,
+      'GET /api/plugins': [],
+      'GET /api/hosts': [],
+      'GET /api/health': [],
+      'POST /api/transfer/export': () => new Response(new Blob(['NKEEPERB']), { status: 200 }),
+      'POST /api/transfer/import/preview': {
+        exportedAtUtc: '2026-11-18T12:00:00Z',
+        exportedBy: 'admin',
+        nKeeperVersion: '2',
+        users: 3,
+        hosts: 40,
+        credentials: 12,
+        missingPlugins: ['zabbix 1.0.0'],
+        warnings: ['The old server had plugins this one doesn’t: zabbix 1.0.0.'],
+      },
+    })
+    URL.createObjectURL = vi.fn(() => 'blob:x')
+    URL.revokeObjectURL = vi.fn()
+    const user = userEvent.setup()
+
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: 'Settings' }))
+    const exporting = screen.getByRole('form', { name: 'Export' })
+    await user.type(within(exporting).getByLabelText('Your password'), ADMIN_PASSWORD_FOR_TEST)
+    await user.type(within(exporting).getByLabelText('Passphrase'), 'short')
+    expect(within(exporting).getByRole('button', { name: 'Export' })).toBeDisabled()
+    await user.clear(within(exporting).getByLabelText('Passphrase'))
+    await user.type(within(exporting).getByLabelText('Passphrase'), 'correct horse battery staple')
+    await user.type(within(exporting).getByLabelText('Passphrase again'), 'correct horse battery staple')
+    await user.click(within(exporting).getByRole('button', { name: 'Export' }))
+    expect(await within(exporting).findByText(/Exported\./)).toBeInTheDocument()
+    expect(bodyOf(fetch, 'POST /api/transfer/export')).toEqual({ password: ADMIN_PASSWORD_FOR_TEST, passphrase: 'correct horse battery staple', passphraseConfirmation: 'correct horse battery staple' })
+
+    const importing = screen.getByRole('form', { name: 'Import' })
+    await user.upload(within(importing).getByLabelText('Export file'), new File(['NKEEPERB'], 'old.nkeeper'))
+    await user.type(within(importing).getByLabelText('Passphrase'), 'correct horse battery staple')
+    await user.click(within(importing).getByRole('button', { name: 'Check the file' }))
+    expect(await within(importing).findByText(/3 users, 40 hosts, 12 credentials/)).toBeInTheDocument()
+    expect(within(importing).getByText(/zabbix 1\.0\.0/)).toBeInTheDocument()
+    expect(within(importing).getByRole('button', { name: 'Import and sign out' })).toBeDisabled()
+  })
+})
+
 describe('the users page', () => {
   it('creates a user, and grants them a host and a tag group', async () => {
     const created = { id: 'u2', userName: 'bob', email: 'bob@example.com', role: 'user', isDisabled: false, mustChangePassword: true, isLockedOut: false, createdAtUtc: '2026-01-01T00:00:00Z' }

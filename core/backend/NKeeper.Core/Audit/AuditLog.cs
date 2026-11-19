@@ -83,6 +83,12 @@ public static class AuditActions
 
     /// <summary>Root's helper stopped trusting a third-party key.</summary>
     public const string PluginPublisherRemoved = "plugin.publisher_removed";
+
+    /// <summary>An administrator exported the instance into an encrypted file (architecture.md §7.45).</summary>
+    public const string TransferExport = "transfer.export";
+
+    /// <summary>An administrator replaced a fresh instance's data with an export file's.</summary>
+    public const string TransferImport = "transfer.import";
 }
 
 /// <summary>
