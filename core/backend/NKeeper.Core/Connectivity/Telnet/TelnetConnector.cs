@@ -45,7 +45,7 @@ public sealed partial class TelnetConnector(
         // Only for the host core authorized for this plugin request: a plugin could make up another.
         var context = http.HttpContext;
         var pluginId = PluginCaller.Of(context);
-        if (context is null || pluginId is null || !ReferenceEquals(context.Features.Get<HostContext>(), host))
+        if (context is null || pluginId is null || !PluginCaller.Authorized(context, host))
         {
             throw new InvalidOperationException("Telnet connections can only be opened from a plugin's host-scoped endpoint, for its own host.");
         }

@@ -93,3 +93,15 @@ describe('session views', () => {
     expect(isPluginDefinition({ id: 'core', exports: null })).toBe(false)
   })
 })
+
+describe('host and settings panels (SDK 1.13)', () => {
+  it('takes panels by title and one settings component', () => {
+    const panel = () => null
+    expect(isPluginDefinition({ id: 'zabbix', hostPanels: { Zabbix: panel }, settingsPanel: panel })).toBe(true)
+    expect(isPluginDefinition({ id: 'zabbix', hostPanels: { ' ': panel } })).toBe(false)
+    expect(isPluginDefinition({ id: 'zabbix', hostPanels: { Zabbix: 'panel' } })).toBe(false)
+    expect(isPluginDefinition({ id: 'zabbix', hostPanels: [panel] })).toBe(false)
+    expect(isPluginDefinition({ id: 'zabbix', settingsPanel: {} })).toBe(false)
+    expect(Object.isFrozen(definePlugin({ id: 'zabbix', hostPanels: { Zabbix: panel } }).hostPanels)).toBe(true)
+  })
+})

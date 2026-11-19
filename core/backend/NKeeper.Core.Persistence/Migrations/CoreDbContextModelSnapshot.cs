@@ -599,6 +599,37 @@ namespace NKeeper.Core.Persistence.Migrations
                     b.ToTable("host_credentials", "core");
                 });
 
+            modelBuilder.Entity("NKeeper.Core.Persistence.HostDataRow", b =>
+                {
+                    b.Property<string>("PluginId")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("plugin_id");
+
+                    b.Property<Guid>("HostId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("host_id");
+
+                    b.Property<string>("Data")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("data");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("PluginId", "HostId");
+
+                    b.HasIndex("HostId");
+
+                    b.ToTable("host_data", "core");
+                });
+
             modelBuilder.Entity("NKeeper.Core.Persistence.HostService", b =>
                 {
                     b.Property<Guid>("Id")
@@ -803,6 +834,82 @@ namespace NKeeper.Core.Persistence.Migrations
                     b.ToTable("installed_plugins", "core");
                 });
 
+            modelBuilder.Entity("NKeeper.Core.Persistence.PluginIntegrationBinding", b =>
+                {
+                    b.Property<string>("PluginId")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("plugin_id");
+
+                    b.Property<string>("Name")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("name");
+
+                    b.Property<Guid>("CredentialId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("credential_id");
+
+                    b.Property<Guid>("HostId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("host_id");
+
+                    b.Property<Guid>("ServiceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("service_id");
+
+                    b.Property<DateTimeOffset>("SetAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("set_at_utc");
+
+                    b.Property<Guid?>("SetByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("set_by_user_id");
+
+                    b.HasKey("PluginId", "Name");
+
+                    b.HasIndex("CredentialId");
+
+                    b.HasIndex("HostId");
+
+                    b.HasIndex("ServiceId");
+
+                    b.HasIndex("SetByUserId");
+
+                    b.ToTable("plugin_integrations", "core");
+                });
+
+            modelBuilder.Entity("NKeeper.Core.Persistence.PluginSettingsRow", b =>
+                {
+                    b.Property<string>("PluginId")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("plugin_id");
+
+                    b.Property<string>("Data")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("data");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at_utc");
+
+                    b.Property<Guid?>("UpdatedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("updated_by_user_id");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer")
+                        .HasColumnName("version");
+
+                    b.HasKey("PluginId");
+
+                    b.HasIndex("UpdatedByUserId");
+
+                    b.ToTable("plugin_settings", "core");
+                });
+
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<System.Guid>", b =>
                 {
                     b.HasOne("NKeeper.Core.Persistence.ApplicationRole", null)
@@ -904,6 +1011,15 @@ namespace NKeeper.Core.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("NKeeper.Core.Persistence.HostDataRow", b =>
+                {
+                    b.HasOne("NKeeper.Core.Persistence.Host", null)
+                        .WithMany()
+                        .HasForeignKey("HostId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("NKeeper.Core.Persistence.HostService", b =>
                 {
                     b.HasOne("NKeeper.Core.Persistence.Host", null)
@@ -933,6 +1049,40 @@ namespace NKeeper.Core.Persistence.Migrations
                     b.HasOne("NKeeper.Core.Persistence.ApplicationUser", null)
                         .WithMany()
                         .HasForeignKey("TrustedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+                });
+
+            modelBuilder.Entity("NKeeper.Core.Persistence.PluginIntegrationBinding", b =>
+                {
+                    b.HasOne("NKeeper.Core.Persistence.HostCredential", null)
+                        .WithMany()
+                        .HasForeignKey("CredentialId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("NKeeper.Core.Persistence.Host", null)
+                        .WithMany()
+                        .HasForeignKey("HostId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("NKeeper.Core.Persistence.HostService", null)
+                        .WithMany()
+                        .HasForeignKey("ServiceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("NKeeper.Core.Persistence.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("SetByUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+                });
+
+            modelBuilder.Entity("NKeeper.Core.Persistence.PluginSettingsRow", b =>
+                {
+                    b.HasOne("NKeeper.Core.Persistence.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("UpdatedByUserId")
                         .OnDelete(DeleteBehavior.SetNull);
                 });
 

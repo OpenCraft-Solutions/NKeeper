@@ -30,6 +30,7 @@ public sealed class PluginHostResult
     private readonly List<ContributedSessionType> _sessionTypes = [];
     private readonly List<ContributedHostAction> _hostActions = [];
     private readonly List<ContributedSessionOrigin> _sessionOrigins = [];
+    private readonly List<ContributedIntegration> _integrations = [];
     private readonly Dictionary<string, PluginManifest> _manifests = new(StringComparer.Ordinal);
 
     public IReadOnlyList<PluginStatus> Statuses => _statuses;
@@ -49,6 +50,10 @@ public sealed class PluginHostResult
     /// <summary>The session origins the loaded plugins claimed (docs/architecture.md §7.18).</summary>
     public IReadOnlyList<ContributedSessionOrigin> SessionOrigins =>
         [.. _sessionOrigins.Where(o => _loaded.Exists(p => p.Manifest.Id == o.PluginId))];
+
+    /// <summary>The integrations the loaded plugins declared (docs/architecture.md §7.39, SDK 1.13).</summary>
+    public IReadOnlyList<ContributedIntegration> Integrations =>
+        [.. _integrations.Where(i => _loaded.Exists(p => p.Manifest.Id == i.PluginId))];
 
     /// <summary>Loaded plugins, dependencies before dependants.</summary>
     public IReadOnlyList<LoadedPlugin> Loaded => _loaded;
@@ -86,6 +91,9 @@ public sealed class PluginHostResult
 
     internal void AddSessionOrigins(string pluginId, IEnumerable<SessionOrigin> origins) =>
         _sessionOrigins.AddRange(origins.Select(o => new ContributedSessionOrigin(pluginId, o)));
+
+    internal void AddIntegrations(string pluginId, IEnumerable<Integration> integrations) =>
+        _integrations.AddRange(integrations.Select(i => new ContributedIntegration(pluginId, i)));
 
     /// <summary>Marks a loaded plugin as refused, with every loaded plugin that depends on it.</summary>
     internal IReadOnlyList<string> Fail(string id, string reasonCode, string message)
@@ -331,8 +339,15 @@ public sealed class PluginHost(
                 }
             }
 
+            if (code is null && collected.Integrations.Select(i => ContributionRules.Check(i, collected.Integrations)).FirstOrDefault(p => p is not null) is { } integrationProblem)
+            {
+                code = HostReasonCodes.ContributionInvalid;
+                problem = integrationProblem;
+            }
+
             if (code is null)
             {
+                result.AddIntegrations(id, collected.Integrations);
                 result.AddServiceTypes(id, collected.ServiceTypes);
                 result.AddSessionTypes(id, collected.SessionTypes);
                 result.AddHostActions(id, collected.HostActions);

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { createElement, useMemo, useState } from 'react'
 import { api, ApiError } from '@nkeeper/sdk'
 import type { Catalog } from './catalog'
 import { CERTIFICATE_WARNING_DAYS, daysUntil } from './health'
@@ -9,6 +9,7 @@ import { Alert } from './ui/Alert'
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
 import { DeleteButton } from './ui/DeleteButton'
+import { PluginBoundary } from './ui/PluginBoundary'
 import styles from './ui/HostPanel.module.css'
 
 const DOWN_REASONS: Record<string, string> = { refused: 'Connection refused', timeout: 'Timed out', unreachable: 'Unreachable' }
@@ -302,9 +303,26 @@ export function HostDetails({
             </ul>
           </section>
         )}
+        <HostPanels host={host} catalog={catalog} />
       </div>
     </article>
   )
+}
+
+/** The plugins' panels (docs/architecture.md §7.39, SDK 1.13), each under its title; one that fails says so alone. */
+function HostPanels({ host, catalog }: { host: Host; catalog: Catalog }) {
+  const props = useMemo(
+    () => ({ host: { id: host.id, name: host.name, hostname: host.hostname, ipAddress: host.ipAddress }, canManage: host.canManage }),
+    [host.id, host.name, host.hostname, host.ipAddress, host.canManage],
+  )
+  return catalog.hostPanels.map(({ pluginId, title, Panel }) => (
+    <section key={`${pluginId}/${title}`} className={styles.section} aria-label={title}>
+      <h2 className={styles.sectionTitle}>{title}</h2>
+      <PluginBoundary pluginId={pluginId} resetKey={host.id}>
+        {createElement(Panel, props)}
+      </PluginBoundary>
+    </section>
+  ))
 }
 
 /** A service's latest check, as 1.x showed it: up and how fast, or down and why, plus its certificate's expiry. */

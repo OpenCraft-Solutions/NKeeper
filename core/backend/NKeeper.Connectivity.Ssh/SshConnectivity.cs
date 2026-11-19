@@ -125,6 +125,10 @@ public sealed class SshConnectivity(SshConnectionPlanner planner, TrustStore tru
     public Task<IHttpConnection> OpenHttpAsync(HostContext host, Guid serviceId, CredentialHandle handle, CancellationToken cancellationToken = default) =>
         services.GetRequiredService<HttpConnector>().OpenAsync(host, serviceId, tls: true, handle, cancellationToken);
 
+    /// <summary>Core signs in over HTTPS as <paramref name="signIn"/> says (SDK 1.13, §7.39): Basic, or the password as a bearer token.</summary>
+    public Task<IHttpConnection> OpenHttpAsync(HostContext host, Guid serviceId, CredentialHandle handle, HttpSignIn signIn, CancellationToken cancellationToken = default) =>
+        services.GetRequiredService<HttpConnector>().OpenAsync(host, serviceId, tls: true, handle, cancellationToken, signIn);
+
     public async Task<ISftpConnection> OpenSftpAsync(HostContext host, Guid serviceId, CredentialHandle handle, CancellationToken cancellationToken = default)
     {
         var (client, forward, jump) = await OpenAsync(host, serviceId, handle, "sftp", info => new SftpClient(info), cancellationToken);

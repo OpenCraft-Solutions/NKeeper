@@ -86,6 +86,12 @@ public sealed class CoreDbContext(DbContextOptions<CoreDbContext> options)
 
     public DbSet<HostTrustedKey> HostTrustedKeys => Set<HostTrustedKey>();
 
+    public DbSet<PluginIntegrationBinding> PluginIntegrations => Set<PluginIntegrationBinding>();
+
+    public DbSet<PluginSettingsRow> PluginSettings => Set<PluginSettingsRow>();
+
+    public DbSet<HostDataRow> HostData => Set<HostDataRow>();
+
     /// <summary>Configures Npgsql for the core context, with its migration history inside the core schema.</summary>
     public static DbContextOptions<CoreDbContext> CreateOptions(string connectionString)
     {
@@ -188,6 +194,34 @@ public sealed class CoreDbContext(DbContextOptions<CoreDbContext> options)
             host.HasOne<HostCredential>().WithMany().HasForeignKey(h => h.JumpCredentialId).OnDelete(DeleteBehavior.SetNull);
         });
 
+        // SDK 1.13 (docs/architecture.md §7.39): what plugins keep through core.
+        builder.Entity<PluginIntegrationBinding>(binding =>
+        {
+            binding.ToTable("plugin_integrations");
+            binding.HasKey(b => new { b.PluginId, b.Name });
+            binding.Property(b => b.PluginId).HasMaxLength(128);
+            binding.Property(b => b.Name).HasMaxLength(32);
+            binding.HasOne<Host>().WithMany().HasForeignKey(b => b.HostId).OnDelete(DeleteBehavior.Cascade);
+            binding.HasOne<HostService>().WithMany().HasForeignKey(b => b.ServiceId).OnDelete(DeleteBehavior.Cascade);
+            binding.HasOne<HostCredential>().WithMany().HasForeignKey(b => b.CredentialId).OnDelete(DeleteBehavior.Cascade);
+            binding.HasOne<ApplicationUser>().WithMany().HasForeignKey(b => b.SetByUserId).OnDelete(DeleteBehavior.SetNull);
+        });
+        builder.Entity<PluginSettingsRow>(settings =>
+        {
+            settings.ToTable("plugin_settings");
+            settings.HasKey(s => s.PluginId);
+            settings.Property(s => s.PluginId).HasMaxLength(128);
+            settings.Property(s => s.Data).HasColumnType("jsonb");
+            settings.HasOne<ApplicationUser>().WithMany().HasForeignKey(s => s.UpdatedByUserId).OnDelete(DeleteBehavior.SetNull);
+        });
+        builder.Entity<HostDataRow>(data =>
+        {
+            data.ToTable("host_data");
+            data.HasKey(d => new { d.PluginId, d.HostId });
+            data.Property(d => d.PluginId).HasMaxLength(128);
+            data.Property(d => d.Data).HasColumnType("jsonb");
+            data.HasOne<Host>().WithMany().HasForeignKey(d => d.HostId).OnDelete(DeleteBehavior.Cascade);
+        });
         builder.Entity<HostTrustedKey>(key =>
         {
             key.ToTable("host_trusted_keys");

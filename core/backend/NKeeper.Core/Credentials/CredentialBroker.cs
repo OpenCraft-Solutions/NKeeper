@@ -31,6 +31,24 @@ public static class PluginCaller
         return metadata?.GetMetadata<PluginEndpointMetadata>()?.PluginId
             ?? (metadata?.GetMetadata<SessionEndpointMetadata>() is null ? null : context!.Features.Get<SessionPluginFeature>()?.PluginId);
     }
+
+    /// <summary>
+    /// Whether <paramref name="host"/> is one core authorized for this request: the host-scoped endpoint's own, or one
+    /// an integration resolved for this user (docs/architecture.md §7.39). A plugin could make up any other.
+    /// </summary>
+    public static bool Authorized(HttpContext context, HostContext host) =>
+        ReferenceEquals(context.Features.Get<HostContext>(), host)
+        || context.Features.Get<IntegrationHosts>()?.Contains(host) == true;
+}
+
+/// <summary>The hosts integrations resolved for this request's user (SDK 1.13), which its plugin may then use.</summary>
+public sealed class IntegrationHosts
+{
+    private readonly List<HostContext> _hosts = [];
+
+    public void Add(HostContext host) => _hosts.Add(host);
+
+    public bool Contains(HostContext host) => _hosts.Exists(h => ReferenceEquals(h, host));
 }
 
 /// <summary>On core's stream session endpoint: the plugin whose session type is being opened.</summary>
@@ -56,8 +74,57 @@ public sealed class CredentialBroker(
     CredentialHandleStore handles,
     CredentialPromptStore prompts,
     IAuthSessionAccessor sessions,
-    IAuditLog audit) : ICredentialBroker
+    IAuditLog audit,
+    NKeeper.Core.Access.HostAccess access,
+    NKeeper.Core.Inventory.ServiceTypeCatalog serviceTypes) : ICredentialBroker
 {
+    /// <summary>
+    /// The plugin's bound integration, for this user only if they may use its host (docs/architecture.md §7.39, SDK
+    /// 1.13, the owner's decision): then its credential is resolved exactly as a saved one the user chose.
+    /// </summary>
+    public async Task<IntegrationHandle> ResolveIntegrationAsync(string name, CancellationToken cancellationToken = default)
+    {
+        var context = http.HttpContext;
+        var plugin = CallerPlugin(context);
+        if (context is null || plugin is null || context.User.Identity?.IsAuthenticated != true)
+        {
+            throw new InvalidOperationException("Integrations can only be resolved from a plugin's own endpoints.");
+        }
+
+        var binding = await db.PluginIntegrations.AsNoTracking().FirstOrDefaultAsync(b => b.PluginId == plugin && b.Name == name, cancellationToken)
+            ?? throw new IntegrationUnavailableException(IntegrationUnavailableReason.NotBound, "An administrator hasn't chosen which service this uses yet. Set it on the Settings page.");
+
+        var permission = await access.GetPermissionAsync(binding.HostId, NKeeper.Core.Access.RequestUser.From(context.User), cancellationToken);
+        if (permission == NKeeper.Core.Access.HostPermission.None)
+        {
+            throw new IntegrationUnavailableException(IntegrationUnavailableReason.NoAccess, "You don't have access to the host this uses. Ask an administrator for access to it.");
+        }
+
+        var host = await NKeeper.Core.Access.HostScopeMiddleware.LoadAsync(db, serviceTypes, binding.HostId, permission, cancellationToken);
+        if (host is null || !host.Services.Any(s => s.Id == binding.ServiceId))
+        {
+            throw new IntegrationUnavailableException(IntegrationUnavailableReason.Gone, "The host or service this uses is gone. Choose another on the Settings page.");
+        }
+
+        // The host is now one this request may use (§7.39), as a host-scoped endpoint's own is.
+        var hosts = context.Features.Get<IntegrationHosts>();
+        if (hosts is null)
+        {
+            hosts = new IntegrationHosts();
+            context.Features.Set(hosts);
+        }
+
+        hosts.Add(host);
+        try
+        {
+            return new IntegrationHandle(host, binding.ServiceId, await ResolveSavedAsync(host, binding.ServiceId, binding.CredentialId, cancellationToken));
+        }
+        catch (CredentialDeniedException ex)
+        {
+            throw new IntegrationUnavailableException(IntegrationUnavailableReason.Gone, $"The credential this uses can't be used any more: {ex.Message}");
+        }
+    }
+
     public async Task<CredentialHandle> ResolveSavedAsync(HostContext host, Guid serviceId, Guid credentialId, CancellationToken cancellationToken = default)
     {
         var caller = await AllowedAsync(host, serviceId, cancellationToken);
@@ -127,7 +194,7 @@ public sealed class CredentialBroker(
         var caller = new Caller(context!, plugin ?? string.Empty, userId ?? Guid.Empty);
 
         // Only the host context core authorized for this request counts: a plugin could make up another.
-        if (context is null || plugin is null || userId is null || !ReferenceEquals(context.Features.Get<HostContext>(), host))
+        if (context is null || plugin is null || userId is null || !PluginCaller.Authorized(context, host))
         {
             throw await DenyAsync(caller, host, serviceId, CredentialDenial.NotAllowed, "Credentials can only be resolved from a plugin's host-scoped endpoint, for its own host.", cancellationToken);
         }

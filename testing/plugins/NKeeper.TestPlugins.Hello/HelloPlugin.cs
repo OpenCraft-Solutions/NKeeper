@@ -30,6 +30,9 @@ public sealed class HelloPlugin : IPlugin
         contributions.AddSessionType(new SessionType(context.Id, "Hello session", typeof(HelloSessionHandler)) { ServiceTypes = [context.Id] });
         contributions.AddHostAction(new HostAction($"{context.Id}.open", "Open", SessionType: context.Id) { Credential = HostActionCredential.None });
 
+        // An integration (SDK 1.13): an outside system on this plugin's own service type.
+        contributions.AddIntegration(new Integration("server", "Hello server") { ServiceTypes = [context.Id] });
+
         // A session origin (SDK 0.1.8), only when its settings name a prefix: the tests package this plugin under many IDs.
         if (context.Configuration["Origin"] is { } prefix)
         {
@@ -72,12 +75,43 @@ public sealed class HelloPlugin : IPlugin
         endpoints.MapGet("/ping", (Greeting greeting) => Results.Text(greeting.Text));
         endpoints.MapPost("/echo", (Greeting greeting) => Results.Text("echo"));
 
+        // SDK 1.13: the bound integration, GET a path on it with core's bearer sign-in; or why it's unavailable.
+        endpoints.MapPost("/integration", async (SshProbe? probe, ICredentialBroker broker, IConnectivity connectivity) =>
+        {
+            try
+            {
+                var integration = await broker.ResolveIntegrationAsync("server");
+                await using var http = await connectivity.OpenHttpAsync(integration.Host, integration.ServiceId, integration.Credential, HttpSignIn.Bearer);
+                using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(http.BaseAddress, probe?.Command ?? "/"));
+                using var response = await http.Client.SendAsync(request, CancellationToken.None);
+                return Results.Json(new { host = integration.Host.Name, status = (int)response.StatusCode, body = await response.Content.ReadAsStringAsync() });
+            }
+            catch (IntegrationUnavailableException ex)
+            {
+                return Results.Json(new { reason = ex.Reason.ToString(), message = ex.Message }, statusCode: StatusCodes.Status409Conflict);
+            }
+            catch (ConnectException ex)
+            {
+                return Results.Json(new { reason = ex.Reason.ToString(), message = ex.Message, presented = ex.Presented }, statusCode: StatusCodes.Status502BadGateway);
+            }
+        });
+
+        // SDK 1.13: settings, host data and an administrators' group.
+        var admin = endpoints.MapAdministratorGroup();
+        admin.MapGet("/settings", async (IPluginSettings settings) => await settings.GetAsync() is { } document ? Results.Json(new { document.Version, document.Data }) : Results.NoContent());
+        admin.MapPut("/settings", async (IPluginSettings settings, System.Text.Json.JsonElement body) =>
+        {
+            await settings.SetAsync(body.GetProperty("version").GetInt32(), body.GetProperty("data"));
+            return Results.NoContent();
+        });
+
         // A raw request delegate: endpoint filters never run for these, which is why core's policies are middleware.
         endpoints.Map("/raw", context => context.Response.WriteAsync("raw"));
 
         // Host-scoped (SDK 0.1.1; services 0.1.2): core authorizes the host before these run.
         var use = endpoints.MapHostGroup(HostPermission.Use);
         use.MapGet("/whoami", (HostContext host) => Results.Text($"{host.Name} {host.Permission}"));
+        use.MapGet("/data", async (HostContext host, IHostData data) => await data.GetAsync(host.Id) is { } document ? Results.Json(new { document.Version, document.Data }) : Results.NoContent());
         use.MapGet("/services", (HostContext host) => Results.Json(host.Services));
 
         // Records a plugin audit event (SDK 0.1.7) with the action it's given: its own, or one it mustn't use.
@@ -602,6 +636,12 @@ public sealed class HelloPlugin : IPlugin
 
         var manage = endpoints.MapHostGroup(HostPermission.Manage);
         manage.Map("/raw", context => context.Response.WriteAsync($"managing {context.GetHostContext().Name}"));
+        // Writing a host's data, such as a link to an outside system, is managing it.
+        manage.MapPut("/data", async (HostContext host, IHostData data, System.Text.Json.JsonElement body) =>
+        {
+            await data.SetAsync(host.Id, 1, body);
+            return Results.NoContent();
+        });
     }
 }
 

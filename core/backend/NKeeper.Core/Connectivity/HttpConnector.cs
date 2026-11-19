@@ -32,12 +32,12 @@ public sealed class HttpConnector(CoreDbContext db, TrustStore trust, IAuthSessi
     /// </summary>
     /// <exception cref="ConnectException">The certificate isn't trusted, the service can't be reached, or the credential has no password.</exception>
     /// <exception cref="CredentialDeniedException">The handle isn't valid here.</exception>
-    public async Task<IHttpConnection> OpenAsync(HostContext host, Guid serviceId, bool tls, CredentialHandle? handle, CancellationToken cancellationToken)
+    public async Task<IHttpConnection> OpenAsync(HostContext host, Guid serviceId, bool tls, CredentialHandle? handle, CancellationToken cancellationToken, HttpSignIn signIn = HttpSignIn.Basic)
     {
         var context = http.HttpContext;
 
         // Only for the host core authorized for this plugin request: a plugin could make up another.
-        if (context is null || PluginCaller.Of(context) is null || !ReferenceEquals(context.Features.Get<HostContext>(), host))
+        if (context is null || PluginCaller.Of(context) is null || !PluginCaller.Authorized(context, host))
         {
             throw new InvalidOperationException("HTTP connections can only be opened from a plugin's host-scoped endpoint, for its own host.");
         }
@@ -65,12 +65,22 @@ public sealed class HttpConnector(CoreDbContext db, TrustStore trust, IAuthSessi
 
             var (_, _, entry) = await broker.UseAsync(host, serviceId, handle, cancellationToken);
             var material = entry.Material;
-            if (material.Username is not { Length: > 0 } username || material.Password?.Reveal() is not { Length: > 0 } password)
+            if (signIn == HttpSignIn.Bearer)
+            {
+                // SDK 1.13: the password is an API token (§7.39).
+                basic = material.Password?.Reveal() is { Length: > 0 } token
+                    ? "Bearer " + token
+                    : throw new ConnectException(ConnectFailure.NoSecret, "Signing in with an API token needs the token as the credential's password, and this credential has none.");
+            }
+            else if (material.Username is not { Length: > 0 } username || material.Password?.Reveal() is not { Length: > 0 } password)
             {
                 throw new ConnectException(ConnectFailure.NoSecret, "Signing in over HTTP needs a user name and password, and this credential doesn't have both.");
             }
+            else
+            {
+                basic = "Basic " + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes($"{username}:{password}"));
+            }
 
-            basic = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes($"{username}:{password}"));
             credential = material.Source == CredentialSource.Saved ? $"credential {material.CredentialId}" : "a typed credential";
         }
 
@@ -238,7 +248,9 @@ public sealed class HttpConnector(CoreDbContext db, TrustStore trust, IAuthSessi
 
             if (basic is not null)
             {
-                request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", basic);
+                // "Basic <base64>" or "Bearer <token>": the scheme and its parameter.
+                var space = basic.IndexOf(' ', StringComparison.Ordinal);
+                request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue(basic[..space], basic[(space + 1)..]);
             }
 
             return base.SendAsync(request, cancellationToken);

@@ -725,3 +725,77 @@ describe('the workspace', () => {
     await waitFor(() => expect(loads).toBe(2))
   })
 })
+
+describe('plugin panels (SDK 1.13)', () => {
+  const zabbix = status({ id: 'zabbix', frontendEntry: '/plugins/zabbix/1.0.0/aaaaaaaaaaaa/index.js' })
+  const server = host({ id: 'h9', name: 'zbx01', services: [service({ id: 's9', type: 'zabbix' }), service({ id: 's8', type: 'term' })], credentials: [credential({ id: 'c9', label: 'API token', serviceIndexes: [0] }), credential({ id: 'c8', serviceIndexes: [1] })] })
+
+  it('shows a plugin’s host panels in a host’s details, and one that throws says so alone', async () => {
+    fakeApi({ 'GET /api/auth/me': ADMIN, 'GET /api/plugins': [zabbix], 'GET /api/hosts': [host({ canManage: false })], 'GET /api/health': [] })
+    const Broken = () => {
+      throw new Error('no data')
+    }
+    const importer = vi.fn(async () => ({
+      default: definePlugin({
+        id: 'zabbix',
+        hostPanels: { Zabbix: ({ host: h, canManage }) => <p>{`${h.name} at ${h.ipAddress}, ${canManage ? 'manage' : 'use'}`}</p>, Broken },
+      }),
+    }))
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const user = userEvent.setup()
+
+    render(<App importer={importer} />)
+    const sidebar = await screen.findByRole('complementary', { name: 'Host inventory' })
+    await user.click(await within(sidebar).findByRole('button', { name: /^web01,/ }))
+
+    const details = screen.getByRole('article', { name: 'web01' })
+    expect(within(within(details).getByRole('region', { name: 'Zabbix' })).getByText('web01 at 192.0.2.10, use')).toBeInTheDocument()
+    expect(within(within(details).getByRole('region', { name: 'Broken' })).getByRole('alert')).toHaveTextContent('The zabbix plugin couldn’t draw this: no data')
+  })
+
+  it('binds an integration with core’s pickers, above the plugin’s settings panel', async () => {
+    let bound = false
+    const fetch = fakeApi({
+      'GET /api/auth/me': ADMIN,
+      'GET /api/plugins': [zabbix],
+      'GET /api/hosts': [server, host()],
+      'GET /api/health': [],
+      'GET /api/plugins/catalog': ADMIN_PLUGINS,
+      'GET /api/plugins/integrations': () =>
+        Response.json([
+          {
+            pluginId: 'zabbix',
+            name: 'server',
+            label: 'Zabbix server',
+            serviceTypes: ['zabbix'],
+            binding: bound ? { hostId: 'h9', hostName: 'zbx01', serviceId: 's9', serviceLabel: 'zabbix', credentialId: 'c9', credentialLabel: 'API token', setAtUtc: '2026-11-18T12:00:00Z' } : null,
+          },
+        ]),
+      'PUT /api/plugins/zabbix/integrations/server': () => {
+        bound = true
+        return new Response(null, { status: 204 })
+      },
+    })
+    const importer = vi.fn(async () => ({
+      default: definePlugin({ id: 'zabbix', settingsPanel: ({ integrations }) => <p>{integrations.every((i) => i.bound) ? 'Ready' : 'Bind the server first'}</p> }),
+    }))
+    const user = userEvent.setup()
+
+    render(<App importer={importer} />)
+    await user.click(await screen.findByRole('button', { name: 'Settings' }))
+    const section = await screen.findByRole('region', { name: 'zabbix settings' })
+    expect(within(section).getByText('Bind the server first')).toBeInTheDocument()
+
+    // Only hosts with a service of the integration's type, and only credentials used with the chosen service.
+    expect(within(section).getAllByRole('option').map((o) => o.textContent)).not.toContain('web01')
+    await user.selectOptions(within(section).getByLabelText('Host'), 'h9')
+    await user.selectOptions(within(section).getByLabelText('Service'), 's9')
+    expect(within(within(section).getByLabelText('Credential')).getAllByRole('option').map((o) => o.textContent)).toEqual(['Choose a credential', 'API token'])
+    await user.selectOptions(within(section).getByLabelText('Credential'), 'c9')
+    await user.click(within(section).getByRole('button', { name: 'Save' }))
+
+    expect(await within(section).findByText('Ready')).toBeInTheDocument()
+    expect(bodyOf(fetch, 'PUT /api/plugins/zabbix/integrations/server')).toEqual({ hostId: 'h9', serviceId: 's9', credentialId: 'c9' })
+    expect(within(section).getByText(/^zbx01 · zabbix · API token, set/)).toBeInTheDocument()
+  })
+})

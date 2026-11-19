@@ -42,6 +42,15 @@ public static class AuditActions
     /// <summary>Root's helper upgraded a plugin from the catalog.</summary>
     public const string PluginUpgraded = "plugin.upgraded";
 
+    /// <summary>A plugin saved its settings (architecture.md §7.39).</summary>
+    public const string PluginSettingsChanged = "plugin.settings_changed";
+
+    /// <summary>An administrator bound a plugin's integration (architecture.md §7.39).</summary>
+    public const string IntegrationSet = "integration.set";
+
+    /// <summary>An administrator cleared a plugin's integration.</summary>
+    public const string IntegrationCleared = "integration.cleared";
+
     /// <summary>Root's helper didn't do what the plugins page asked.</summary>
     public const string PluginRequestFailed = "plugin.request_failed";
 

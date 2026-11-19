@@ -15,6 +15,9 @@ public sealed record ContributedHostAction(string PluginId, HostAction Action);
 /// <summary>A session origin, with the plugin that claimed it.</summary>
 public sealed record ContributedSessionOrigin(string PluginId, SessionOrigin Origin);
 
+/// <summary>An integration a loaded plugin declared (docs/architecture.md §7.39, SDK 1.13).</summary>
+public sealed record ContributedIntegration(string PluginId, Integration Integration);
+
 /// <summary>Collects one plugin's contributions while its <see cref="IPlugin.Contribute"/> runs.</summary>
 internal sealed class ContributionCollector : IPluginContributions
 {
@@ -49,6 +52,14 @@ internal sealed class ContributionCollector : IPluginContributions
         ArgumentNullException.ThrowIfNull(origin);
         SessionOrigins.Add(origin);
     }
+
+    public List<Integration> Integrations { get; } = [];
+
+    public void AddIntegration(Integration integration)
+    {
+        ArgumentNullException.ThrowIfNull(integration);
+        Integrations.Add(integration);
+    }
 }
 
 /// <summary>The rules a contribution must follow (docs/architecture.md §7.4). Each returns a problem, or null.</summary>
@@ -57,6 +68,29 @@ public static partial class ContributionRules
     public const int MaxTypeIdLength = 32;
     public const int MaxLabelLength = 100;
     public const int MaxTextLength = 4000;
+
+    /// <summary>An integration (§7.39): a name like a type ID, unique in the plugin, a label, and the service types it binds to.</summary>
+    public static string? Check(Integration integration, IReadOnlyList<Integration> all)
+    {
+        if (integration.Name is null || !TypeId().IsMatch(integration.Name))
+        {
+            return $"The integration name '{integration.Name}' isn't lower-case letters, digits and '-', starting with a letter, up to {MaxTypeIdLength} characters.";
+        }
+
+        if (all.Count(i => i.Name == integration.Name) > 1)
+        {
+            return $"The integration '{integration.Name}' is declared twice.";
+        }
+
+        if (string.IsNullOrWhiteSpace(integration.Label) || integration.Label.Length > MaxLabelLength)
+        {
+            return $"Integration '{integration.Name}' needs a label of at most {MaxLabelLength} characters.";
+        }
+
+        return integration.ServiceTypes is not { Count: > 0 } types || types.Any(t => t is null || !TypeId().IsMatch(t))
+            ? $"Integration '{integration.Name}' needs the service types it binds to, as service type IDs."
+            : null;
+    }
 
     public static string? Check(ServiceType type)
     {

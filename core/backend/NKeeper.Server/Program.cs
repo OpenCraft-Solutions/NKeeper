@@ -159,6 +159,7 @@ api.MapStreamSessions();
 api.MapHealthEndpoints();
 api.MapPluginStatus();
 api.MapPluginCatalog();
+api.MapPluginIntegrations();
 app.MapPluginFrontends();
 PluginHost.MapEndpoints(plugins, api, builder.Configuration, (group, id) => group.WithMetadata(new NKeeper.Core.Credentials.PluginEndpointMetadata(id)));
 if (shell is not null)

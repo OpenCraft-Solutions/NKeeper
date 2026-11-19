@@ -1179,7 +1179,7 @@ Some plugins work with one outside system for the whole instance, not with a hos
 **An integration binding.** The plugin declares a named integration and the service types it takes:
 
 ```csharp
-contributions.AddIntegration(new Integration("server", "Zabbix server", ServiceTypes: ["zabbix"]));
+contributions.AddIntegration(new Integration("server", "Zabbix server") { ServiceTypes = ["zabbix"] });
 ```
 
 - An administrator binds it, on the plugin's settings (below), to one host, one of its services of those types, and one credential used with that service. Core stores the binding (`core.plugin_integrations`: plugin, name, host, service, credential, who set it and when) and audits it (`integration.set`, `integration.cleared`). Deleting the host, service or credential clears it.
@@ -1189,15 +1189,15 @@ contributions.AddIntegration(new Integration("server", "Zabbix server", ServiceT
 
 **HTTPS with a bearer token.** `IConnectivity.OpenHttpAsync(host, serviceId, handle, HttpSignIn.Bearer)` signs every request in with `Authorization: Bearer <password>`, as `HttpSignIn.Basic` (§7.16, SDK 1.6) does with Basic authentication. TLS only, the certificate checked the same way, the plugin never seeing the token.
 
-**Plugin settings.** `IPluginSettings` keeps one JSON document per plugin, with its schema version (`{ "v": 1, "data": … }`, v2-plan.md §5): `GetAsync<T>()` and `SetAsync(value)`. It holds no secrets: those are credentials. Stored in `core.plugin_settings`, audited as `plugin.settings_changed` with the plugin's ID.
+**Plugin settings.** `IPluginSettings` keeps one JSON document per plugin, with its schema version (v2-plan.md §5): `GetAsync()` gives a `PluginDocument(Version, Data)` or null, `SetAsync(version, data)` replaces it (at most 64 KB). It holds no secrets: those are credentials. Stored in `core.plugin_settings`, audited as `plugin.settings_changed` with the plugin's ID.
 
-**Host data.** `IHostData` keeps one small JSON document per plugin and host (at most 16 KB), such as the Zabbix host a host is linked to: `GetAsync<T>(hostId)`, `SetAsync(hostId, value)`, `ClearAsync(hostId)`, and `FindAsync<T>()` for every host's. Stored in `core.host_data`, deleted with the host, kept when the plugin is disabled (§9.2).
+**Host data.** `IHostData` keeps one small JSON document per plugin and host (at most 16 KB), such as the Zabbix host a host is linked to: `GetAsync(hostId)`, `SetAsync(hostId, version, data)`, `ClearAsync(hostId)`, and `AllAsync()` for every host's. It checks no permission itself: the plugin's endpoint is in a host group (§7.11) that does, and writing a link is managing the host. Stored in `core.host_data`, deleted with the host, kept when the plugin is disabled (§9.2).
 
 **Administrator endpoints.** `endpoints.MapAdministratorGroup()` gives a group only administrators reach, as core's own settings endpoints are.
 
 **Frontend (SDK 1.13).** A plugin's definition can also draw:
-- `hostPanels`: a panel in a host's details, `(props: { host, canManage }) => …`, under the plugin's name. The shell shows it for every host; the panel draws nothing for a host it has nothing to say about.
-- `settingsPanel`: a section of the Settings page, for administrators. The shell draws the plugin's integration bindings above it, with core's own host, service and credential pickers, so no plugin draws a credential picker.
+- `hostPanels`: panels in a host's details by their titles, `{ Zabbix: (props: { host, canManage }) => … }`. The shell shows them for every host; a panel draws nothing for a host it has nothing to say about. One that throws shows an error in its place, and the rest of the page goes on.
+- `settingsPanel`: a section of the Settings page, for administrators, given `{ integrations: [{ name, label, bound }], version }` (`version` changes with every binding). The shell draws the plugin's integration bindings above it, with core's own host, service and credential pickers, so no plugin draws a credential picker.
 
 A plugin's frontend calls core's API as the signed-in user, as the shell does (`api` from `@nkeeper/sdk`), so creating hosts, say, is core's ordinary `POST /api/hosts`, with the user's own rights and audit.
 
