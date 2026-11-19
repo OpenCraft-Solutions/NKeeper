@@ -1268,6 +1268,20 @@ inventoryTools: { 'network-scan': { label: 'Scan network', title: 'Find the mach
 - Two hosts at one address are a conflict, marked. Rows can be limited to addresses in use, and the grid downloads as CSV.
 - Selecting a host shows it in the workspace.
 
+### 7.44 The audit log page
+
+1.x's audit log report, ported from `AuditController` and `AuditLogReport`: core's audit trail (`core.audit_events`), for administrators, as a report on the Reports page next to Health. Recording terminal sessions, and 1.x's player for them, aren't ported yet.
+
+- **`GET /api/audit/events`**, administrators only: the events newest first, a page at a time (`limit`, at most 500, 100 by default), with `next` to pass as `before` for the next older page. Filters, which combine:
+  - `q`: text in the actor, action, target or detail;
+  - `category`: an action's first part, such as `host`, `auth`, `plugin` or a plugin's ID (`zabbix`). `GET /api/audit/categories` lists those in use;
+  - `actor`: who did it, exactly;
+  - `target`: what it happened to, exactly, such as a host's ID;
+  - `from` and `to`: when, as UTC times (`from` inclusive, `to` exclusive).
+- Each event has its time, actor, client address, action, target and detail. A target that's a host's ID comes with the host's name, while the host exists; reading the log needs no permission on the host, since administrators see every host anyway.
+- **`GET /api/audit/events.csv`**: the same filters, as CSV, newest first, at most 100,000 rows.
+- **The page**: the filters, the events in a table, **Load older** for the next page, and **Download CSV**. Selecting a host's name shows it in the workspace.
+- Reading the log isn't audited: it changes nothing, and only administrators can.
 ### 7.45 Moving an instance to a new server
 
 1.x's instance transfer, ported from `InstanceTransferController` and `Transfer/`: everything an instance holds, exported into one file encrypted with a passphrase, and imported on a fresh NKeeper. Settings, Administrators only. It's for moving servers; a backup is still the database and the key ring certificate (§8).
@@ -1308,6 +1322,8 @@ It holds no sessions, no audit log (the new server's starts with the import) and
 4. **Fetches the built-in plugins** named in `deploy/plugins.lock`: each one a signed release of its own repository, checked against its SHA-256 there (§9). One that fails to download or doesn't match is skipped, with a warning. An earlier install's install key is removed (plugin-security.md §6.1).
 5. Lays out the files below, and writes the settings file (with `Origins:BaseDomain` when given `--web-domain`, §7.18), the key ring certificate (on a fresh install only), the systemd unit and nginx's site. nginx gets a self-signed certificate unless one is given (`--cert`, `--key`).
 6. **Starts NKeeper.** On a fresh install it creates the first administrator: the installer asks for a password, or generates one and prints it once. Once the server is up, it turns the bootstrap off and removes the password from the settings file.
+
+**A lost password.** The installer keeps no copy of the first administrator's password, and nobody can reset an account without signing in. So root can: `sudo nkeeper admin reset-password <user name>` sets a new random password for the account, prints it once, and requires the user to change it at the next sign-in. As the Users page's reset does (§6.1), it clears a lockout, ends the account's sessions and is audited (`user.credential_reset`, by `system`). It needs the settings file, which only root can read, and the database.
 
 | Path | Owner / mode | Contents |
 | --- | --- | --- |
