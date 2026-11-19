@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react'
-import type { SessionViewProps } from '@nkeeper/sdk'
+import type { HostPanelProps, SessionViewProps, SettingsPanelProps } from '@nkeeper/sdk'
 import { credentialName, serviceName, usedWith } from './hosts'
 import type { FrontendState, PluginStatus } from './plugins'
 import type { Host, HostActionInfo, ServiceTypeInfo, SessionTypeInfo } from './types'
@@ -14,10 +14,14 @@ export interface Catalog {
   actions: (HostActionInfo & { pluginId: string })[]
   /** Session views by session type, each from the plugin that contributed the type. */
   views: Map<string, ComponentType<SessionViewProps>>
+  /** Panels in a host's details (SDK 1.13), in the plugins' order. */
+  hostPanels: { pluginId: string; title: string; Panel: ComponentType<HostPanelProps> }[]
+  /** Sections of the Settings page (SDK 1.13), by plugin. */
+  settingsPanels: Map<string, ComponentType<SettingsPanelProps>>
 }
 
 export function buildCatalog(statuses: PluginStatus[], frontends: Map<string, FrontendState>): Catalog {
-  const catalog: Catalog = { serviceTypes: new Map(), sessionTypes: new Map(), actions: [], views: new Map() }
+  const catalog: Catalog = { serviceTypes: new Map(), sessionTypes: new Map(), actions: [], views: new Map(), hostPanels: [], settingsPanels: new Map() }
   for (const status of statuses) {
     if (status.state !== 'loaded') {
       continue
@@ -32,7 +36,14 @@ export function buildCatalog(statuses: PluginStatus[], frontends: Map<string, Fr
       catalog.actions.push({ ...action, pluginId: status.id })
     }
     const frontend = frontends.get(status.id)
-    const views = frontend?.kind === 'active' ? frontend.definition.sessionViews : undefined
+    const definition = frontend?.kind === 'active' ? frontend.definition : undefined
+    for (const [title, Panel] of Object.entries(definition?.hostPanels ?? {})) {
+      catalog.hostPanels.push({ pluginId: status.id, title, Panel })
+    }
+    if (definition?.settingsPanel) {
+      catalog.settingsPanels.set(status.id, definition.settingsPanel)
+    }
+    const views = definition?.sessionViews
     for (const [sessionType, view] of Object.entries(views ?? {})) {
       // A plugin draws only its own session types.
       if (status.sessionTypes?.some((t) => t.id === sessionType)) {

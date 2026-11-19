@@ -19,6 +19,14 @@ public interface ICredentialBroker
     /// <summary>A credential the user typed into core's prompt; <paramref name="promptReference"/> is single-use.</summary>
     Task<CredentialHandle> ResolvePromptAsync(HostContext host, Guid serviceId, string promptReference, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// The plugin's integration <paramref name="name"/>, as an administrator bound it (docs/architecture.md §7.39, SDK
+    /// 1.13), for the current user: only if they may use its host, as <see cref="ResolveSavedAsync"/> would.
+    /// </summary>
+    /// <exception cref="IntegrationUnavailableException">It isn't bound, its parts are gone, or the user may not use its host.</exception>
+    Task<IntegrationHandle> ResolveIntegrationAsync(string name, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("This server has no integrations: it needs SDK 1.13.");
+
     /// <summary>What a handle refers to, without its secrets: for messages such as "connecting as root".</summary>
     Task<CredentialDescription> DescribeAsync(HostContext host, Guid serviceId, CredentialHandle handle, CancellationToken cancellationToken = default);
 }

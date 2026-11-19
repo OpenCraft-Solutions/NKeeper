@@ -27,7 +27,7 @@ public sealed class PluginSessions(
         var plugin = PluginCaller.Of(context);
 
         // Only from the plugin's own host endpoint, for the host core authorized and one of its stateful types.
-        if (context is null || plugin is null || !ReferenceEquals(context.Features.Get<HostContext>(), host))
+        if (context is null || plugin is null || !PluginCaller.Authorized(context, host))
         {
             throw new InvalidOperationException("Sessions can only be opened from a plugin's host-scoped endpoint, for its own host.");
         }

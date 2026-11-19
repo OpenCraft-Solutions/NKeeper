@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { api } from '@nkeeper/sdk'
+import type { Catalog } from './catalog'
 import { PluginCatalog } from './PluginCatalog'
+import { PluginIntegrations } from './PluginIntegrations'
 import { errorMessage, usePluginAdmin, type PluginAdmin } from './pluginAdmin'
 import type { FrontendState, PluginStatus } from './plugins'
 import { Alert } from './ui/Alert'
@@ -24,7 +26,7 @@ type Asking = { kind: 'disable' | 'remove'; plugin: PluginStatus; dependants: st
  * server knows, with their states and whether their frontends loaded here, and turns them on and off (§9.2); below
  * it, the plugin catalog (§9.1, §9.3).
  */
-export function PluginsView({ plugins, frontends }: { plugins: PluginStatus[]; frontends: Map<string, FrontendState> }) {
+export function PluginsView({ plugins, frontends, catalog }: { plugins: PluginStatus[]; frontends: Map<string, FrontendState>; catalog: Catalog }) {
   const { admin, setAdmin, error, setError } = usePluginAdmin()
   const [busy, setBusy] = useState<string | null>(null)
   const [asking, setAsking] = useState<Asking | null>(null)
@@ -170,6 +172,7 @@ export function PluginsView({ plugins, frontends }: { plugins: PluginStatus[]; f
           </table>
         )}
       </section>
+      <PluginIntegrations catalog={catalog} />
       {admin ? <PluginCatalog admin={admin} onChange={setAdmin} /> : null}
     </div>
   )

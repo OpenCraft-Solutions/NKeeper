@@ -191,7 +191,7 @@ export function App({ importer }: { importer?: ModuleImporter }) {
             </ReportsPage>
           )}
           {view === 'users' && isAdministrator && <UsersView currentUserId={load.user.id} />}
-          {view === 'settings' && isAdministrator && <PluginsView plugins={load.plugins} frontends={load.frontends} />}
+          {view === 'settings' && isAdministrator && <PluginsView plugins={load.plugins} frontends={load.frontends} catalog={catalog} />}
           {/* The workspace stays mounted behind the other pages, so its sessions and drafts carry on. */}
           <div className={frame.content} hidden={view !== 'workspace'}>
             <Workspace catalog={catalog} canCreate={isAdministrator} focus={focus} />

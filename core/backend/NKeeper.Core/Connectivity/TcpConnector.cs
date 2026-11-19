@@ -19,7 +19,7 @@ public sealed class TcpConnector(CoreDbContext db, IHttpContextAccessor http, IJ
     {
         // Only for the host core authorized for this plugin request: a plugin could make up another.
         var context = http.HttpContext;
-        if (context is null || PluginCaller.Of(context) is null || !ReferenceEquals(context.Features.Get<HostContext>(), host))
+        if (context is null || PluginCaller.Of(context) is null || !PluginCaller.Authorized(context, host))
         {
             throw new InvalidOperationException("TCP connections can only be opened from a plugin's host-scoped endpoint, for its own host.");
         }

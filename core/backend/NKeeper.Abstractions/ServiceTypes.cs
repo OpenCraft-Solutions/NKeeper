@@ -17,6 +17,9 @@ public interface IPluginContributions
 
     /// <summary>Claims an origin prefix for the plugin's sessions (docs/architecture.md §7.18, SDK 0.1.8).</summary>
     void AddSessionOrigin(SessionOrigin origin);
+
+    /// <summary>Declares an outside system an administrator binds for the whole instance (docs/architecture.md §7.39, SDK 1.13).</summary>
+    void AddIntegration(Integration integration) => throw new NotSupportedException("This server has no integrations: it needs SDK 1.13.");
 }
 
 /// <summary>

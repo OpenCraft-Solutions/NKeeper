@@ -106,7 +106,7 @@ public sealed class HttpsSignInTests(PostgresFixture postgres) : IClassFixture<P
     private static Guid CredentialId(JsonElement host) => host.GetProperty("credentials")[0].GetProperty("id").GetGuid();
 
     /// <summary>An HTTPS server with a self-signed certificate that answers every request with its method, path and authorization.</summary>
-    private sealed class FakeBmc : IAsyncDisposable
+    internal sealed class FakeBmc : IAsyncDisposable
     {
         private readonly TcpListener _listener = new(IPAddress.Loopback, 0);
         private readonly CancellationTokenSource _stop = new();

@@ -2,7 +2,7 @@ import type { ComponentType } from 'react'
 import type { StreamConnection, TrustPrompt } from './sessions'
 
 /** The SDK version this build of the shell implements; plugin manifests declare a compatible range. */
-export const SDK_VERSION = '1.12.0'
+export const SDK_VERSION = '1.13.0'
 
 /** What a plugin's frontend knows about itself. Its identity comes from the server's verified manifest. */
 export interface PluginContext {
@@ -37,6 +37,35 @@ export interface SessionViewProps {
   readonly confirmTrust: (prompt: TrustPrompt) => Promise<boolean>
 }
 
+/** What a host panel is given (docs/architecture.md §7.39, SDK 1.13). */
+export interface HostPanelProps {
+  /** The host whose details are showing. */
+  readonly host: { readonly id: string; readonly name: string; readonly hostname: string | null; readonly ipAddress: string | null }
+  /** Whether the signed-in user may manage the host (edit it, trust for it), not only use it. */
+  readonly canManage: boolean
+}
+
+/** One of the plugin's integrations, as its settings panel sees it (SDK 1.13). */
+export interface IntegrationState {
+  readonly name: string
+  readonly label: string
+  /** Whether an administrator has bound it; the shell draws the binding itself, above the panel. */
+  readonly bound: boolean
+}
+
+/** What a settings panel is given (docs/architecture.md §7.39, SDK 1.13). */
+export interface SettingsPanelProps {
+  /** The plugin's integrations; `version` changes whenever a binding does, so the panel can test it again. */
+  readonly integrations: readonly IntegrationState[]
+  readonly version: number
+  /**
+   * Shows core's dialog for a certificate or key the plugin's endpoint reported (its `presented`), such as a bound
+   * server's self-signed certificate, and posts it to core when the administrator trusts it. Resolves to whether it's
+   * now trusted.
+   */
+  readonly confirmTrust: (prompt: TrustPrompt) => Promise<boolean>
+}
+
 /**
  * A plugin frontend (SDK v1, docs/plugin-authoring.md). The module named by the manifest's
  * `frontend.entry` default-exports one, made with {@link definePlugin}. More members arrive with
@@ -51,6 +80,13 @@ export interface PluginDefinition {
   readonly sessionViews?: Readonly<Record<string, ComponentType<SessionViewProps>>>
   /** What the plugins that depend on this one may use, through `context.use` (SDK 1.8). */
   readonly exports?: Readonly<Record<string, unknown>>
+  /**
+   * Panels in a host's details, by their titles (SDK 1.13). The shell shows them for every host; a panel draws
+   * nothing (returns null) for a host it has nothing to say about.
+   */
+  readonly hostPanels?: Readonly<Record<string, ComponentType<HostPanelProps>>>
+  /** A section of the Settings page, for administrators, below the plugin's integration bindings (SDK 1.13). */
+  readonly settingsPanel?: ComponentType<SettingsPanelProps>
 }
 
 const ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*(?:\.[a-z0-9]+(?:-[a-z0-9]+)*)*$/
@@ -59,13 +95,14 @@ const ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*(?:\.[a-z0-9]+(?:-[a-z0-9]+)*)*$/
 export function definePlugin<T extends PluginDefinition>(definition: T): Readonly<T> {
   if (!isPluginDefinition(definition)) {
     throw new TypeError(
-      'definePlugin needs an object with a valid plugin id; activate (if any) must be a function, sessionViews (if any) an object of components, and exports (if any) an object.',
+      'definePlugin needs an object with a valid plugin id; activate (if any) must be a function, sessionViews and hostPanels (if any) objects of components, settingsPanel (if any) a component, and exports (if any) an object.',
     )
   }
   return Object.freeze({
     ...definition,
     ...(definition.sessionViews ? { sessionViews: Object.freeze({ ...definition.sessionViews }) } : {}),
     ...(definition.exports ? { exports: Object.freeze({ ...definition.exports }) } : {}),
+    ...(definition.hostPanels ? { hostPanels: Object.freeze({ ...definition.hostPanels }) } : {}),
   })
 }
 
@@ -74,13 +111,15 @@ export function isPluginDefinition(value: unknown): value is PluginDefinition {
   if (typeof value !== 'object' || value === null) {
     return false
   }
-  const candidate = value as { id?: unknown; activate?: unknown; sessionViews?: unknown; exports?: unknown }
+  const candidate = value as { id?: unknown; activate?: unknown; sessionViews?: unknown; exports?: unknown; hostPanels?: unknown; settingsPanel?: unknown }
   return (
     typeof candidate.id === 'string' &&
     candidate.id.length <= 100 &&
     ID_PATTERN.test(candidate.id) &&
     (candidate.activate === undefined || typeof candidate.activate === 'function') &&
     (candidate.sessionViews === undefined || isViewMap(candidate.sessionViews)) &&
+    (candidate.hostPanels === undefined || (isViewMap(candidate.hostPanels) && Object.keys(candidate.hostPanels as object).every(isPanelTitle))) &&
+    (candidate.settingsPanel === undefined || isComponent(candidate.settingsPanel)) &&
     (candidate.exports === undefined || (typeof candidate.exports === 'object' && candidate.exports !== null && !Array.isArray(candidate.exports)))
   )
 }
@@ -98,4 +137,8 @@ function isComponent(view: unknown): boolean {
 
 function isViewMap(value: unknown): boolean {
   return typeof value === 'object' && value !== null && !Array.isArray(value) && Object.values(value).every(isComponent)
+}
+
+function isPanelTitle(title: string): boolean {
+  return title.trim().length > 0 && title.length <= 100
 }

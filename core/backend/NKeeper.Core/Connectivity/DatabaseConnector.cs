@@ -31,7 +31,7 @@ public sealed class DatabaseConnector(
         ArgumentNullException.ThrowIfNull(request);
         var context = http.HttpContext;
         var pluginId = PluginCaller.Of(context);
-        if (context is null || pluginId is null || !ReferenceEquals(context.Features.Get<HostContext>(), host))
+        if (context is null || pluginId is null || !PluginCaller.Authorized(context, host))
         {
             throw new InvalidOperationException("Database connections can only be opened from a plugin's host-scoped endpoint, for its own host.");
         }
@@ -108,7 +108,7 @@ public sealed class DatabaseConnector(
     {
         ArgumentNullException.ThrowIfNull(identity);
         var context = http.HttpContext;
-        if (context is null || PluginCaller.Of(context) is null || !ReferenceEquals(context.Features.Get<HostContext>(), host))
+        if (context is null || PluginCaller.Of(context) is null || !PluginCaller.Authorized(context, host))
         {
             throw new InvalidOperationException("Identities can only be checked from a plugin's host-scoped endpoint, for its own host.");
         }

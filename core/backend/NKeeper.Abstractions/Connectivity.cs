@@ -35,6 +35,16 @@ public interface IConnectivity
         => throw new NotSupportedException("This server doesn't sign in to HTTP services: it needs SDK 1.6.");
 
     /// <summary>
+    /// Like <see cref="OpenHttpAsync(HostContext, Guid, CredentialHandle, CancellationToken)"/>, signing in as
+    /// <paramref name="signIn"/> says (docs/architecture.md §7.39, SDK 1.13): <see cref="HttpSignIn.Bearer"/> sends the
+    /// credential's password as an API token. TLS only; the plugin never sees the secret.
+    /// </summary>
+    Task<IHttpConnection> OpenHttpAsync(HostContext host, Guid serviceId, CredentialHandle handle, HttpSignIn signIn, CancellationToken cancellationToken = default)
+        => signIn == HttpSignIn.Basic
+            ? OpenHttpAsync(host, serviceId, handle, cancellationToken)
+            : throw new NotSupportedException("This server doesn't sign in with bearer tokens: it needs SDK 1.13.");
+
+    /// <summary>
     /// Like <see cref="OpenSshAsync(HostContext, Guid, CredentialHandle, CancellationToken)"/>, to another port on the
     /// service's address (SDK 1.6): RACADM, an iDRAC's SSH command line, beside its HTTPS service. The server's key is
     /// trusted for that address and port.
