@@ -45,6 +45,16 @@ public sealed class AdminCommandTests(PostgresFixture postgres) : IClassFixture<
     }
 
     [Fact]
+    public void Every_generated_password_meets_the_policy()
+    {
+        for (var i = 0; i < 2000; i++)
+        {
+            var password = AdminCommand.NewPassword();
+            Assert.True(password.Length == 20 && password.Any(char.IsAsciiDigit) && password.Any(char.IsAsciiLetterUpper) && password.Any(char.IsAsciiLetterLower), password);
+        }
+    }
+
+    [Fact]
     public async Task An_unknown_user_or_a_wrong_usage_changes_nothing()
     {
         await using var server = new ServerScenario(await postgres.CreateDatabaseAsync());

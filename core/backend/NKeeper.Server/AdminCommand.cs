@@ -24,6 +24,24 @@ internal static class AdminCommand
     private const int PasswordLength = 20;
     private const string Alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
 
+    /// <summary>
+    /// A random password the policy accepts: it needs a digit and a lower- and upper-case letter, which a purely random
+    /// draw sometimes lacks, so one of each is placed, at random positions.
+    /// </summary>
+    internal static string NewPassword()
+    {
+        var chars = RandomNumberGenerator.GetString(Alphabet, PasswordLength).ToCharArray();
+        string[] required = ["ABCDEFGHJKLMNPQRSTUVWXYZ", "abcdefghijkmnpqrstuvwxyz", "23456789"];
+        var positions = Enumerable.Range(0, PasswordLength).ToArray();
+        RandomNumberGenerator.Shuffle(positions.AsSpan());
+        for (var i = 0; i < required.Length; i++)
+        {
+            chars[positions[i]] = RandomNumberGenerator.GetString(required[i], 1)[0];
+        }
+
+        return new string(chars);
+    }
+
     public static Task<int> RunAsync(string[] args, CancellationToken cancellationToken) =>
         RunAsync(
             args,
@@ -69,7 +87,7 @@ internal static class AdminCommand
             return 1;
         }
 
-        var password = RandomNumberGenerator.GetString(Alphabet, PasswordLength);
+        var password = NewPassword();
         await scope.ServiceProvider.GetRequiredService<UserAdministration>()
             .ResetPasswordAsync(user.Id, new ResetPasswordRequest { Password = password, MustChangePassword = true }, Guid.Empty, cancellationToken);
         output.WriteLine($"{user.UserName}'s password is now: {password}");
