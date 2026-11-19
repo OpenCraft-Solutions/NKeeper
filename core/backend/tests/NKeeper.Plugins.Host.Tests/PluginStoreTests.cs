@@ -1,3 +1,4 @@
+using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using NKeeper.Abstractions;
@@ -45,28 +46,48 @@ public sealed class PluginStoreTests : IDisposable
     }
 
     [Fact]
-    public void GitHubs_releases_are_read_newest_first_without_drafts_prereleases_or_releases_lacking_the_package()
+    public void A_release_feed_is_read_newest_first_without_prereleases_or_other_repositories_tags()
     {
-        var json = """
-            [
-              { "tag_name": "v1.0.0", "draft": false, "prerelease": false, "assets": [
-                { "name": "kvm-1.0.0.nkp", "browser_download_url": "https://dl.test/kvm-1.0.0.nkp" },
-                { "name": "kvm-1.0.0.nkp.sha256", "browser_download_url": "https://dl.test/kvm-1.0.0.nkp.sha256" } ] },
-              { "tag_name": "v1.2.0", "draft": false, "prerelease": false, "assets": [
-                { "name": "kvm-1.2.0.nkp", "browser_download_url": "https://dl.test/kvm-1.2.0.nkp" } ] },
-              { "tag_name": "v1.3.0", "draft": true, "assets": [ { "name": "kvm-1.3.0.nkp", "browser_download_url": "https://dl.test/a" } ] },
-              { "tag_name": "v1.4.0", "prerelease": true, "assets": [ { "name": "kvm-1.4.0.nkp", "browser_download_url": "https://dl.test/b" } ] },
-              { "tag_name": "v1.5.0", "assets": [ { "name": "other-1.5.0.nkp", "browser_download_url": "https://dl.test/c" } ] },
-              { "tag_name": "v1.6.0", "assets": [ { "name": "kvm-1.6.0.nkp", "browser_download_url": "http://dl.test/d" } ] },
-              { "tag_name": "latest", "assets": [] }
-            ]
-            """u8;
+        var atom = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <feed xmlns="http://www.w3.org/2005/Atom">
+              <entry><link rel="alternate" type="text/html" href="https://github.com/o/kvm/releases/tag/v1.0.0"/><title>kvm 1.0.0</title></entry>
+              <entry><link rel="alternate" type="text/html" href="https://github.com/o/kvm/releases/tag/v1.2.0"/><title>kvm 1.2.0</title></entry>
+              <entry><link rel="alternate" type="text/html" href="https://github.com/o/kvm/releases/tag/v1.3.0-beta.1"/></entry>
+              <entry><link rel="alternate" type="text/html" href="https://github.com/elsewhere/kvm/releases/tag/v9.0.0"/></entry>
+              <entry><link rel="alternate" type="text/html" href="https://github.com/o/kvm/releases/tag/latest"/></entry>
+            </feed>
+            """u8.ToArray();
 
-        var releases = GitHubReleases.ParseReleases("kvm", json);
+        var releases = GitHubReleases.ParseFeed("kvm", "o/kvm", atom);
 
         Assert.Equal(["1.2.0", "1.0.0"], releases.Select(r => r.Version.Text));
-        Assert.Null(releases[0].Sha256);
-        Assert.Equal(new Uri("https://dl.test/kvm-1.0.0.nkp.sha256"), releases[1].Sha256);
+        Assert.Equal(new Uri("https://github.com/o/kvm/releases/download/v1.2.0/kvm-1.2.0.nkp"), releases[0].Package);
+        Assert.Equal(new Uri("https://github.com/o/kvm/releases/download/v1.2.0/kvm-1.2.0.nkp.sha256"), releases[0].Sha256);
+        Assert.Throws<ReleaseSourceException>(() => GitHubReleases.ParseFeed("kvm", "o/kvm", "<!DOCTYPE x [<!ENTITY e 'x'>]><feed/>"u8.ToArray()));
+    }
+
+    [Fact]
+    public async Task Releases_come_from_the_feed_never_the_rate_limited_API()
+    {
+        using var http = new HttpClient(new RateLimitedGitHub());
+        var releases = await new GitHubReleases(http).ListAsync(new CatalogEntry("kvm", "o/kvm", null), Ct);
+
+        Assert.Equal(["1.1.0"], releases.Select(r => r.Version.Text));
+    }
+
+    /// <summary>GitHub with this address's API allowance used up: the API answers 403, the release feed answers.</summary>
+    private sealed class RateLimitedGitHub : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(request.RequestUri!.Host == "api.github.com"
+                ? new HttpResponseMessage(HttpStatusCode.Forbidden) { Content = new StringContent("""{ "message": "API rate limit exceeded" }""") }
+                : request.RequestUri.AbsoluteUri == "https://github.com/o/kvm/releases.atom"
+                    ? new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("""<feed xmlns="http://www.w3.org/2005/Atom"><entry><link href="https://github.com/o/kvm/releases/tag/v1.1.0"/></entry></feed>"""),
+                    }
+                    : new HttpResponseMessage(HttpStatusCode.NotFound));
     }
 
     [Fact]
