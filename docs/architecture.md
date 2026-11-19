@@ -1268,6 +1268,21 @@ inventoryTools: { 'network-scan': { label: 'Scan network', title: 'Find the mach
 - Two hosts at one address are a conflict, marked. Rows can be limited to addresses in use, and the grid downloads as CSV.
 - Selecting a host shows it in the workspace.
 
+### 7.44 The audit log page
+
+1.x's audit log report, ported from `AuditController` and `AuditLogReport`: core's audit trail (`core.audit_events`), for administrators, as a report on the Reports page next to Health. Recording terminal sessions, and 1.x's player for them, aren't ported yet.
+
+- **`GET /api/audit/events`**, administrators only: the events newest first, a page at a time (`limit`, at most 500, 100 by default), with `next` to pass as `before` for the next older page. Filters, which combine:
+  - `q`: text in the actor, action, target or detail;
+  - `category`: an action's first part, such as `host`, `auth`, `plugin` or a plugin's ID (`zabbix`). `GET /api/audit/categories` lists those in use;
+  - `actor`: who did it, exactly;
+  - `target`: what it happened to, exactly, such as a host's ID;
+  - `from` and `to`: when, as UTC times (`from` inclusive, `to` exclusive).
+- Each event has its time, actor, client address, action, target and detail. A target that's a host's ID comes with the host's name, while the host exists; reading the log needs no permission on the host, since administrators see every host anyway.
+- **`GET /api/audit/events.csv`**: the same filters, as CSV, newest first, at most 100,000 rows.
+- **The page**: the filters, the events in a table, **Load older** for the next page, and **Download CSV**. Selecting a host's name shows it in the workspace.
+- Reading the log isn't audited: it changes nothing, and only administrators can.
+
 ## 8. The native install
 
 `deploy/setup.sh` installs NKeeper on a Linux server, from a checkout of the repository, as root. It's an early version of the Phase 6 installer (v2-plan.md §8). NKeeper installs natively only (D8): systemd, nginx and PostgreSQL, no containers.
