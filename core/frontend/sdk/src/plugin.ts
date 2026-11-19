@@ -2,7 +2,7 @@ import type { ComponentType } from 'react'
 import type { StreamConnection, TrustPrompt } from './sessions'
 
 /** The SDK version this build of the shell implements; plugin manifests declare a compatible range. */
-export const SDK_VERSION = '1.13.0'
+export const SDK_VERSION = '1.14.0'
 
 /** What a plugin's frontend knows about itself. Its identity comes from the server's verified manifest. */
 export interface PluginContext {
@@ -66,6 +66,37 @@ export interface SettingsPanelProps {
   readonly confirmTrust: (prompt: TrustPrompt) => Promise<boolean>
 }
 
+/** What a report's view is given (docs/architecture.md §7.41, SDK 1.14). */
+export interface ReportViewProps {
+  /** Shows a host in the workspace, as the Health report's links do. */
+  readonly showHost: (hostId: string) => void
+}
+
+/** A report on the Reports page (SDK 1.14). */
+export interface PluginReport {
+  readonly label: string
+  readonly description: string
+  readonly view: ComponentType<ReportViewProps>
+  /** Lists it only for administrators. Its endpoints check that too: this only hides it. */
+  readonly administrators?: boolean
+}
+
+/** What an inventory tool's view is given (SDK 1.14). */
+export interface InventoryToolProps {
+  /** Closes the tool's dialog. */
+  readonly close: () => void
+  /** Reloads the host tree, after the tool added or changed hosts. */
+  readonly hostsChanged: () => void
+}
+
+/** A button above the host tree, for administrators, that opens the plugin's view in core's dialog (SDK 1.14). */
+export interface InventoryTool {
+  readonly label: string
+  /** The button's tooltip. */
+  readonly title?: string
+  readonly view: ComponentType<InventoryToolProps>
+}
+
 /**
  * A plugin frontend (SDK v1, docs/plugin-authoring.md). The module named by the manifest's
  * `frontend.entry` default-exports one, made with {@link definePlugin}. More members arrive with
@@ -87,6 +118,10 @@ export interface PluginDefinition {
   readonly hostPanels?: Readonly<Record<string, ComponentType<HostPanelProps>>>
   /** A section of the Settings page, for administrators, below the plugin's integration bindings (SDK 1.13). */
   readonly settingsPanel?: ComponentType<SettingsPanelProps>
+  /** Reports on the Reports page, by ID (SDK 1.14). */
+  readonly reports?: Readonly<Record<string, PluginReport>>
+  /** Administrators' tools above the host tree, by ID (SDK 1.14). */
+  readonly inventoryTools?: Readonly<Record<string, InventoryTool>>
 }
 
 const ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*(?:\.[a-z0-9]+(?:-[a-z0-9]+)*)*$/
@@ -95,7 +130,7 @@ const ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*(?:\.[a-z0-9]+(?:-[a-z0-9]+)*)*$/
 export function definePlugin<T extends PluginDefinition>(definition: T): Readonly<T> {
   if (!isPluginDefinition(definition)) {
     throw new TypeError(
-      'definePlugin needs an object with a valid plugin id; activate (if any) must be a function, sessionViews and hostPanels (if any) objects of components, settingsPanel (if any) a component, and exports (if any) an object.',
+      'definePlugin needs an object with a valid plugin id; activate (if any) must be a function, sessionViews and hostPanels (if any) objects of components, settingsPanel (if any) a component, reports and inventoryTools (if any) objects of { label, view }, and exports (if any) an object.',
     )
   }
   return Object.freeze({
@@ -103,6 +138,8 @@ export function definePlugin<T extends PluginDefinition>(definition: T): Readonl
     ...(definition.sessionViews ? { sessionViews: Object.freeze({ ...definition.sessionViews }) } : {}),
     ...(definition.exports ? { exports: Object.freeze({ ...definition.exports }) } : {}),
     ...(definition.hostPanels ? { hostPanels: Object.freeze({ ...definition.hostPanels }) } : {}),
+    ...(definition.reports ? { reports: Object.freeze({ ...definition.reports }) } : {}),
+    ...(definition.inventoryTools ? { inventoryTools: Object.freeze({ ...definition.inventoryTools }) } : {}),
   })
 }
 
@@ -111,7 +148,16 @@ export function isPluginDefinition(value: unknown): value is PluginDefinition {
   if (typeof value !== 'object' || value === null) {
     return false
   }
-  const candidate = value as { id?: unknown; activate?: unknown; sessionViews?: unknown; exports?: unknown; hostPanels?: unknown; settingsPanel?: unknown }
+  const candidate = value as {
+    id?: unknown
+    activate?: unknown
+    sessionViews?: unknown
+    exports?: unknown
+    hostPanels?: unknown
+    settingsPanel?: unknown
+    reports?: unknown
+    inventoryTools?: unknown
+  }
   return (
     typeof candidate.id === 'string' &&
     candidate.id.length <= 100 &&
@@ -120,6 +166,8 @@ export function isPluginDefinition(value: unknown): value is PluginDefinition {
     (candidate.sessionViews === undefined || isViewMap(candidate.sessionViews)) &&
     (candidate.hostPanels === undefined || (isViewMap(candidate.hostPanels) && Object.keys(candidate.hostPanels as object).every(isPanelTitle))) &&
     (candidate.settingsPanel === undefined || isComponent(candidate.settingsPanel)) &&
+    (candidate.reports === undefined || isEntryMap(candidate.reports)) &&
+    (candidate.inventoryTools === undefined || isEntryMap(candidate.inventoryTools)) &&
     (candidate.exports === undefined || (typeof candidate.exports === 'object' && candidate.exports !== null && !Array.isArray(candidate.exports)))
   )
 }
@@ -141,4 +189,25 @@ function isViewMap(value: unknown): boolean {
 
 function isPanelTitle(title: string): boolean {
   return title.trim().length > 0 && title.length <= 100
+}
+
+/** Reports and inventory tools: by ID, each with a label and a view, and any text fields as text. */
+function isEntryMap(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false
+  }
+  return Object.entries(value).every(([id, entry]) => {
+    if (!ID_PATTERN.test(id) || typeof entry !== 'object' || entry === null) {
+      return false
+    }
+    const { label, view, description, title, administrators } = entry as Record<string, unknown>
+    return (
+      typeof label === 'string' &&
+      isPanelTitle(label) &&
+      isComponent(view) &&
+      (description === undefined || typeof description === 'string') &&
+      (title === undefined || typeof title === 'string') &&
+      (administrators === undefined || typeof administrators === 'boolean')
+    )
+  })
 }

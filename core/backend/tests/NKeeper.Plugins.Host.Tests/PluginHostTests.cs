@@ -468,6 +468,7 @@ public sealed class PluginHostTests : IDisposable
     [InlineData("action-run-services")]
     [InlineData("action-session-services")]
     [InlineData("action-scan-session")]
+    [InlineData("action-host-scan-credential")]
     public async Task A_plugin_contributing_an_invalid_host_action_is_refused_and_registers_nothing(string rule)
     {
         _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "broken", entryType: TestPlugins.InvalidServiceTypeType));
@@ -479,6 +480,17 @@ public sealed class PluginHostTests : IDisposable
         Assert.Empty(result.SessionTypes);
         Assert.Empty(result.HostActions);
         Assert.Empty(services);
+    }
+
+    [Fact]
+    public async Task A_scanner_with_no_service_types_and_no_credential_scans_the_host_itself()
+    {
+        _scenario.Install(TestPlugins.Package(_scenario.OfficialKey, id: "broken", entryType: TestPlugins.InvalidServiceTypeType));
+
+        var (result, _) = await ConfigureAsync(("Plugins:Settings:broken:Break", "action-host-scan"));
+
+        var action = Assert.Single(result.HostActions, a => a.PluginId == "broken").Action;
+        Assert.Equal((true, 0, NKeeper.Abstractions.HostActionCredential.None), (action.Scan, action.ServiceTypes.Count, action.Credential));
     }
 
     [Theory]

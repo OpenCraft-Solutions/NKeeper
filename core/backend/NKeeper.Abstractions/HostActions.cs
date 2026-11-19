@@ -35,6 +35,8 @@ public sealed record HostAction(string Id, string Label, string? SessionType = n
     /// <summary>
     /// A run action that scans the host (docs/architecture.md §7.26, SDK 1.4): its endpoint answers a <see cref="ScanFindings"/>,
     /// and the shell offers it in the Scan dialog instead of the menu. Map the endpoint with <see cref="HostPermission.Manage"/>.
+    /// With no <see cref="ServiceTypes"/> it scans the host itself (SDK 1.14, §7.41): offered once per host, with
+    /// <see cref="HostActionCredential.None"/>, and posted <c>{}</c>.
     /// </summary>
     public bool Scan { get; init; }
 }

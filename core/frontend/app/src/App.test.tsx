@@ -703,6 +703,90 @@ describe('the workspace', () => {
     expect(bodyOf(fetch, 'PUT /api/hosts/h1')).toMatchObject({ hostname: 'web01.example.com', macAddress: 'AA:BB:CC:DD:EE:FF', tags: [{ name: 'env', value: 'prod' }], version: 1 })
   })
 
+  it('offers a host-wide scanner once for a host without services, posting no service (SDK 1.14)', async () => {
+    const plugin = terminalPlugin()
+    const fetch = signedIn({
+      'GET /api/plugins': [
+        {
+          ...plugin,
+          hostActions: [...(plugin.hostActions ?? []), { id: 'term.external', label: 'From the server', sessionType: null, endpoint: 'external', serviceTypes: [], credential: 'none', scan: true }],
+        },
+      ],
+      'POST /api/p/term/hosts/h2/external': { ports: [{ port: 22, name: 'SSH' }], notes: ['Probed 36 ports.'] },
+    })
+    const user = userEvent.setup()
+
+    render(<App importer={termImporter} />)
+    await user.click(await screen.findByRole('button', { name: /^db01,/ }))
+    await user.click(screen.getByRole('button', { name: 'Scan' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Scan db01' })
+    await user.click(within(dialog).getByRole('button', { name: 'Scan' }))
+
+    expect(await within(dialog).findByText('Probed 36 ports.')).toBeInTheDocument()
+    expect(bodyOf(fetch, 'POST /api/p/term/hosts/h2/external')).toEqual({})
+  })
+
+  it('opens a plugin’s inventory tool from above the tree, and reloads the hosts it asks to (SDK 1.14)', async () => {
+    let loads = 0
+    signedIn({ 'GET /api/hosts': () => Response.json(loads++ === 0 ? hosts : [...hosts, host({ id: 'h3', name: 'found01' })]) })
+    const importer = vi.fn(async () => ({
+      default: definePlugin({
+        id: 'term',
+        sessionViews: { term: EchoView },
+        inventoryTools: {
+          'network-scan': {
+            label: 'Scan network',
+            title: 'Find the machines on a subnet',
+            view: ({ close, hostsChanged }) => (
+              <button
+                type="button"
+                onClick={() => {
+                  hostsChanged()
+                  close()
+                }}
+              >
+                Add found01
+              </button>
+            ),
+          },
+        },
+      }),
+    }))
+    const user = userEvent.setup()
+
+    render(<App importer={importer} />)
+    await user.click(await screen.findByRole('button', { name: 'Scan network' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Scan network' })
+    await user.click(within(dialog).getByRole('button', { name: 'Add found01' }))
+
+    expect(await screen.findByRole('button', { name: /^found01,/ })).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: 'Scan network' })).not.toBeInTheDocument()
+  })
+
+  it('lists a plugin’s reports after Health, and hides an administrators’ one from others (SDK 1.14)', async () => {
+    signedIn({ 'GET /api/auth/me': { ...ADMIN, roles: [] } })
+    const importer = vi.fn(async () => ({
+      default: definePlugin({
+        id: 'term',
+        sessionViews: { term: EchoView },
+        reports: {
+          'ip-addresses': { label: 'IP addresses', description: 'By subnet', view: ({ showHost }) => <button onClick={() => showHost('h2')}>db01 at .20</button> },
+          secret: { label: 'Licences', description: 'Administrators only', view: () => null, administrators: true },
+        },
+      }),
+    }))
+    const user = userEvent.setup()
+
+    render(<App importer={importer} />)
+    await user.click(await screen.findByRole('button', { name: 'Reports' }))
+    const list = screen.getByRole('navigation', { name: 'Reports' })
+    expect(within(list).queryByRole('button', { name: /Licences/ })).not.toBeInTheDocument()
+    await user.click(within(list).getByRole('button', { name: /IP addresses/ }))
+    await user.click(screen.getByRole('button', { name: 'db01 at .20' }))
+
+    expect(await screen.findByRole('article', { name: 'db01' })).toBeInTheDocument()
+  })
+
   it('sends the version an edit started from, and offers to reload after a conflict', async () => {
     let loads = 0
     const fetch = signedIn({

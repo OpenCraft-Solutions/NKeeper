@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react'
-import type { HostPanelProps, SessionViewProps, SettingsPanelProps } from '@nkeeper/sdk'
+import type { HostPanelProps, InventoryTool, PluginReport, SessionViewProps, SettingsPanelProps } from '@nkeeper/sdk'
 import { credentialName, serviceName, usedWith } from './hosts'
 import type { FrontendState, PluginStatus } from './plugins'
 import type { Host, HostActionInfo, ServiceTypeInfo, SessionTypeInfo } from './types'
@@ -18,10 +18,14 @@ export interface Catalog {
   hostPanels: { pluginId: string; title: string; Panel: ComponentType<HostPanelProps> }[]
   /** Sections of the Settings page (SDK 1.13), by plugin. */
   settingsPanels: Map<string, ComponentType<SettingsPanelProps>>
+  /** Reports on the Reports page (SDK 1.14), in the plugins' order. */
+  reports: (PluginReport & { pluginId: string; id: string })[]
+  /** Administrators' tools above the host tree (SDK 1.14). */
+  inventoryTools: (InventoryTool & { pluginId: string; id: string })[]
 }
 
 export function buildCatalog(statuses: PluginStatus[], frontends: Map<string, FrontendState>): Catalog {
-  const catalog: Catalog = { serviceTypes: new Map(), sessionTypes: new Map(), actions: [], views: new Map(), hostPanels: [], settingsPanels: new Map() }
+  const catalog: Catalog = { serviceTypes: new Map(), sessionTypes: new Map(), actions: [], views: new Map(), hostPanels: [], settingsPanels: new Map(), reports: [], inventoryTools: [] }
   for (const status of statuses) {
     if (status.state !== 'loaded') {
       continue
@@ -42,6 +46,12 @@ export function buildCatalog(statuses: PluginStatus[], frontends: Map<string, Fr
     }
     if (definition?.settingsPanel) {
       catalog.settingsPanels.set(status.id, definition.settingsPanel)
+    }
+    for (const [id, report] of Object.entries(definition?.reports ?? {})) {
+      catalog.reports.push({ ...report, pluginId: status.id, id })
+    }
+    for (const [id, tool] of Object.entries(definition?.inventoryTools ?? {})) {
+      catalog.inventoryTools.push({ ...tool, pluginId: status.id, id })
     }
     const views = definition?.sessionViews
     for (const [sessionType, view] of Object.entries(views ?? {})) {
@@ -105,6 +115,12 @@ export function connectMenu(host: Host, catalog: Catalog, scans = false): Connec
     }
     const resolved = resolve(action, host, catalog)
     if (!resolved) {
+      continue
+    }
+    // A host-wide scanner (SDK 1.14, §7.41) scans the host itself: once, with no service and no credential.
+    if (scans && resolved.target.kind === 'run' && action.serviceTypes.length === 0) {
+      const entry: ConnectEntry = { key: action.id, label: action.label, target: resolved.target, serviceId: '', credential: { kind: 'none' } }
+      groups.push({ key: action.id, label: action.label, actionLabel: action.label, entries: [entry] })
       continue
     }
     host.services.forEach((service, index) => {

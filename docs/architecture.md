@@ -1244,7 +1244,7 @@ inventoryTools: { 'network-scan': { label: 'Scan network', title: 'Find the mach
 
 1.x's external scan and network (subnet) scan, ported from `ExternalScan`, `NetworkScan`, `NetworkProbes`, `ScanPorts`, `Subnet` and `NeighborTable`, in its own repository, `NKeeper-Plugin-NetworkScan` (§9), on SDK 1.14 (`>=1.14.0 <2.0.0`). It contributes no service type.
 
-**It probes from the NKeeper server itself**, with its own sockets: plugins run in-process, which isn't a sandbox (plugin-security.md §5), and these probes carry no credential. So both scans are limited by what they may reach, not by core:
+**It probes from the NKeeper server itself**, with its own sockets: plugins run in-process, which isn't a sandbox (plugin-security.md §1, principle 5), and these probes carry no credential. So both scans are limited by what they may reach, not by core:
 - **The external scan** (`network-scan.host`, a host-wide scanner, §7.41) probes only the host's own address: its IP address, or its hostname resolved once. Someone who can manage the host runs it from the Scan dialog. It finds:
   - TCP connections to 1.x's common ports and the host's own service ports;
   - the SSH banner, and the operating system it suggests (else Windows from RDP, SMB or RPC);
@@ -1262,7 +1262,7 @@ inventoryTools: { 'network-scan': { label: 'Scan network', title: 'Find the mach
 
 ### 7.43 The `reports-ip` plugin
 
-1.x's IP address report, ported from `features/reports/ipGrid` and `IpAddressReport`, in its own repository, `NKeeper-Plugin-ReportsIp` (§9), on SDK 1.14. It's a report (§7.41) and nothing else: frontend only, with no backend endpoints.
+1.x's IP address report, ported from `features/reports/ipGrid` and `IpAddressReport`, in its own repository, `NKeeper-Plugin-ReportsIp` (§9), on SDK 1.14. It's a report (§7.41) and nothing else: its backend, which every package has (plugin-security.md §3), contributes nothing and maps no endpoints.
 
 - **IP addresses**, for everyone: the hosts the user can see (core's `GET /api/hosts`), by IPv4 address, one column per /24 subnet in use and one row per last octet. Hosts with an IPv6 address or a hostname only are left out.
 - Two hosts at one address are a conflict, marked. Rows can be limited to addresses in use, and the grid downloads as CSV.

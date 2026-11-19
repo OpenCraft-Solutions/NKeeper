@@ -105,3 +105,16 @@ describe('host and settings panels (SDK 1.13)', () => {
     expect(Object.isFrozen(definePlugin({ id: 'zabbix', hostPanels: { Zabbix: panel } }).hostPanels)).toBe(true)
   })
 })
+
+describe('reports and inventory tools (SDK 1.14)', () => {
+  it('takes them by ID, each with a label and a view', () => {
+    const view = () => null
+    expect(isPluginDefinition({ id: 'ip', reports: { 'ip-addresses': { label: 'IP addresses', description: 'By subnet', view } } })).toBe(true)
+    expect(isPluginDefinition({ id: 'ip', reports: { 'ip-addresses': { label: 'IP addresses', description: 'By subnet', view, administrators: true } } })).toBe(true)
+    expect(isPluginDefinition({ id: 'ip', reports: { 'IP addresses': { label: 'IP addresses', view } } })).toBe(false)
+    expect(isPluginDefinition({ id: 'ip', reports: { ip: { label: '', view } } })).toBe(false)
+    expect(isPluginDefinition({ id: 'ip', reports: { ip: { label: 'IP', view: 'IpReport' } } })).toBe(false)
+    expect(isPluginDefinition({ id: 'scan', inventoryTools: { 'network-scan': { label: 'Scan network', title: 'Loud', view } } })).toBe(true)
+    expect(isPluginDefinition({ id: 'scan', inventoryTools: { 'network-scan': { label: 'Scan network', title: 3, view } } })).toBe(false)
+  })
+})

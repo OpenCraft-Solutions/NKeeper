@@ -779,6 +779,9 @@ public sealed class InvalidServiceTypePlugin : IPlugin
                 "action-run-services" => new HostAction("fine.go", "Go") { Endpoint = "go" },
                 "action-session-services" => new HostAction("fine.go", "Go", "fine") { ServiceTypes = ["fine"] },
                 "action-scan-session" => new HostAction("fine.scan", "Scan", "fine") { Scan = true },
+                // A host-wide scanner (SDK 1.14) takes no credential; the valid one is "action-host-scan".
+                "action-host-scan-credential" => new HostAction("fine.scan", "Scan") { Endpoint = "scan", Scan = true },
+                "action-host-scan" => new HostAction("fine.scan", "Scan") { Endpoint = "scan", Scan = true, Credential = HostActionCredential.None },
                 _ => new HostAction("Fine.Go", "Go", "fine"),
             });
             return;
