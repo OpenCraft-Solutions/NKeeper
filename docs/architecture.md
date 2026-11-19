@@ -1408,7 +1408,7 @@ Only administrators see the catalog: `GET /api/plugins/catalog`, `POST /api/plug
   - `nkeeper plugin update` refreshes the catalog, as above, and lists what can be installed or upgraded;
   - `nkeeper plugin upgrade [<id>…]` upgrades every installed plugin with a newer installable version, or just those named;
   - `nkeeper plugin install <id>` installs a catalogued plugin, with the plugins it depends on (`dependsOn`) that aren't installed.
-- **From the plugins page,** through a root helper. An administrator's **Install** or **Upgrade** writes a request (the plugin's ID, version and package SHA-256, and who asked) to `/var/lib/nkeeper/plugin-requests/`, and is audited (`plugin.install_requested`). A systemd path unit, `nkeeper-plugin-requests.path`, watches that directory and starts `nkeeper-plugin-requests.service`, which runs `nkeeper plugin apply-requests` as root.
+- **From the plugins page,** through a root helper. An administrator's **Install** or **Upgrade** writes a request (the plugin's ID, version and package SHA-256, and who asked) to `/var/lib/nkeeper/plugin-requests/`, and is audited (`plugin.install_requested`). A systemd path unit, `nkeeper-plugin-requests.path`, watches that directory and starts `nkeeper-plugin-requests.service`, which runs `nkeeper plugin apply-requests` as root. Several can be ticked and installed together, up to ten, what the helper applies in one run: their requests are all checked against the last refresh first (all are on offer, or none is asked for), then made visible at once, so the helper applies them in one run with one restart.
 
 Either way, root's side trusts nothing the service wrote:
 - it fetches the catalog itself and checks the ID is in it;
