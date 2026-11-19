@@ -46,31 +46,6 @@ public sealed class PluginStoreTests : IDisposable
     }
 
     [Fact]
-    public void GitHubs_releases_are_read_newest_first_without_drafts_prereleases_or_releases_lacking_the_package()
-    {
-        var json = """
-            [
-              { "tag_name": "v1.0.0", "draft": false, "prerelease": false, "assets": [
-                { "name": "kvm-1.0.0.nkp", "browser_download_url": "https://dl.test/kvm-1.0.0.nkp" },
-                { "name": "kvm-1.0.0.nkp.sha256", "browser_download_url": "https://dl.test/kvm-1.0.0.nkp.sha256" } ] },
-              { "tag_name": "v1.2.0", "draft": false, "prerelease": false, "assets": [
-                { "name": "kvm-1.2.0.nkp", "browser_download_url": "https://dl.test/kvm-1.2.0.nkp" } ] },
-              { "tag_name": "v1.3.0", "draft": true, "assets": [ { "name": "kvm-1.3.0.nkp", "browser_download_url": "https://dl.test/a" } ] },
-              { "tag_name": "v1.4.0", "prerelease": true, "assets": [ { "name": "kvm-1.4.0.nkp", "browser_download_url": "https://dl.test/b" } ] },
-              { "tag_name": "v1.5.0", "assets": [ { "name": "other-1.5.0.nkp", "browser_download_url": "https://dl.test/c" } ] },
-              { "tag_name": "v1.6.0", "assets": [ { "name": "kvm-1.6.0.nkp", "browser_download_url": "http://dl.test/d" } ] },
-              { "tag_name": "latest", "assets": [] }
-            ]
-            """u8;
-
-        var releases = GitHubReleases.ParseReleases("kvm", json);
-
-        Assert.Equal(["1.2.0", "1.0.0"], releases.Select(r => r.Version.Text));
-        Assert.Null(releases[0].Sha256);
-        Assert.Equal(new Uri("https://dl.test/kvm-1.0.0.nkp.sha256"), releases[1].Sha256);
-    }
-
-    [Fact]
     public void A_release_feed_is_read_newest_first_without_prereleases_or_other_repositories_tags()
     {
         var atom = """
@@ -93,7 +68,7 @@ public sealed class PluginStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task When_the_API_allowance_is_used_up_the_release_feed_is_read_instead()
+    public async Task Releases_come_from_the_feed_never_the_rate_limited_API()
     {
         using var http = new HttpClient(new RateLimitedGitHub());
         var releases = await new GitHubReleases(http).ListAsync(new CatalogEntry("kvm", "o/kvm", null), Ct);
@@ -101,7 +76,7 @@ public sealed class PluginStoreTests : IDisposable
         Assert.Equal(["1.1.0"], releases.Select(r => r.Version.Text));
     }
 
-    /// <summary>GitHub with this address's API allowance used up: the API answers 403, the release feed still answers.</summary>
+    /// <summary>GitHub with this address's API allowance used up: the API answers 403, the release feed answers.</summary>
     private sealed class RateLimitedGitHub : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>

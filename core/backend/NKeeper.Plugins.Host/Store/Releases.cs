@@ -1,7 +1,5 @@
-using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Headers;
-using System.Text.Json;
 using System.Xml;
 using System.Xml.Linq;
 using NKeeper.Plugins.Packaging;
@@ -25,19 +23,14 @@ public interface IPluginReleaseSource
 public sealed class ReleaseSourceException(string message, Exception? innerException = null) : Exception(message, innerException);
 
 /// <summary>
-/// GitHub's releases, through its REST API without a token (docs/architecture.md §9.1). Each repository's listing is
-/// kept with its ETag, so asking again about an unchanged repository costs nothing against the rate limit. When the
-/// API's allowance for this address is used up, the repository's release feed is read instead.
+/// GitHub's releases, from each repository's release feed (docs/architecture.md §9.1), not its REST API: without a
+/// token the API allows 60 requests an hour per public address, which every machine behind it shares. The feed and the
+/// downloads aren't part of that allowance.
 /// </summary>
 public sealed class GitHubReleases(HttpClient http) : IPluginReleaseSource
 {
-    public const int MaxListingBytes = 4 * 1024 * 1024;
     public const int MaxFeedBytes = 2 * 1024 * 1024;
-    private const int PageSize = 30;
-
-    private readonly ConcurrentDictionary<string, (string ETag, byte[] Body)> _listings = new(StringComparer.OrdinalIgnoreCase);
-
-    /// <summary>The HTTP client GitHub expects: a User-Agent, its JSON media type, and a bounded timeout.</summary>
+    /// <summary>The HTTP client GitHub expects: a User-Agent, and a bounded timeout.</summary>
     public static HttpClient CreateClient()
     {
         var client = new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = true, MaxAutomaticRedirections = 5, PooledConnectionLifetime = TimeSpan.FromMinutes(5) })
@@ -48,60 +41,10 @@ public sealed class GitHubReleases(HttpClient http) : IPluginReleaseSource
         return client;
     }
 
+    /// <summary>The repository's release feed; the files are at their conventional addresses.</summary>
     public async Task<IReadOnlyList<PluginRelease>> ListAsync(CatalogEntry entry, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(entry);
-        var uri = new Uri($"https://api.github.com/repos/{entry.Repository}/releases?per_page={PageSize}");
-        using var request = new HttpRequestMessage(HttpMethod.Get, uri);
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
-        request.Headers.Add("X-GitHub-Api-Version", "2022-11-28");
-        _listings.TryGetValue(entry.Repository, out var cached);
-        if (cached.ETag is not null)
-        {
-            request.Headers.TryAddWithoutValidation("If-None-Match", cached.ETag);
-        }
-
-        byte[] body;
-        try
-        {
-            using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-            if (response.StatusCode == HttpStatusCode.NotModified && cached.Body is not null)
-            {
-                body = cached.Body;
-            }
-            else if (response.StatusCode == HttpStatusCode.NotFound)
-            {
-                throw new ReleaseSourceException($"GitHub has no repository {entry.Repository}.");
-            }
-            else if (response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.TooManyRequests)
-            {
-                // The API's 60 requests an hour for this address (shared by every machine behind it) are used up.
-                return await ListFromFeedAsync(entry, cancellationToken);
-            }
-            else if (!response.IsSuccessStatusCode)
-            {
-                throw new ReleaseSourceException($"GitHub answered {(int)response.StatusCode} for {entry.Repository}'s releases.");
-            }
-            else
-            {
-                body = await ReadAsync(response, MaxListingBytes, cancellationToken);
-                if (response.Headers.ETag is { } etag)
-                {
-                    _listings[entry.Repository] = (etag.ToString(), body);
-                }
-            }
-        }
-        catch (HttpRequestException ex)
-        {
-            throw new ReleaseSourceException($"Couldn't reach GitHub: {ex.Message}", ex);
-        }
-
-        return ParseReleases(entry.Id, body);
-    }
-
-    /// <summary>The repository's release feed, which isn't part of the API's allowance; the files are at their conventional addresses.</summary>
-    private async Task<IReadOnlyList<PluginRelease>> ListFromFeedAsync(CatalogEntry entry, CancellationToken cancellationToken)
-    {
         byte[] feed;
         try
         {
@@ -115,7 +58,7 @@ public sealed class GitHubReleases(HttpClient http) : IPluginReleaseSource
             {
                 throw new ReleaseSourceException(
                     response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.TooManyRequests
-                        ? "GitHub's rate limit for this server's address is used up, for its release feeds too; try again in an hour."
+                        ? "GitHub is refusing this server's requests for now; try again later."
                         : $"GitHub answered {(int)response.StatusCode} for {entry.Repository}'s release feed.");
             }
 
@@ -204,65 +147,6 @@ public sealed class GitHubReleases(HttpClient http) : IPluginReleaseSource
             throw new ReleaseSourceException($"Couldn't download {uri}: {ex.Message}", ex);
         }
     }
-
-    /// <summary>GitHub's releases listing, as the plugin's releases: tag <c>v&lt;version&gt;</c> with <c>&lt;id&gt;-&lt;version&gt;.nkp</c>.</summary>
-    internal static IReadOnlyList<PluginRelease> ParseReleases(string id, ReadOnlySpan<byte> json)
-    {
-        var releases = new List<PluginRelease>();
-        try
-        {
-            using var document = JsonDocument.Parse(json.ToArray());
-            if (document.RootElement.ValueKind != JsonValueKind.Array)
-            {
-                throw new ReleaseSourceException("GitHub's releases listing isn't a list.");
-            }
-
-            foreach (var release in document.RootElement.EnumerateArray())
-            {
-                if (Bool(release, "draft") || Bool(release, "prerelease")
-                    || String(release, "tag_name") is not { } tag || !tag.StartsWith('v')
-                    || !SemanticVersion.TryParse(tag[1..], out var version)
-                    || !release.TryGetProperty("assets", out var assets) || assets.ValueKind != JsonValueKind.Array)
-                {
-                    continue;
-                }
-
-                var name = PackageFormat.FileName(id, version.Text);
-                Uri? package = null, sha = null;
-                foreach (var asset in assets.EnumerateArray())
-                {
-                    var assetName = String(asset, "name");
-                    if (String(asset, "browser_download_url") is { } url && Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps)
-                    {
-                        if (assetName == name)
-                        {
-                            package = uri;
-                        }
-                        else if (assetName == name + ".sha256")
-                        {
-                            sha = uri;
-                        }
-                    }
-                }
-
-                if (package is not null)
-                {
-                    releases.Add(new PluginRelease(version, package, name, sha));
-                }
-            }
-        }
-        catch (JsonException ex)
-        {
-            throw new ReleaseSourceException("GitHub's releases listing isn't JSON.", ex);
-        }
-
-        return [.. releases.OrderByDescending(r => r.Version)];
-    }
-
-    private static bool Bool(JsonElement item, string name) => item.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.True;
-
-    private static string? String(JsonElement item, string name) =>
-        item.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 
     private static async Task<byte[]> ReadAsync(HttpResponseMessage response, long maxBytes, CancellationToken cancellationToken)
     {
