@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { buildCatalog, connectMenu } from './catalog'
+import { buildCatalog, connectMenu, defaultEntry } from './catalog'
 import { groupHosts, healthSummary, matchesSearch, tagNames } from './hosts'
-import { credential, host, service, terminalPlugin } from './test/fixtures'
+import { credential, host, service, status, terminalPlugin } from './test/fixtures'
 import { definePlugin } from '@nkeeper/sdk'
 
 const web = host({ id: 'h1', name: 'web01', tags: [{ name: 'env', value: 'prod' }, { name: 'role', value: 'web' }] })
@@ -104,5 +104,31 @@ describe('the Connect menu', () => {
       new Map([['sneaky', { kind: 'active', definition: definePlugin({ id: 'sneaky', sessionViews: { term: View } }) }]]),
     )
     expect(other.views.size).toBe(0)
+  })
+})
+
+describe('double-clicking a host', () => {
+  it('opens the service’s own plugin’s session, not another plugin’s tool on it, even when that one comes first', () => {
+    const view = () => null
+    const tools = status({
+      id: 'tools',
+      frontendEntry: '/plugins/tools/1.0.0/aaaaaaaaaaaa/index.js',
+      sessionTypes: [{ id: 'tools-journal', label: 'Journal', serviceTypes: ['term'], supportsJumpHost: true }],
+      hostActions: [{ id: 'tools.journal', label: 'Journal', sessionType: 'tools-journal', endpoint: null, serviceTypes: [], credential: 'required', scan: false }],
+    })
+    const catalog = buildCatalog(
+      [tools, terminalPlugin()],
+      new Map([
+        ['tools', { kind: 'active', definition: definePlugin({ id: 'tools', sessionViews: { 'tools-journal': view } }) }],
+        ['term', { kind: 'active', definition: definePlugin({ id: 'term', sessionViews: { term: view } }) }],
+      ]),
+    )
+    const h = host({ services: [service()], credentials: [credential()] })
+
+    const groups = connectMenu(h, catalog)
+    expect(groups[0]?.actionLabel).toBe('Journal')
+    expect(defaultEntry(groups, catalog)?.group.actionLabel).toBe('Terminal')
+    // Without the owner's session, the menu's first session.
+    expect(defaultEntry(connectMenu(h, buildCatalog([tools], new Map([['tools', { kind: 'active', definition: definePlugin({ id: 'tools', sessionViews: { 'tools-journal': view } }) }]]))), catalog)?.group.actionLabel).toBe('Journal')
   })
 })

@@ -3,6 +3,7 @@ import { api } from '@nkeeper/sdk'
 import type { Catalog } from './catalog'
 import { PluginCatalog } from './PluginCatalog'
 import { PluginIntegrations } from './PluginIntegrations'
+import { TransferPanel } from './TransferPanel'
 import { errorMessage, usePluginAdmin, type PluginAdmin } from './pluginAdmin'
 import type { FrontendState, PluginStatus } from './plugins'
 import { Alert } from './ui/Alert'
@@ -174,6 +175,7 @@ export function PluginsView({ plugins, frontends, catalog }: { plugins: PluginSt
       </section>
       <PluginIntegrations catalog={catalog} />
       {admin ? <PluginCatalog admin={admin} onChange={setAdmin} /> : null}
+      <TransferPanel />
     </div>
   )
 }

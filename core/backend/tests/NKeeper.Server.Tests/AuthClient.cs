@@ -25,7 +25,8 @@ internal static class AuthClient
         request.Headers.Add(header, token);
         if (body is not null)
         {
-            request.Content = JsonContent.Create(body);
+            // Content as it is (a multipart form, say); anything else as JSON.
+            request.Content = body as HttpContent ?? JsonContent.Create(body);
         }
 
         return await client.SendAsync(request, Token);

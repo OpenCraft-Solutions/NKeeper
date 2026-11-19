@@ -37,6 +37,7 @@ public static class InventoryEndpoints
         return services
             .AddSingleton(provider => new ServiceTypeCatalog(types, provider.GetRequiredService<ILogger<ServiceTypeCatalog>>()))
             .AddSingleton<CredentialProtector>()
+            .AddScoped<NKeeper.Core.Transfer.InstanceTransfer>()
             .AddSingleton<CredentialHandleStore>()
             .AddSingleton<CredentialPromptStore>()
             .AddScoped<CredentialBroker>()

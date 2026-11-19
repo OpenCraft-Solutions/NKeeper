@@ -665,7 +665,7 @@ The single-page app in `core/frontend/app`. It knows no service type, session ty
   - **group by** a tag name gives one group per value, plus "No <name>" for hosts without it. The other choice is no grouping. The choice is kept in the browser;
   - each host shows its services' health (§7.13). The shell checks a host when it's created or saved, rather than waiting for the next background round;
   - selecting a host shows its details. Its Connect menu (§7.12) is on the host's row and in its details;
-  - right-clicking a host's row opens 1.x's host menu there: Connect, Edit and Copy. Double-clicking it opens the menu's first entry: the first action on the first service it applies to, with the first saved credential used with that service, or the typed-credential dialog when there's none;
+  - right-clicking a host's row opens 1.x's host menu there: Connect, Edit and Copy. Double-clicking it opens a session: the one the service's own plugin offers on the first service it can (ssh's terminal on an SSH service, rather than another plugin's tool on it, as 1.x opened the terminal), else the menu's first session; with the first saved credential used with that service, or the typed-credential dialog when there's none;
   - a host's details say why there's nothing to connect with: it has no services, or no loaded plugin opens a session on them.
 - **Tabs**, on the right. The first tab is always the selected host's details. Every session opens in a tab of its own. A tab stays mounted while another is showing, so a terminal keeps running. Closing a tab ends its session.
 - **Reports**, for everyone: 1.x's list of reports on the left, with the report on the right. So far it lists one:
@@ -1268,6 +1268,42 @@ inventoryTools: { 'network-scan': { label: 'Scan network', title: 'Find the mach
 - Two hosts at one address are a conflict, marked. Rows can be limited to addresses in use, and the grid downloads as CSV.
 - Selecting a host shows it in the workspace.
 
+### 7.44 The audit log page
+
+1.x's audit log report, ported from `AuditController` and `AuditLogReport`: core's audit trail (`core.audit_events`), for administrators, as a report on the Reports page next to Health. Recording terminal sessions, and 1.x's player for them, aren't ported yet.
+
+- **`GET /api/audit/events`**, administrators only: the events newest first, a page at a time (`limit`, at most 500, 100 by default), with `next` to pass as `before` for the next older page. Filters, which combine:
+  - `q`: text in the actor, action, target or detail;
+  - `category`: an action's first part, such as `host`, `auth`, `plugin` or a plugin's ID (`zabbix`). `GET /api/audit/categories` lists those in use;
+  - `actor`: who did it, exactly;
+  - `target`: what it happened to, exactly, such as a host's ID;
+  - `from` and `to`: when, as UTC times (`from` inclusive, `to` exclusive).
+- Each event has its time, actor, client address, action, target and detail. A target that's a host's ID comes with the host's name, while the host exists; reading the log needs no permission on the host, since administrators see every host anyway.
+- **`GET /api/audit/events.csv`**: the same filters, as CSV, newest first, at most 100,000 rows.
+- **The page**: the filters, the events in a table, **Load older** for the next page, and **Download CSV**. Selecting a host's name shows it in the workspace.
+- Reading the log isn't audited: it changes nothing, and only administrators can.
+### 7.45 Moving an instance to a new server
+
+1.x's instance transfer, ported from `InstanceTransferController` and `Transfer/`: everything an instance holds, exported into one file encrypted with a passphrase, and imported on a fresh NKeeper. Settings, Administrators only. It's for moving servers; a backup is still the database and the key ring certificate (§8).
+
+**Why a file, not the database.** Credentials are encrypted with this server's key ring (§6.3, §7.5), which a new server doesn't have. The file carries them decrypted, inside its own encryption, and the import encrypts them again with the new server's key ring. So nothing moves that only the old server could read, and the old key ring never leaves it.
+
+**The file** is 1.x's bundle format, version 2: `NKEEPERB`, a plain header (format, NKeeper's version, the core schema's latest migration, the key derivation's salt and iterations), then the data in 64 KiB chunks, each AES-256-GCM. The key is PBKDF2-HMAC-SHA512 of the passphrase (600,000 iterations, at least 16 characters). The nonces number the chunks and mark the last, with the magic and header as associated data, so the header can't be altered and chunks can't be reordered, dropped or added. Nothing is used until every chunk is authenticated.
+
+**What it holds:**
+- the users: names, emails, roles, password hashes (so everyone signs in as before), whether they must change their password, and their color schemes;
+- the hosts with their tags, services and settings, credentials (secrets decrypted), trusted keys and jump hosts, and the grants;
+- the plugins' data: integration bindings (§7.39), settings and host data;
+- which plugins were installed and turned on, by ID and version, so the import can say which the new server lacks. Packages don't move: the new server installs them from its catalog (§9.1).
+
+It holds no sessions, no audit log (the new server's starts with the import) and no key ring.
+
+**Exporting** (`POST /api/transfer/export`): the administrator confirms with their own password and gives the passphrase twice. The file downloads, and the export is audited (`transfer.export`). Not yet: 1.x's lock after an export, which kept hosts, users and credentials from changing until the move was done or called off.
+
+**Importing**, only into a fresh instance: no hosts, and no users but the one importing.
+- **Preview** (`POST /api/transfer/import/preview`, the file and passphrase): decrypts and checks the file and says what it holds: how many users, hosts and credentials, and the plugins it used that this server doesn't have. Nothing changes.
+- **Import** (`POST /api/transfer/import`, with a confirmation): in one transaction, replaces this instance's users, hosts and plugin data with the file's, encrypting each secret again. It refuses a file from a newer core schema than this server's. Every session ends, the importer's included: they sign in again with their account from the old server. Audited as `transfer.import`, which is the new audit log's first event.
+
 ## 8. The native install
 
 `deploy/setup.sh` installs NKeeper on a Linux server, from a checkout of the repository, as root. It's an early version of the Phase 6 installer (v2-plan.md §8). NKeeper installs natively only (D8): systemd, nginx and PostgreSQL, no containers.
@@ -1286,6 +1322,8 @@ inventoryTools: { 'network-scan': { label: 'Scan network', title: 'Find the mach
 4. **Fetches the built-in plugins** named in `deploy/plugins.lock`: each one a signed release of its own repository, checked against its SHA-256 there (§9). One that fails to download or doesn't match is skipped, with a warning. An earlier install's install key is removed (plugin-security.md §6.1).
 5. Lays out the files below, and writes the settings file (with `Origins:BaseDomain` when given `--web-domain`, §7.18), the key ring certificate (on a fresh install only), the systemd unit and nginx's site. nginx gets a self-signed certificate unless one is given (`--cert`, `--key`).
 6. **Starts NKeeper.** On a fresh install it creates the first administrator: the installer asks for a password, or generates one and prints it once. Once the server is up, it turns the bootstrap off and removes the password from the settings file.
+
+**A lost password.** The installer keeps no copy of the first administrator's password, and nobody can reset an account without signing in. So root can: `sudo nkeeper admin reset-password <user name>` sets a new random password for the account, prints it once, and requires the user to change it at the next sign-in. As the Users page's reset does (§6.1), it clears a lockout, ends the account's sessions and is audited (`user.credential_reset`, by `system`). It needs the settings file, which only root can read, and the database.
 
 | Path | Owner / mode | Contents |
 | --- | --- | --- |
