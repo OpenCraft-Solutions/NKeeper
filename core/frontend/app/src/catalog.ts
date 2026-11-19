@@ -10,6 +10,8 @@ import type { Host, HostActionInfo, ServiceTypeInfo, SessionTypeInfo } from './t
  */
 export interface Catalog {
   serviceTypes: Map<string, ServiceTypeInfo>
+  /** The plugin that contributed each service type, by type ID. */
+  serviceTypeOwners: Map<string, string>
   sessionTypes: Map<string, SessionTypeInfo & { pluginId: string }>
   actions: (HostActionInfo & { pluginId: string })[]
   /** Session views by session type, each from the plugin that contributed the type. */
@@ -25,13 +27,14 @@ export interface Catalog {
 }
 
 export function buildCatalog(statuses: PluginStatus[], frontends: Map<string, FrontendState>): Catalog {
-  const catalog: Catalog = { serviceTypes: new Map(), sessionTypes: new Map(), actions: [], views: new Map(), hostPanels: [], settingsPanels: new Map(), reports: [], inventoryTools: [] }
+  const catalog: Catalog = { serviceTypes: new Map(), serviceTypeOwners: new Map(), sessionTypes: new Map(), actions: [], views: new Map(), hostPanels: [], settingsPanels: new Map(), reports: [], inventoryTools: [] }
   for (const status of statuses) {
     if (status.state !== 'loaded') {
       continue
     }
     for (const type of status.serviceTypes ?? []) {
       catalog.serviceTypes.set(type.id, type)
+      catalog.serviceTypeOwners.set(type.id, status.id)
     }
     for (const type of status.sessionTypes ?? []) {
       catalog.sessionTypes.set(type.id, { ...type, pluginId: status.id })
@@ -84,6 +87,9 @@ export interface ConnectGroup {
   label: string
   /** The action's own label, for the tab. */
   actionLabel: string
+  /** The plugin whose action it is, and the type of the service it's on (none for a host-wide scanner). */
+  pluginId: string
+  serviceType: string | null
   entries: ConnectEntry[]
 }
 
@@ -120,7 +126,7 @@ export function connectMenu(host: Host, catalog: Catalog, scans = false): Connec
     // A host-wide scanner (SDK 1.14, §7.41) scans the host itself: once, with no service and no credential.
     if (scans && resolved.target.kind === 'run' && action.serviceTypes.length === 0) {
       const entry: ConnectEntry = { key: action.id, label: action.label, target: resolved.target, serviceId: '', credential: { kind: 'none' } }
-      groups.push({ key: action.id, label: action.label, actionLabel: action.label, entries: [entry] })
+      groups.push({ key: action.id, label: action.label, actionLabel: action.label, pluginId: action.pluginId, serviceType: null, entries: [entry] })
       continue
     }
     host.services.forEach((service, index) => {
@@ -137,8 +143,27 @@ export function connectMenu(host: Host, catalog: Catalog, scans = false): Connec
                 .map((c): ConnectEntry => ({ ...base, key: `${action.id}/${service.id}/${c.id}`, label: credentialName(c), credential: { kind: 'saved', id: c.id, name: credentialName(c) } })),
               { ...base, key: `${action.id}/${service.id}/typed`, label: 'Enter credentials…', credential: { kind: 'typed' } },
             ]
-      groups.push({ key: `${action.id}/${service.id}`, label: `${action.label} · ${serviceName(service, catalog.serviceTypes)}`, actionLabel: action.label, entries })
+      groups.push({
+        key: `${action.id}/${service.id}`,
+        label: `${action.label} · ${serviceName(service, catalog.serviceTypes)}`,
+        actionLabel: action.label,
+        pluginId: action.pluginId,
+        serviceType: service.type,
+        entries,
+      })
     })
   }
   return groups
+}
+
+/**
+ * What double-clicking a host opens (docs/architecture.md §7.14): a session, never a run action, preferring the one the
+ * service's own plugin offers (ssh's terminal on an SSH service, not another plugin's tool on it), as 1.x opened the
+ * terminal. Otherwise the menu's first session.
+ */
+export function defaultEntry(groups: ConnectGroup[], catalog: Catalog): { group: ConnectGroup; entry: ConnectEntry } | null {
+  const sessions = groups.filter((g) => g.entries[0]?.target.kind === 'session')
+  const group = sessions.find((g) => g.serviceType !== null && catalog.serviceTypeOwners.get(g.serviceType) === g.pluginId) ?? sessions[0]
+  const entry = group?.entries[0]
+  return group && entry ? { group, entry } : null
 }
