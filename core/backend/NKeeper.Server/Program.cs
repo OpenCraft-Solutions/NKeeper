@@ -26,6 +26,12 @@ if (args is ["plugin", .. var pluginArgs])
     return await PluginCommand.RunAsync(pluginArgs, CancellationToken.None);
 }
 
+// Root's account recovery (§8): a lost administrator password.
+if (args is ["admin", .. var adminArgs])
+{
+    return await AdminCommand.RunAsync(adminArgs, CancellationToken.None);
+}
+
 var builder = WebApplication.CreateBuilder(args);
 var isDevelopment = builder.Environment.IsDevelopment();
 var fileSystem = OperatingSystem.IsLinux() ? new LinuxFileSystem() : null;
