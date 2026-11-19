@@ -53,6 +53,9 @@ public sealed class CatalogResolver(IPluginReleaseSource source, VerificationCon
 
     private const int MaxChecksumBytes = 1024;
 
+    /// <summary>A tag with no package published under it: passed over, never reported.</summary>
+    private const string NotReleased = "not_released";
+
     private readonly Dictionary<string, byte[]> _packages = new(StringComparer.Ordinal);
 
     /// <summary>The verified bytes of each candidate found, by plugin ID: what root's side installs.</summary>
@@ -100,8 +103,14 @@ public sealed class CatalogResolver(IPluginReleaseSource source, VerificationCon
                 return Status(candidate);
             }
 
+            if (refusal!.Value.Reason == NotReleased)
+            {
+                // Not a release: the next older one may be.
+                continue;
+            }
+
             firstRefusal ??= refusal;
-            if (refusal!.Value.Reason != ReasonCodes.SdkIncompatible)
+            if (refusal.Value.Reason != ReasonCodes.SdkIncompatible)
             {
                 // Only an SDK this server doesn't have sends it back to an older release; anything else is reported.
                 break;
@@ -126,6 +135,11 @@ public sealed class CatalogResolver(IPluginReleaseSource source, VerificationCon
                     return (null, (CatalogReasonCodes.ChecksumMismatch, $"{release.PackageName} doesn't match its published SHA-256."));
                 }
             }
+        }
+        catch (ReleaseSourceException ex) when (ex.NotFound)
+        {
+            // The feed lists tags, and a tag whose release isn't published yet (it waits for signing) has no package.
+            return (null, (NotReleased, ex.Message));
         }
         catch (ReleaseSourceException ex)
         {

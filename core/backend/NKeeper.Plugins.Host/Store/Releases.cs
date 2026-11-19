@@ -20,7 +20,11 @@ public interface IPluginReleaseSource
 }
 
 /// <summary>A download or a GitHub request failed.</summary>
-public sealed class ReleaseSourceException(string message, Exception? innerException = null) : Exception(message, innerException);
+public sealed class ReleaseSourceException(string message, Exception? innerException = null) : Exception(message, innerException)
+{
+    /// <summary>The file isn't there (404): a tag with no published release yet, say.</summary>
+    public bool NotFound { get; init; }
+}
 
 /// <summary>
 /// GitHub's releases, from each repository's release feed (docs/architecture.md §9.1), not its REST API: without a
@@ -137,7 +141,7 @@ public sealed class GitHubReleases(HttpClient http) : IPluginReleaseSource
 
             if (!response.IsSuccessStatusCode)
             {
-                throw new ReleaseSourceException($"{uri} answered {(int)response.StatusCode}.");
+                throw new ReleaseSourceException($"{uri} answered {(int)response.StatusCode}.") { NotFound = response.StatusCode == HttpStatusCode.NotFound };
             }
 
             return await ReadAsync(response, maxBytes, cancellationToken);

@@ -117,6 +117,32 @@ public sealed class PluginStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task A_tag_whose_release_isnt_published_is_passed_over_for_the_newest_one_that_is()
+    {
+        Publish(TestPlugins.Package(_scenario.OfficialKey, version: "1.5.0"));
+        // The feed lists a newer tag whose release waits for signing: no package under it yet.
+        var unpublished = new Uri("https://dl.test/hello/hello-1.6.0.nkp");
+        _releases.Add("o/hello", new PluginRelease(SemanticVersion.Parse("1.6.0"), unpublished, "hello-1.6.0.nkp", null), []);
+        _releases.Files.Remove(unpublished);
+        PublishCatalog(("hello", "o/hello"));
+
+        var status = Assert.Single(await Store().UpdateAsync(Ct));
+        Assert.Equal(("1.5.0", null), (status.Available?.Version, status.ReasonCode));
+    }
+
+    [Fact]
+    public async Task Only_unpublished_tags_mean_no_release_yet_not_a_failure()
+    {
+        var unpublished = new Uri("https://dl.test/hello/hello-1.0.0.nkp");
+        _releases.Add("o/hello", new PluginRelease(SemanticVersion.Parse("1.0.0"), unpublished, "hello-1.0.0.nkp", null), []);
+        _releases.Files.Remove(unpublished);
+        PublishCatalog(("hello", "o/hello"));
+
+        var status = Assert.Single(await Store().UpdateAsync(Ct));
+        Assert.Equal((null, null), (status.Available, status.ReasonCode));
+    }
+
+    [Fact]
     public async Task Packages_that_wouldnt_load_or_dont_match_their_release_are_reported_not_offered()
     {
         Publish(TestPlugins.Package(_scenario.ThirdPartyKey, id: "hello", version: "1.0.0")); // an official ID, signed by a third party
@@ -413,6 +439,6 @@ public sealed class PluginStoreTests : IDisposable
                 : throw new ReleaseSourceException($"GitHub has no repository {entry.Repository}.");
 
         public Task<byte[]> DownloadAsync(Uri uri, long maxBytes, CancellationToken cancellationToken) =>
-            Files.TryGetValue(uri, out var file) ? Task.FromResult(file) : throw new ReleaseSourceException($"{uri} answered 404.");
+            Files.TryGetValue(uri, out var file) ? Task.FromResult(file) : throw new ReleaseSourceException($"{uri} answered 404.") { NotFound = true };
     }
 }
