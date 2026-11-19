@@ -1,6 +1,7 @@
-import { createElement, useEffect, useMemo, useState } from 'react'
-import { api, ApiError } from '@nkeeper/sdk'
+import { createElement, useCallback, useEffect, useMemo, useState } from 'react'
+import { api, ApiError, type TrustPrompt } from '@nkeeper/sdk'
 import type { Catalog } from './catalog'
+import { useDialogs } from './dialogContext'
 import { credentialName, serviceName, usedWith } from './hosts'
 import type { Host } from './types'
 import { Alert } from './ui/Alert'
@@ -36,6 +37,23 @@ export function PluginIntegrations({ catalog }: { catalog: Catalog }) {
   const [hosts, setHosts] = useState<Host[]>([])
   const [error, setError] = useState<string | null>(null)
   const [version, setVersion] = useState(0)
+  const dialogs = useDialogs()
+
+  // Administrators manage every host, so they may trust for any (docs/architecture.md §7.7).
+  const confirmTrust = useCallback(
+    async (prompt: TrustPrompt) => {
+      if (!(await dialogs.confirmHostKey(prompt, hosts.find((h) => h.id === prompt.hostId)?.name ?? 'the bound host'))) {
+        return false
+      }
+      try {
+        await api.post(`/api/hosts/${prompt.hostId}/services/${prompt.serviceId}/trusted-keys`, { algorithm: prompt.algorithm, fingerprint: prompt.fingerprint })
+        return true
+      } catch {
+        return false
+      }
+    },
+    [dialogs, hosts],
+  )
 
   useEffect(() => {
     let live = true
@@ -75,7 +93,7 @@ export function PluginIntegrations({ catalog }: { catalog: Catalog }) {
         ))}
         {Panel ? (
           <PluginBoundary pluginId={pluginId}>
-            {createElement(Panel, { integrations: own.map((i) => ({ name: i.name, label: i.label, bound: i.binding !== null })), version })}
+            {createElement(Panel, { integrations: own.map((i) => ({ name: i.name, label: i.label, bound: i.binding !== null })), version, confirmTrust })}
           </PluginBoundary>
         ) : null}
       </section>

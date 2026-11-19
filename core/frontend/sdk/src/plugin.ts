@@ -58,6 +58,12 @@ export interface SettingsPanelProps {
   /** The plugin's integrations; `version` changes whenever a binding does, so the panel can test it again. */
   readonly integrations: readonly IntegrationState[]
   readonly version: number
+  /**
+   * Shows core's dialog for a certificate or key the plugin's endpoint reported (its `presented`), such as a bound
+   * server's self-signed certificate, and posts it to core when the administrator trusts it. Resolves to whether it's
+   * now trusted.
+   */
+  readonly confirmTrust: (prompt: TrustPrompt) => Promise<boolean>
 }
 
 /**

@@ -1197,7 +1197,7 @@ contributions.AddIntegration(new Integration("server", "Zabbix server") { Servic
 
 **Frontend (SDK 1.13).** A plugin's definition can also draw:
 - `hostPanels`: panels in a host's details by their titles, `{ Zabbix: (props: { host, canManage }) => … }`. The shell shows them for every host; a panel draws nothing for a host it has nothing to say about. One that throws shows an error in its place, and the rest of the page goes on.
-- `settingsPanel`: a section of the Settings page, for administrators, given `{ integrations: [{ name, label, bound }], version }` (`version` changes with every binding). The shell draws the plugin's integration bindings above it, with core's own host, service and credential pickers, so no plugin draws a credential picker.
+- `settingsPanel`: a section of the Settings page, for administrators, given `{ integrations: [{ name, label, bound }], version, confirmTrust }` (`version` changes with every binding; `confirmTrust` is core's dialog for a certificate the plugin's endpoint reported, as a session view's, SDK 0.1.8). The shell draws the plugin's integration bindings above it, with core's own host, service and credential pickers, so no plugin draws a credential picker.
 
 A plugin's frontend calls core's API as the signed-in user, as the shell does (`api` from `@nkeeper/sdk`), so creating hosts, say, is core's ordinary `POST /api/hosts`, with the user's own rights and audit.
 
