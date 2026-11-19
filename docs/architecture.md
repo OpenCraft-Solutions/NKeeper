@@ -71,7 +71,7 @@ public sealed class WakeOnLanPlugin : IPlugin
 - More contracts (plugin settings, scanners, reports) arrive with their first real users ([v2-plan.md §4.2](v2-plan.md#42-contribution-catalogue)), as additions to SDK v1.
 - **SDK versions.** A manifest declares the SDK range it supports, and a package outside the server's `SdkVersion` is refused. Within v0, an addition raises the patch number (`0.1.1` added the host scope, `0.1.2` service types, `0.1.3` the credential broker, `0.1.4` SSH connections, `0.1.5` stream sessions, `0.1.6` host actions, health probes and, in the frontend SDK, session views, `0.1.7` run actions and plugin audit events, `0.1.8` HTTPS connections, stateful sessions, session origins and, in the frontend SDK, `confirmTrust`, `0.1.9` desktop connections) and a breaking change raises the minor one.
 - **SDK v1 (1.0.0)** froze the SDK at the end of Phase 3, after a review of what Phases 1 and 2 used ([v2-plan.md, Phase 3](v2-plan.md#phase-3-freeze-sdk-v1)). From v1, a fix that changes no API raises the patch number, an addition the minor number, and a breaking change the major one, which the plan avoids. So a plugin built for `>=1.0.0 <2.0.0` keeps loading, and one that uses an addition declares the version that brought it. The frontend SDK, `@nkeeper/sdk`, is versioned with it. [plugin-authoring.md](plugin-authoring.md) shows how to write a plugin against it.
-- **Since v1:** `1.0.1` fixed `NKeeper.Testing`'s `TestPlugins` outside this repository; `1.1.0` adds Telnet connections (§7.22); `1.2.0` adds VNC desktops (§7.20); `1.12.0` adds a streaming command's standard input (§7.9); `1.13.0` adds integrations: bindings, bearer sign-in, plugin settings, host data, administrator endpoints, host panels and a settings panel (§7.39). `NKeeper.Testing`'s helpers that packaged the built-in plugins from this repository's build (`TestPlugins.SshPackage` and the like) went with them: they only ever worked here.
+- **Since v1:** `1.0.1` fixed `NKeeper.Testing`'s `TestPlugins` outside this repository; `1.1.0` adds Telnet connections (§7.22); `1.2.0` adds VNC desktops (§7.20); `1.12.0` adds a streaming command's standard input (§7.9); `1.13.0` adds integrations: bindings, bearer sign-in, plugin settings, host data, administrator endpoints, host panels and a settings panel (§7.39); `1.14.0` adds host-wide scanners, reports and inventory tools (§7.41). `NKeeper.Testing`'s helpers that packaged the built-in plugins from this repository's build (`TestPlugins.SshPackage` and the like) went with them: they only ever worked here.
 
 ## 5. Frontend extension point
 
@@ -942,7 +942,7 @@ contributions.AddHostAction(new HostAction("linux.scan", "Linux (internal)") { E
   - a credential, with the username only, for each account the host has none for. These start ticked when there are at most 10, since a server with many accounts rarely needs each one;
   - for an administrator, a new host for each neighbour that matches no host the user can see, by MAC address or IP address. These start unticked.
 - **Applying** saves the host's changes with one `PUT /api/hosts/{id}`, from the version the dialog opened with, so an edit in between is a conflict, not lost. Then it creates each new host with `POST /api/hosts`.
-- Not yet: scanning many hosts at once (1.x's bulk scan), external scans (TCP probes from the server, with `network-scan`), and guests and cluster nodes (with the virt plugins).
+- Not yet: scanning many hosts at once (1.x's bulk scan), and guests and cluster nodes (with the virt plugins). External scans, from the server over the network, are `network-scan`'s, as a host-wide scanner (§7.41, §7.42).
 
 ### 7.27 The `storage` plugin
 
@@ -1210,6 +1210,63 @@ Zabbix, read only, ported from 1.x's `ZabbixController` and `Zabbix/`, in its ow
 - **A host's Zabbix panel** (`hostPanels`), for a host linked to a Zabbix host: its availability, interfaces, inventory, latest values and open problems, as 1.x's overview showed. It needs Use on the host and on the Zabbix server's host (§7.39); otherwise it says the user has no access to the Zabbix server. Someone who can manage the host can link it (searching Zabbix by name, technical name, IP address or DNS name) or unlink it. A link is host data (§7.39): the Zabbix host's ID.
 - **The comparison** (administrators): Zabbix's hosts next to NKeeper's, as 1.x's `ZabbixMatcher` sorted them: linked, probably the same machine (by name or address), only in Zabbix, and only in NKeeper. From it, an administrator links pairs, or adds hosts for Zabbix hosts NKeeper doesn't have, from Zabbix's names and interfaces. Adding goes through core's `POST /api/hosts`, linked once created.
 - **Audit:** `zabbix.link` and `zabbix.unlink` with the host and Zabbix host ID. Reads aren't audited beyond the credential's use.
+
+### 7.41 Host-wide scanners, reports and inventory tools (SDK 1.14)
+
+Three more contributions, for the plugins that port 1.x's network scans and reports (§7.42, §7.43).
+
+**Host-wide scanners.** A scanner (§7.26) whose `ServiceTypes` is empty scans the host itself, not one of its services: 1.x's external scan, from the NKeeper server over the network. It must have `Credential = HostActionCredential.None`, which is checked at startup.
+- The Scan dialog offers it once per host, whatever services the host has, labelled with the action's label alone.
+- The shell posts `{}` to its endpoint: no service and no credential. The endpoint is in a Manage host group, as every scanner's.
+- Its answer is a `ScanFindings`, turned into proposals as any scan's.
+
+**Reports.** A plugin's frontend can add reports to the Reports page (§7.14), next to core's Health:
+
+```ts
+reports: { 'ip-addresses': { label: 'IP addresses', description: 'Who has which address, by subnet', view: IpReport } }
+```
+
+- Each is listed by its label and description, under core's own. The shell draws its view in the report area, given `{ showHost(hostId) }`, which shows a host in the workspace as the Health report's links do.
+- `administrators: true` lists it only for administrators. The report's own endpoints, if any, check that too: the flag only hides it.
+- A report reads what the user may see, through core's API or the plugin's endpoints, as any plugin frontend does.
+
+**Inventory tools.** A plugin's frontend can add buttons above the host tree, as 1.x's Import and Scan network were:
+
+```ts
+inventoryTools: { 'network-scan': { label: 'Scan network', title: 'Find the machines on a subnet (a loud network scan)', view: NetworkScanDialog } }
+```
+
+- They're for administrators only: the shell shows them to no one else.
+- Choosing one opens core's dialog, titled with the label, with the plugin's view inside it, given `{ close, hostsChanged }`. `hostsChanged()` reloads the host tree after the tool added hosts.
+- The tool's endpoints are in the plugin's administrator group (§7.39).
+
+### 7.42 The `network-scan` plugin
+
+1.x's external scan and network (subnet) scan, ported from `ExternalScan`, `NetworkScan`, `NetworkProbes`, `ScanPorts`, `Subnet` and `NeighborTable`, in its own repository, `NKeeper-Plugin-NetworkScan` (§9), on SDK 1.14 (`>=1.14.0 <2.0.0`). It contributes no service type.
+
+**It probes from the NKeeper server itself**, with its own sockets: plugins run in-process, which isn't a sandbox (plugin-security.md §5), and these probes carry no credential. So both scans are limited by what they may reach, not by core:
+- **The external scan** (`network-scan.host`, a host-wide scanner, §7.41) probes only the host's own address: its IP address, or its hostname resolved once. Someone who can manage the host runs it from the Scan dialog. It finds:
+  - TCP connections to 1.x's common ports and the host's own service ports;
+  - the SSH banner, and the operating system it suggests (else Windows from RDP, SMB or RPC);
+  - the name reverse DNS gives;
+  - the MAC address, from the server's neighbour table, when the host is on the server's network segment;
+  - each open port named, and given the service type of a loaded plugin whose default port it is, as 1.x's `ScanPorts`.
+  It's audited as `network-scan.host`. At most four run at once on the server.
+- **The network scan** (an inventory tool, §7.41, for administrators): every address in an IPv4 subnet, /20 or smaller, that the administrator enters or picks from the server's own networks. It's loud, so it's confirmed first and audited as `network-scan.subnet` with the subnet and its size. Only one runs at a time on the server, and it can be stopped.
+  - **Discovery:** an address is a machine when it answers a ping, answers or refuses a TCP connection on 1.x's discovery ports, or resolves in the neighbour table.
+  - **What each one is:** its open ports, the SSH banner, web servers' titles, headers and certificate names, the NetBIOS name and workgroup, reverse DNS, the ping's TTL, and the MAC address's vendor (which tells most virtual machines apart).
+  - **Matching:** each machine is matched to an NKeeper host by MAC address, else IP address, else hostname, as 1.x's matcher, against the hosts core's `GET /api/hosts` gives the administrator. The dialog does the matching, so the plugin needs no inventory API.
+  - **Adding:** the administrator ticks the machines NKeeper doesn't have, and the dialog adds each one through core's `POST /api/hosts`, named by its short hostname, else its address, with a service for each open port whose type is known.
+  - The scan runs on the server, with its progress polled, and is kept for its administrator for two hours after it ends, so a reopened dialog picks it up. Nothing is stored.
+  - Its notes say what limits it: no ping answers (ICMP blocked), a subnet off the server's segment (no MAC addresses through a router), or a server in a container.
+
+### 7.43 The `reports-ip` plugin
+
+1.x's IP address report, ported from `features/reports/ipGrid` and `IpAddressReport`, in its own repository, `NKeeper-Plugin-ReportsIp` (§9), on SDK 1.14. It's a report (§7.41) and nothing else: frontend only, with no backend endpoints.
+
+- **IP addresses**, for everyone: the hosts the user can see (core's `GET /api/hosts`), by IPv4 address, one column per /24 subnet in use and one row per last octet. Hosts with an IPv6 address or a hostname only are left out.
+- Two hosts at one address are a conflict, marked. Rows can be limited to addresses in use, and the grid downloads as CSV.
+- Selecting a host shows it in the workspace.
 
 ## 8. The native install
 
