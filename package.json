@@ -17,7 +17,7 @@
     "build": "npm run build -w @nkeeper/runtime && npm run build -w @nkeeper/app"
   },
   "devDependencies": {
-    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/jest-dom": "^8.0.0",
     "@testing-library/react": "^16.3.3",
     "@testing-library/user-event": "^14.6.10",
     "@types/node": "^24.13.3",
