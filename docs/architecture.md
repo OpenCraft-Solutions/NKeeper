@@ -1317,6 +1317,13 @@ It holds no sessions, no audit log (the new server's starts with the import) and
 - hosts reached through a removed host now go through the kept one; grants for the removed hosts become one grant per user for the kept host, at the highest level any had; integration bindings (§7.39) follow their service and credential; plugins' host data (§7.39) moves to the kept host unless it has its own.
 
 It's audited as `host.merge`, with the removed hosts' names. A user who can't manage one of the hosts gets 403, and nothing changes.
+### 7.47 The Inventory report
+
+1.x's inventory report, ported from `features/reports/inventoryCounts` and `InventoryReport`: how many hosts have each combination of values of up to three fields, from the hosts the user can see (`GET /api/hosts`). A report on the Reports page (§7.14), for everyone; frontend only.
+
+- **The fields:** any tag name in use (the operating system is the `os` tag, §7.26), and **service type**.
+- **The rows:** one per combination, in the fields' order. Values match case-insensitively, and a host with several values (two `role` tags, an SSH and an RDP service) counts under each, so rows can add up to more than the hosts. Hosts without a value fall in a trailing "No …" row. Each row lists its hosts, and selecting one shows it in the workspace.
+- The fields chosen are kept in the browser. The report downloads as CSV: a column per field, then the count and the hosts' names.
 
 ## 8. The native install
 
