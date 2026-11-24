@@ -99,6 +99,15 @@ public static class InventoryEndpoints
                 return deleted ? Results.NoContent() : Results.NotFound();
             }));
 
+        // Changing several hosts at once (§7.50): all of them, or none.
+        hosts.MapPost("/bulk", (BulkHostRequest? request, HostInventory inventory, SessionRegistry sessions, HttpContext context) =>
+            Handled(async () =>
+            {
+                var changed = await inventory.BulkUpdateAsync(request ?? new BulkHostRequest(), RequestUser.From(context.User), context.RequestAborted);
+                await sessions.RecheckAsync(_ => true, context.RequestAborted);
+                return changed is null ? Results.NotFound() : Results.Ok(changed);
+            }));
+
         // Combining duplicates (§7.46): the others' details, services and credentials into this one, then they're deleted.
         hosts.MapPost("/{id:guid}/merge", (Guid id, HostMergeRequest? request, HostMerger merger, SessionRegistry sessions, HttpContext context) =>
             Handled(async () =>

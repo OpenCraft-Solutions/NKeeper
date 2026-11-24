@@ -4,9 +4,10 @@ import { connectMenu, defaultEntry, type Catalog, type ConnectEntry, type Connec
 import { useDialogs } from './dialogContext'
 import { HostDetails } from './HostDetails'
 import { HostEditor } from './HostEditor'
-import { HostTree } from './HostTree'
+import { BulkEditPanel } from './BulkEditPanel'
+import { HostTree, type SelectMode } from './HostTree'
 import { ScanDialog } from './ScanDialog'
-import { groupHosts, matchesSearch, serviceName, tagNames } from './hosts'
+import { groupHosts, matchesSearch, serviceName, shownOrder, tagNames } from './hosts'
 import type { Host, ServiceHealth } from './types'
 import { Alert } from './ui/Alert'
 import { Button } from './ui/Button'
@@ -73,6 +74,9 @@ export function Workspace({
   const [loadError, setLoadError] = useState<string | null>(null)
   const [health, setHealth] = useState(new Map<string, ServiceHealth>())
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  // Hosts picked to change together (§7.50), and the one a Shift+click extends from.
+  const [picked, setPicked] = useState(new Set<string>())
+  const [anchor, setAnchor] = useState<string | null>(null)
   const [pane, setPane] = useState<Pane>({ kind: 'details' })
   const [sessions, setSessions] = useState<SessionTab[]>([])
   const [activeTab, setActiveTab] = useState<string>('host')
@@ -134,6 +138,7 @@ export function Workspace({
   }, [])
 
   const selected = hosts?.find((h) => h.id === selectedId) ?? null
+  const pickedHosts = useMemo(() => (hosts ?? []).filter((h) => picked.has(h.id)), [hosts, picked])
   const scanHost = hosts?.find((h) => h.id === scanning) ?? null
   // A jump host's key prompt names the jump host, which the user may not be able to see.
   const hostName = useCallback((id: string) => hosts?.find((h) => h.id === id)?.name ?? null, [hosts])
@@ -149,12 +154,6 @@ export function Workspace({
       setPane({ kind: 'details' })
       setActiveTab('host')
     }
-  }
-
-  function select(host: Host) {
-    setSelectedId(host.id)
-    setPane({ kind: 'details' })
-    setActiveTab('host')
   }
 
   function open(host: Host, group: ConnectGroup, entry: ConnectEntry) {
@@ -234,6 +233,43 @@ export function Workspace({
   const effectiveGroupBy = names.includes(groupBy) ? groupBy : ''
   const visibleHosts = useMemo(() => [...(hosts ?? [])].filter((h) => matchesSearch(h, query)).sort((a, b) => a.name.localeCompare(b.name)), [hosts, query])
   const groups = useMemo(() => groupHosts(visibleHosts, effectiveGroupBy || null), [visibleHosts, effectiveGroupBy])
+
+  function select(host: Host, mode: SelectMode = 'single') {
+    setPane({ kind: 'details' })
+    setActiveTab('host')
+    const from = anchor ?? selectedId
+    if (mode === 'single' || (mode === 'range' && !from)) {
+      setAnchor(host.id)
+      setPicked(new Set())
+      setSelectedId(host.id)
+      return
+    }
+    const current = picked.size > 0 ? picked : new Set(selectedId ? [selectedId] : [])
+    let next: Set<string>
+    if (mode === 'toggle') {
+      next = new Set(current)
+      if (!next.delete(host.id)) {
+        next.add(host.id)
+      }
+      setAnchor(host.id)
+    } else {
+      const order = shownOrder(groups, !!effectiveGroupBy, collapsed).map((h) => h.id)
+      const a = order.indexOf(from!)
+      const b = order.indexOf(host.id)
+      next = new Set([...current, ...(a === -1 || b === -1 ? [host.id] : order.slice(Math.min(a, b), Math.max(a, b) + 1))])
+    }
+    pick(next)
+  }
+
+  /** Several hosts are picked together; one (or none) is an ordinary selection instead. */
+  function pick(ids: Set<string>) {
+    if (ids.size > 1) {
+      setPicked(ids)
+      return
+    }
+    setPicked(new Set())
+    setSelectedId([...ids][0] ?? null)
+  }
   const menuHost = menu ? (hosts?.find((h) => h.id === menu.hostId) ?? null) : null
 
   /** 1.x's Connect entries: one per action and service, with its credentials in a submenu. */
@@ -419,8 +455,11 @@ export function Workspace({
               health={health}
               catalog={catalog}
               selectedId={selectedId}
+              picked={picked}
               menuHostId={menu?.hostId ?? null}
               onSelect={select}
+              onSelectAll={() => pick(new Set(shownOrder(groups, !!effectiveGroupBy, collapsed).map((h) => h.id)))}
+              onClearPicked={() => pick(new Set(selectedId ? [selectedId] : []))}
               onActivate={activate}
               onContextMenu={(host, x, y) => {
                 select(host)
@@ -473,7 +512,19 @@ export function Workspace({
         )}
 
         <div className={layout.view} role="tabpanel" id="panel-host" aria-labelledby="tab-host" hidden={activeTab !== 'host'}>
-          {pane.kind === 'create' ? (
+          {pickedHosts.length > 1 ? (
+            <BulkEditPanel
+              key={[...picked].sort().join(',')}
+              hosts={pickedHosts}
+              allHosts={hosts ?? []}
+              serviceTypes={catalog.serviceTypes}
+              onApplied={(changed) => {
+                const byId = new Map(changed.map((h) => [h.id, h]))
+                setHosts((current) => (current ?? []).map((h) => byId.get(h.id) ?? h))
+              }}
+              onClear={() => pick(new Set())}
+            />
+          ) : pane.kind === 'create' ? (
             <HostEditor
               host={null}
               hosts={hosts ?? []}

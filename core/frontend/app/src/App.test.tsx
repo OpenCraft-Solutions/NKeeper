@@ -1012,6 +1012,47 @@ describe('the workspace', () => {
     await waitFor(() => expect(loads).toBe(2))
   })
 
+  it('picks hosts with Ctrl+click and Shift+click, and changes them together (§7.50)', async () => {
+    const changed = hosts.map((h) => ({ ...h, tags: [{ name: 'team', value: 'ops' }], version: 2 }))
+    const fetch = signedIn({ 'POST /api/hosts/bulk': changed })
+    const user = userEvent.setup()
+
+    render(<App importer={termImporter} />)
+    await user.click(await screen.findByRole('button', { name: /^db01,/ }))
+    await user.keyboard('{Control>}')
+    await user.click(screen.getByRole('button', { name: /^web01,/ }))
+    await user.keyboard('{/Control}')
+
+    const form = await screen.findByRole('form', { name: 'Change the selected hosts' })
+    expect(within(form).getByRole('heading', { name: '2 hosts selected' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^web01,.*selected$/ })).toBeInTheDocument()
+    await user.click(within(form).getByRole('button', { name: 'Add a tag change' }))
+    await user.type(within(form).getByRole('textbox', { name: 'Tag name' }), 'team')
+    await user.type(within(form).getByRole('textbox', { name: 'Tag value' }), 'ops')
+    expect(within(form).getByText('Changes 2 hosts')).toBeInTheDocument()
+    await user.selectOptions(within(form).getByRole('combobox', { name: 'Runs on' }), 'Unknown (clear it)')
+    await user.click(within(form).getByRole('button', { name: 'Apply to 2 hosts' }))
+
+    expect(await within(form).findByText('Applied to 2 hosts.')).toBeInTheDocument()
+    expect(bodyOf(fetch, 'POST /api/hosts/bulk')).toMatchObject({
+      hostIds: expect.arrayContaining(['h1', 'h2']) as unknown,
+      addTags: [{ name: 'team', value: 'ops' }],
+      hypervisor: { hypervisorId: null },
+    })
+
+    await user.click(within(form).getByRole('button', { name: 'Clear selection' }))
+    expect(screen.queryByRole('form', { name: 'Change the selected hosts' })).not.toBeInTheDocument()
+
+    // Shift+click picks every host from the one selected; Escape in the tree goes back to one.
+    await user.click(screen.getByRole('button', { name: /^db01,/ }))
+    await user.keyboard('{Shift>}')
+    await user.click(screen.getByRole('button', { name: /^web01,/ }))
+    await user.keyboard('{/Shift}')
+    expect(await screen.findByRole('heading', { name: '2 hosts selected' })).toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('form', { name: 'Change the selected hosts' })).not.toBeInTheDocument()
+  })
+
   it('records the host a virtual machine runs on, offering none that runs on it (§7.49)', async () => {
     const fetch = signedIn({
       'GET /api/hosts': [hosts[0], { ...hosts[1], isVirtualMachine: false }, host({ id: 'h3', name: 'guest', isVirtualMachine: true, hypervisorId: 'h2' })],
