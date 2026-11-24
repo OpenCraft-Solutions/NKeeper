@@ -427,6 +427,10 @@ namespace NKeeper.Core.Persistence.Migrations
                         .HasColumnType("character varying(253)")
                         .HasColumnName("hostname");
 
+                    b.Property<Guid?>("HypervisorId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("hypervisor_id");
+
                     b.Property<string>("IpAddress")
                         .HasMaxLength(45)
                         .HasColumnType("character varying(45)")
@@ -483,6 +487,8 @@ namespace NKeeper.Core.Persistence.Migrations
                         .HasColumnName("xmin");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("HypervisorId");
 
                     b.HasIndex("JumpCredentialId");
 
@@ -972,6 +978,11 @@ namespace NKeeper.Core.Persistence.Migrations
 
             modelBuilder.Entity("NKeeper.Core.Persistence.Host", b =>
                 {
+                    b.HasOne("NKeeper.Core.Persistence.Host", null)
+                        .WithMany()
+                        .HasForeignKey("HypervisorId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("NKeeper.Core.Persistence.HostCredential", null)
                         .WithMany()
                         .HasForeignKey("JumpCredentialId")

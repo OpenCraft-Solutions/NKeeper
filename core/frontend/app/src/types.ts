@@ -115,6 +115,8 @@ export interface Host {
   memoryMiB: number | null
   serialNumber: string | null
   isVirtualMachine: boolean
+  /** For a virtual machine, the host it runs on (docs/architecture.md §7.49); null when unknown. */
+  hypervisorId: string | null
   tags: HostTag[]
   services: HostService[]
   credentials: HostCredential[]

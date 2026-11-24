@@ -12,6 +12,7 @@ import { HealthView } from './HealthView'
 import { InventoryView } from './InventoryView'
 import { PluginsView } from './PluginsView'
 import { UsersView } from './UsersView'
+import { VmResourcesView } from './VmResourcesView'
 import { SignIn } from './SignIn'
 import { ADMINISTRATOR, type CurrentUser } from './types'
 import { Workspace } from './Workspace'
@@ -227,7 +228,7 @@ function ReportsPage({ catalog, isAdministrator, showHost }: { catalog: Catalog;
   const listed = catalog.reports.filter((r) => isAdministrator || !r.administrators)
   const report = listed.find((r) => `${r.pluginId}/${r.id}` === selected)
   // Core's own reports, by key; administrators' ones only for them.
-  const coreReports = ['health', 'inventory', 'duplicates', ...(isAdministrator ? ['audit'] : [])]
+  const coreReports = ['health', 'inventory', 'vm-resources', 'duplicates', ...(isAdministrator ? ['audit'] : [])]
   const current = report || coreReports.includes(selected) ? selected : 'health'
   const entry = (key: string, label: string, description: string) => (
     <li key={key}>
@@ -249,6 +250,7 @@ function ReportsPage({ catalog, isAdministrator, showHost }: { catalog: Catalog;
         <ul className={reports.reportList}>
           {entry('health', 'Health', 'What’s down, and certificates about to expire')}
           {entry('inventory', 'Inventory', 'How many hosts have each combination of values')}
+          {entry('vm-resources', 'VM hosts & resources', 'What each hypervisor runs, and how much of it they use')}
           {entry('duplicates', 'Duplicates', 'Hosts that look like the same machine')}
           {isAdministrator ? entry('audit', 'Audit log', 'What happened, and who did it') : null}
           {listed.map((r) => entry(`${r.pluginId}/${r.id}`, r.label, r.description))}
@@ -261,6 +263,8 @@ function ReportsPage({ catalog, isAdministrator, showHost }: { catalog: Catalog;
           </PluginBoundary>
         ) : current === 'inventory' ? (
           <InventoryView catalog={catalog} onShowHost={showHost} />
+        ) : current === 'vm-resources' ? (
+          <VmResourcesView onShowHost={showHost} />
         ) : current === 'audit' ? (
           <AuditView onShowHost={showHost} />
         ) : current === 'duplicates' ? (

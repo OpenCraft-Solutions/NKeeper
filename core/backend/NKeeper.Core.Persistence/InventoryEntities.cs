@@ -38,6 +38,12 @@ public sealed class Host
 
     public bool IsVirtualMachine { get; set; }
 
+    /// <summary>
+    /// For a virtual machine, the host it runs on (docs/architecture.md §7.49); null when unknown, and for a host that
+    /// isn't one. Cleared when that host is deleted. Hypervisors may run on hypervisors, but never in a loop.
+    /// </summary>
+    public Guid? HypervisorId { get; set; }
+
     public List<HostTag> Tags { get; set; } = [];
 
     /// <summary>In <see cref="HostService.Position"/> order once loaded through the inventory.</summary>

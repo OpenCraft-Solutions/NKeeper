@@ -41,6 +41,8 @@ export interface Draft {
   memoryGiB: string
   serialNumber: string
   isVirtualMachine: boolean
+  /** The host it runs on, when it's a virtual machine; '' for unknown. */
+  hypervisorId: string
   tags: { key: string; name: string; value: string }[]
   services: ServiceDraft[]
   credentials: CredentialDraft[]
@@ -62,6 +64,7 @@ export function draftOf(host: Host | null): Draft {
       memoryGiB: '',
       serialNumber: '',
       isVirtualMachine: false,
+      hypervisorId: '',
       tags: [],
       services: [],
       credentials: [],
@@ -91,6 +94,7 @@ export function draftOf(host: Host | null): Draft {
     memoryGiB: host.memoryMiB ? String(host.memoryMiB / 1024) : '',
     serialNumber: host.serialNumber ?? '',
     isVirtualMachine: host.isVirtualMachine,
+    hypervisorId: host.hypervisorId ?? '',
     tags: host.tags.map((t) => ({ key: newKey(), name: t.name, value: t.value ?? '' })),
     services,
     credentials: host.credentials.map((c) => credentialDraft(c, services)),
@@ -132,6 +136,7 @@ export function requestOf(draft: Draft, version: number | null) {
     memoryMiB: draft.memoryGiB.trim() === '' ? null : Math.round(Number(draft.memoryGiB) * 1024),
     serialNumber: orNull(draft.serialNumber),
     isVirtualMachine: draft.isVirtualMachine,
+    hypervisorId: draft.isVirtualMachine && draft.hypervisorId ? draft.hypervisorId : null,
     tags: draft.tags.filter((t) => t.name.trim() !== '').map((t) => ({ name: t.name.trim(), value: orNull(t.value) })),
     services: draft.services.map((s) => ({
       id: s.id,

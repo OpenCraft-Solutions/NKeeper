@@ -76,6 +76,17 @@ public sealed class HostMerger(CoreDbContext db, HostAccess access, HostInventor
         target.UpdatedByUserId = user.Id;
 
         // What pointed at the removed hosts points at the kept one.
+        foreach (var guest in await db.Hosts.Where(h => h.HypervisorId != null && sources.Contains(h.HypervisorId.Value) && !ids.Contains(h.Id)).ToListAsync(cancellationToken))
+        {
+            guest.HypervisorId = target.Id;
+        }
+
+        // Running on itself, on a removed host, or on something that now runs on it (§7.49): its host is unknown.
+        if (target.HypervisorId is { } runsOn && (runsOn == target.Id || sources.Contains(runsOn) || await RunsOnAsync(runsOn, target.Id, cancellationToken)))
+        {
+            target.HypervisorId = null;
+        }
+
         foreach (var reached in await db.Hosts.Where(h => h.JumpHostId != null && sources.Contains(h.JumpHostId.Value) && !ids.Contains(h.Id)).ToListAsync(cancellationToken))
         {
             reached.JumpHostId = target.Id;
@@ -119,6 +130,34 @@ public sealed class HostMerger(CoreDbContext db, HostAccess access, HostInventor
         return await hosts.GetAsync(target.Id, user, cancellationToken);
     }
 
+    /// <summary>Whether <paramref name="host"/> runs on <paramref name="hypervisor"/>, however indirectly, counting links not saved yet.</summary>
+    private async Task<bool> RunsOnAsync(Guid host, Guid hypervisor, CancellationToken cancellationToken)
+    {
+        var links = await db.Hosts.AsNoTracking().Where(h => h.HypervisorId != null).Select(h => new { h.Id, h.HypervisorId }).ToDictionaryAsync(h => h.Id, h => h.HypervisorId!.Value, cancellationToken);
+        foreach (var entry in db.ChangeTracker.Entries<Host>())
+        {
+            if (entry.Entity.HypervisorId is { } changed)
+            {
+                links[entry.Entity.Id] = changed;
+            }
+            else
+            {
+                links.Remove(entry.Entity.Id);
+            }
+        }
+
+        var seen = new HashSet<Guid>();
+        for (Guid? current = host; current is { } next && seen.Add(next); current = links.TryGetValue(next, out var parent) ? parent : null)
+        {
+            if (next == hypervisor)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static Guid? Mapped(Dictionary<Guid, Guid> map, Guid? id) => id is { } value && map.TryGetValue(value, out var mapped) ? mapped : id;
 
     private static void FillDetails(Host target, Host source, List<Guid> sources)
@@ -131,6 +170,11 @@ public sealed class HostMerger(CoreDbContext db, HostAccess access, HostInventor
         target.MemoryMiB ??= source.MemoryMiB;
         target.SerialNumber ??= source.SerialNumber;
         target.IsVirtualMachine |= source.IsVirtualMachine;
+        if (target.HypervisorId is null && source.HypervisorId is { } hypervisor && !sources.Contains(hypervisor))
+        {
+            target.HypervisorId = hypervisor;
+        }
+
         if (target.JumpHostId is null && source.JumpHostId is { } jump && !sources.Contains(jump))
         {
             (target.JumpHostId, target.JumpServiceId, target.JumpCredentialId) = (jump, source.JumpServiceId, source.JumpCredentialId);
