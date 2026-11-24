@@ -7,6 +7,7 @@ import { ChangePassword } from './ChangePassword'
 import { DialogProvider } from './Dialogs'
 import { loadPluginFrontends, type FrontendState, type ModuleImporter, type PluginStatus } from './plugins'
 import { AuditView } from './AuditView'
+import { DuplicatesView } from './DuplicatesView'
 import { HealthView } from './HealthView'
 import { InventoryView } from './InventoryView'
 import { PluginsView } from './PluginsView'
@@ -248,6 +249,7 @@ function ReportsPage({ catalog, isAdministrator, showHost }: { catalog: Catalog;
         <ul className={reports.reportList}>
           {entry('health', 'Health', 'What’s down, and certificates about to expire')}
           {entry('inventory', 'Inventory', 'How many hosts have each combination of values')}
+          {entry('duplicates', 'Duplicates', 'Hosts that look like the same machine')}
           {isAdministrator ? entry('audit', 'Audit log', 'What happened, and who did it') : null}
           {listed.map((r) => entry(`${r.pluginId}/${r.id}`, r.label, r.description))}
         </ul>
@@ -261,6 +263,8 @@ function ReportsPage({ catalog, isAdministrator, showHost }: { catalog: Catalog;
           <InventoryView catalog={catalog} onShowHost={showHost} />
         ) : current === 'audit' ? (
           <AuditView onShowHost={showHost} />
+        ) : current === 'duplicates' ? (
+          <DuplicatesView onShowHost={showHost} />
         ) : (
           <HealthView catalog={catalog} onShowHost={showHost} />
         )}

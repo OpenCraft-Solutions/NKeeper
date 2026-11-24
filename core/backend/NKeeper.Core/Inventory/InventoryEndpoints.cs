@@ -38,6 +38,7 @@ public static class InventoryEndpoints
             .AddSingleton(provider => new ServiceTypeCatalog(types, provider.GetRequiredService<ILogger<ServiceTypeCatalog>>()))
             .AddSingleton<CredentialProtector>()
             .AddScoped<NKeeper.Core.Transfer.InstanceTransfer>()
+            .AddScoped<HostMerger>()
             .AddSingleton<CredentialHandleStore>()
             .AddSingleton<CredentialPromptStore>()
             .AddScoped<CredentialBroker>()
@@ -96,6 +97,15 @@ public static class InventoryEndpoints
                 var deleted = await inventory.DeleteAsync(id, RequestUser.From(context.User), context.RequestAborted);
                 await sessions.RecheckAsync(_ => true, context.RequestAborted);
                 return deleted ? Results.NoContent() : Results.NotFound();
+            }));
+
+        // Combining duplicates (§7.46): the others' details, services and credentials into this one, then they're deleted.
+        hosts.MapPost("/{id:guid}/merge", (Guid id, HostMergeRequest? request, HostMerger merger, SessionRegistry sessions, HttpContext context) =>
+            Handled(async () =>
+            {
+                var host = await merger.MergeAsync(id, request?.SourceIds ?? [], RequestUser.From(context.User), context.RequestAborted);
+                await sessions.RecheckAsync(_ => true, context.RequestAborted);
+                return host is null ? Results.NotFound() : Results.Ok(host);
             }));
 
         // The core credential prompt (§7.6): typed secrets come here, never to a plugin's endpoint.

@@ -1304,6 +1304,19 @@ It holds no sessions, no audit log (the new server's starts with the import) and
 - **Preview** (`POST /api/transfer/import/preview`, the file and passphrase): decrypts and checks the file and says what it holds: how many users, hosts and credentials, and the plugins it used that this server doesn't have. Nothing changes.
 - **Import** (`POST /api/transfer/import`, with a confirmation): in one transaction, replaces this instance's users, hosts and plugin data with the file's, encrypting each secret again. It refuses a file from a newer core schema than this server's. Every session ends, the importer's included: they sign in again with their account from the old server. Audited as `transfer.import`, which is the new audit log's first event.
 
+### 7.46 The Duplicates report, and combining hosts
+
+1.x's duplicates report, ported from `features/reports/duplicates` and `HostMerger`: hosts that look like the same machine, and combining them into one. A report on the Reports page (§7.14), for everyone; combining needs Manage on every host involved.
+
+**Finding them**, in the shell, from the hosts the user can see (`GET /api/hosts`), as 1.x did. Two hosts are the same machine by the first field both have, in this order: MAC address, IP address, hostname (without its domain), name. So two hosts with different MAC addresses are never duplicates, whatever their names. Hosts reached through different jump hosts can share a private address, so for them only a MAC address counts. Groups are joined transitively, largest first, and the host with the most in it is offered as the one to keep.
+
+**Combining** (`POST /api/hosts/{id}/merge`, `{ sourceIds }`, at most 50): the kept host gets what the others have that it lacks, everything that pointed at the others points at it, and the others are deleted. In one transaction:
+- its details (hostname, address, MAC address, hardware, description, jump host) are its own, filled in from the others where it has none;
+- tags, services and credentials are added unless it has them: the same tag; a service of the same type, port and address; a credential for the same account (or with the same label, when neither has a user name). A credential it has takes a password or key it lacks from its duplicate, and the services of both. A copied secret is decrypted and encrypted again for its new credential, since each is bound to its own (§7.5);
+- trusted keys and certificates come along only from a host at the same address;
+- hosts reached through a removed host now go through the kept one; grants for the removed hosts become one grant per user for the kept host, at the highest level any had; integration bindings (§7.39) follow their service and credential; plugins' host data (§7.39) moves to the kept host unless it has its own.
+
+It's audited as `host.merge`, with the removed hosts' names. A user who can't manage one of the hosts gets 403, and nothing changes.
 ### 7.47 The Inventory report
 
 1.x's inventory report, ported from `features/reports/inventoryCounts` and `InventoryReport`: how many hosts have each combination of values of up to three fields, from the hosts the user can see (`GET /api/hosts`). A report on the Reports page (§7.14), for everyone; frontend only.
