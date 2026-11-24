@@ -1324,6 +1324,22 @@ It's audited as `host.merge`, with the removed hosts' names. A user who can't ma
 - **The fields:** any tag name in use (the operating system is the `os` tag, §7.26), and **service type**.
 - **The rows:** one per combination, in the fields' order. Values match case-insensitively, and a host with several values (two `role` tags, an SSH and an RDP service) counts under each, so rows can add up to more than the hosts. Hosts without a value fall in a trailing "No …" row. Each row lists its hosts, and selecting one shows it in the workspace.
 - The fields chosen are kept in the browser. The report downloads as CSV: a column per field, then the count and the hosts' names.
+### 7.48 The `import-mremoteng` plugin
+
+1.x's Import, ported from `Inventory/Import/MRemoteNgFile` and `HostImporter`, in its own repository, `NKeeper-Plugin-ImportMRemoteNG` (§9), on SDK 1.14. An inventory tool (§7.41), **Import**, for administrators: an mRemoteNG connection file (`confCons.xml`, or an mRemoteNG XML export, format 2.6 or later) becomes hosts. Its backend contributes nothing.
+
+**Reading the file, in the browser.** The file and its master password never reach the server as such: the dialog reads the XML (no DTDs), resolves each connection's `Inherit*` settings from its folders, and decrypts the passwords with the Web Crypto API. mRemoteNG's secrets are AES-GCM (salt, 16-byte nonce, ciphertext and tag, base64), keyed by PBKDF2-HMAC-SHA1 of the master password (`KdfIterations`, 1000 by default) with the salt as associated data. Without a master password mRemoteNG uses its default, `mR3m`. The root's `Protected` marker tells a wrong master password from a right one. A file encrypted whole (`FullFileEncryption`) is decrypted the same way. Other ciphers than AES-GCM are refused, with how to change it in mRemoteNG.
+
+**What a connection becomes**, as 1.x made it:
+- a host named as the connection, at its hostname or IP address, with its description and MAC address, and its folder path as a `folder` tag (`folder: Servers/SQL`);
+- a service for its protocol, when a loaded plugin provides it: RDP `rdp`, VNC `vnc`, SSH `ssh`, Telnet `telnet`, HTTP `http`, HTTPS `https`. Its port is kept unless it's the type's default. Another protocol, or one no loaded plugin provides, gives no service, with a warning;
+- a credential, when it has a user name or password, used with that service.
+
+Connections with the same name and address become one host with each one's service and credential. A second connection with the same name and another address is skipped, with why, as is one with no name or address.
+
+**Applying it**, through core's own `POST`, `PUT` and `DELETE /api/hosts`, as the administrator, so every change is checked and audited as if made by hand:
+- **Add** hosts for connections no host has the name of; **Update** the host with a connection's name: its services and credentials are added unless it has them, and its missing details filled in, keeping what the file doesn't mention; **Delete** hosts the file doesn't name, only when asked, and never when the file has no connections. A name two hosts share is skipped, since it's unclear which to update.
+- **Preview** first: what would be added, updated, left unchanged and deleted, and what's skipped and why. Nothing changes until the administrator applies it.
 
 ## 8. The native install
 
