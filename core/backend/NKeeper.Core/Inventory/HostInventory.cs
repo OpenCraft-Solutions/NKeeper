@@ -70,6 +70,7 @@ public sealed record HostResponse(
     int? MemoryMiB,
     string? SerialNumber,
     bool IsVirtualMachine,
+    Guid? HypervisorId,
     IReadOnlyList<HostTagDto> Tags,
     IReadOnlyList<HostServiceResponse> Services,
     IReadOnlyList<HostCredentialResponse> Credentials,
@@ -101,6 +102,9 @@ public sealed class HostRequest
     public string? SerialNumber { get; set; }
 
     public bool? IsVirtualMachine { get; set; }
+
+    /// <summary>For a virtual machine, the host it runs on (§7.49); ignored for a host that isn't one.</summary>
+    public Guid? HypervisorId { get; set; }
 
     public List<HostTagDto>? Tags { get; set; }
 
@@ -166,6 +170,7 @@ public sealed partial class HostInventory(CoreDbContext db, HostAccess access, S
         var host = new Host { Id = Guid.NewGuid(), CreatedAtUtc = now, CreatedByUserId = user.Id };
         Apply(host, request, user.Id, now);
         await ApplyJumpAsync(host, request.Jump, user, cancellationToken);
+        await ApplyHypervisorAsync(host, request, user, cancellationToken);
         db.Hosts.Add(host);
         await db.SaveChangesAsync(cancellationToken);
         await audit.RecordAsync(new AuditEntry(AuditActions.HostCreate, host.Id.ToString(), host.Name), cancellationToken);
@@ -192,6 +197,7 @@ public sealed partial class HostInventory(CoreDbContext db, HostAccess access, S
         db.Entry(host).Property(h => h.Version).OriginalValue = version;
         Apply(host, request, user.Id, time.GetUtcNow());
         await ApplyJumpAsync(host, request.Jump, user, cancellationToken);
+        await ApplyHypervisorAsync(host, request, user, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         await audit.RecordAsync(new AuditEntry(AuditActions.HostUpdate, id.ToString(), host.Name), cancellationToken);
 
@@ -290,6 +296,48 @@ public sealed partial class HostInventory(CoreDbContext db, HostAccess access, S
         host.JumpHostId = target.Id;
         host.JumpServiceId = service.Id;
         host.JumpCredentialId = credential.Id;
+    }
+
+    /// <summary>
+    /// Sets or clears the host a virtual machine runs on (§7.49, from 1.x): another host the user can see, which doesn't
+    /// itself run, however indirectly, on this one. A host that isn't a VM runs on nothing. A link sent unchanged isn't
+    /// checked again, so an edit by someone who can't see the hypervisor keeps it.
+    /// </summary>
+    private async Task ApplyHypervisorAsync(Host host, HostRequest request, RequestUser user, CancellationToken cancellationToken)
+    {
+        var requested = host.IsVirtualMachine ? request.HypervisorId : null;
+        if (requested == host.HypervisorId)
+        {
+            return;
+        }
+
+        if (requested is { } hypervisorId)
+        {
+            if (hypervisorId == host.Id)
+            {
+                throw new InventoryValidationException("hypervisorId", "A virtual machine can't run on itself.");
+            }
+
+            if (!await access.Visible(user).AnyAsync(h => h.Id == hypervisorId, cancellationToken))
+            {
+                throw new InventoryValidationException("hypervisorId", "Choose a host you can see for it to run on.");
+            }
+
+            var links = await db.Hosts.AsNoTracking()
+                .Where(h => h.HypervisorId != null)
+                .Select(h => new { h.Id, h.HypervisorId })
+                .ToDictionaryAsync(h => h.Id, h => h.HypervisorId!.Value, cancellationToken);
+            var seen = new HashSet<Guid>();
+            for (Guid? current = hypervisorId; current is { } next && seen.Add(next); current = links.TryGetValue(next, out var parent) ? parent : null)
+            {
+                if (next == host.Id)
+                {
+                    throw new InventoryValidationException("hypervisorId", "That host runs on this one, so this one can't run on it.");
+                }
+            }
+        }
+
+        host.HypervisorId = requested;
     }
 
     /// <returns>False when the host isn't visible; throws when it's visible but can't be changed.</returns>
@@ -684,6 +732,7 @@ public sealed partial class HostInventory(CoreDbContext db, HostAccess access, S
             host.MemoryMiB,
             host.SerialNumber,
             host.IsVirtualMachine,
+            host.HypervisorId,
             [.. host.Tags
                 .OrderBy(t => t.Name, StringComparer.OrdinalIgnoreCase).ThenBy(t => t.Value, StringComparer.OrdinalIgnoreCase)
                 .Select(t => new HostTagDto(t.Name, t.Value.Length == 0 ? null : t.Value))],

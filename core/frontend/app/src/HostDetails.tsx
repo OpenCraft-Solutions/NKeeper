@@ -52,6 +52,8 @@ export function HostDetails({
   const [deleting, setDeleting] = useState(false)
   const [checking, setChecking] = useState(false)
   const jumpHost = host.jump ? hosts.find((h) => h.id === host.jump!.hostId) : undefined
+  const hypervisor = host.hypervisorId ? hosts.find((h) => h.id === host.hypervisorId) : undefined
+  const guests = hosts.filter((h) => h.hypervisorId === host.id)
   const addresses = [host.hostname, host.ipAddress].filter(Boolean).join(' · ')
 
   async function remove() {
@@ -158,6 +160,18 @@ export function HostDetails({
                     .filter(Boolean)
                     .join(' · ')}
                 </dd>
+              </>
+            )}
+            {host.hypervisorId && (
+              <>
+                <dt>Runs on</dt>
+                <dd>{hypervisor ? hypervisor.name : <span className={styles.muted}>A host you can’t see</span>}</dd>
+              </>
+            )}
+            {guests.length > 0 && (
+              <>
+                <dt>Virtual machines</dt>
+                <dd>{guests.map((g) => g.name).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).join(', ')}</dd>
               </>
             )}
             {host.serialNumber && (

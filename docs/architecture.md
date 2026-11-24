@@ -1341,6 +1341,22 @@ Connections with the same name and address become one host with each one's servi
 - **Add** hosts for connections no host has the name of; **Update** the host with a connection's name: its services and credentials are added unless it has them, and its missing details filled in, keeping what the file doesn't mention; **Delete** hosts the file doesn't name, only when asked, and never when the file has no connections. A name two hosts share is skipped, since it's unclear which to update.
 - **Preview** first: what would be added, updated, left unchanged and deleted, and what's skipped and why. Nothing changes until the administrator applies it.
 
+### 7.49 Where a VM runs, and the VM hosts & resources report
+
+1.x's hypervisor link, ported from `HostManager.CheckHypervisorAsync`, and its VM hosts & resources report, from `features/reports/vmResources`.
+
+**The link.** A host marked **Virtual machine** (§7.1) can name the host it **runs on** (`hypervisorId` on `GET`, `POST` and `PUT /api/hosts`); the host editor offers it under the checkbox, and the host's details show it, and on a hypervisor, its VMs. The rules, as 1.x had them:
+- It's another host the user can see, and never one that runs on this host, however indirectly: hypervisors may run on hypervisors (nested virtualization), but not in a loop. A host that isn't a VM runs on nothing, whatever is sent.
+- A link sent unchanged isn't checked again, so an edit by someone who can't see the hypervisor keeps it ("A host you can't see").
+- Deleting the hypervisor leaves its VMs with their host unknown (`ON DELETE SET NULL`). Combining hosts (§7.46) moves the removed hosts' VMs to the kept one, which keeps its own link or takes a removed host's; a link that would then point at itself, at a removed host, or into a loop is cleared. Moving an instance (§7.45) carries the links; a bundle from before them imports without.
+
+The link is set by hand for now. 1.x's hypervisor scans also linked the VMs they found; that waits on the KVM and Proxmox plugins' scanners.
+
+**The report**, on the Reports page (§7.14), for everyone, from the hosts the user can see; frontend only:
+- each hypervisor (any host with VMs linked to it), with its serial number, CPU cores and memory, and what its VMs are given in total and as a share of it; beneath it, each VM with its vCPUs and memory and its share. A share over 100% is flagged as overcommitted. VMs whose vCPUs or memory aren't known are counted apart ("+1 unknown");
+- then physical hosts that run no VMs, with their serial numbers, and VMs whose host isn't known.
+- It downloads as CSV, one row per host, VMs after their hypervisor; values a spreadsheet would run as a formula are kept as text.
+
 ## 8. The native install
 
 `deploy/setup.sh` installs NKeeper on a Linux server, from a checkout of the repository, as root. It's an early version of the Phase 6 installer (v2-plan.md §8). NKeeper installs natively only (D8): systemd, nginx and PostgreSQL, no containers.

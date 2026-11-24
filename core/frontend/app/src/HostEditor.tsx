@@ -85,6 +85,8 @@ export function HostEditor({ host, hosts, serviceTypes, sessionTypes, onSaved, o
 
   const jumpHosts = hosts.filter((h) => h.id !== host?.id && !h.jump)
   const jumpHost = draft.jump ? hosts.find((h) => h.id === draft.jump!.hostId) : undefined
+  // §7.49: not itself, and not a host that runs on it, however indirectly.
+  const hypervisors = host ? hosts.filter((h) => !runsOn(hosts, h.id, host.id)) : hosts
   const fieldErrors = Object.entries(errors).filter(([, messages]) => messages.length > 0)
 
   const title = host ? `Edit ${host.name}` : 'New host'
@@ -208,6 +210,30 @@ export function HostEditor({ host, hosts, serviceTypes, sessionTypes, onSaved, o
               autoComplete="off"
             />
             <Checkbox className={panel.full} label="Virtual machine" checked={draft.isVirtualMachine} onChange={(e) => update({ isVirtualMachine: e.target.checked })} />
+            {draft.isVirtualMachine && (
+              <div className={`${panel.full} ${panel.field}`}>
+                <label htmlFor="hypervisor" className={panel.fieldLabel}>
+                  Runs on
+                </label>
+                <select
+                  id="hypervisor"
+                  className={list.input}
+                  value={draft.hypervisorId}
+                  onChange={(e) => update({ hypervisorId: e.target.value })}
+                  aria-invalid={firstError('hypervisorId') ? true : undefined}
+                >
+                  <option value="">Unknown</option>
+                  {hypervisors.map((h) => (
+                    <option key={h.id} value={h.id}>
+                      {h.name}
+                    </option>
+                  ))}
+                  {draft.hypervisorId && !hosts.some((h) => h.id === draft.hypervisorId) && <option value={draft.hypervisorId}>A host you can’t see</option>}
+                </select>
+                {firstError('hypervisorId') && <p className={panel.fieldError}>{firstError('hypervisorId')}</p>}
+                <p className={panel.fieldHint}>The hypervisor it runs on, for the VM resources report.</p>
+              </div>
+            )}
             <TextArea
               className={panel.full}
               label="Description"
@@ -712,4 +738,16 @@ export function SettingsFields({
       </div>
     )
   })
+}
+
+/** Whether a host runs on another, however indirectly (or is it). */
+function runsOn(hosts: Host[], id: string, hypervisorId: string): boolean {
+  const seen = new Set<string>()
+  for (let current: string | null = id; current && !seen.has(current); current = hosts.find((h) => h.id === current)?.hypervisorId ?? null) {
+    if (current === hypervisorId) {
+      return true
+    }
+    seen.add(current)
+  }
+  return false
 }

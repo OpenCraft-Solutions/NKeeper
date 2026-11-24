@@ -499,6 +499,39 @@ describe('the duplicates report', () => {
   })
 })
 
+describe('the VM hosts & resources report', () => {
+  it('shows each VM host with its VMs’ share of it, overcommitment flagged (1.x)', async () => {
+    fakeApi({
+      'GET /api/auth/me': ADMIN,
+      'GET /api/plugins': [],
+      'GET /api/health': [],
+      'GET /api/hosts': [
+        host({ id: 'n1', name: 'node1', cpuCores: 32, memoryMiB: 131072, serialNumber: 'ABC1234' }),
+        host({ id: 'v1', name: 'db01', isVirtualMachine: true, hypervisorId: 'n1', cpuCores: 16, memoryMiB: 65536 }),
+        host({ id: 'v2', name: 'mystery', isVirtualMachine: true, hypervisorId: 'n1' }),
+        host({ id: 'n2', name: 'small', cpuCores: 4, memoryMiB: 8192 }),
+        host({ id: 'v3', name: 'greedy', isVirtualMachine: true, hypervisorId: 'n2', cpuCores: 8, memoryMiB: 4096 }),
+        host({ id: 'p1', name: 'nas', cpuCores: 8, memoryMiB: 32768, serialNumber: 'NAS0001' }),
+        host({ id: 'v4', name: 'orphan', isVirtualMachine: true, cpuCores: 2, memoryMiB: 2048 }),
+      ],
+    })
+    const user = userEvent.setup()
+
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: 'Reports' }))
+    await user.click(within(screen.getByRole('navigation', { name: 'Reports' })).getByRole('button', { name: /VM hosts & resources/ }))
+
+    const table = (await screen.findByRole('table')) as HTMLTableElement
+    const text = (row: HTMLTableRowElement) => [...row.cells].map((c) => c.textContent)
+    expect(text(table.tBodies[0]!.rows[0]!)).toEqual(['node12 VMs', 'ABC1234', '32 cores', '16 (50%)+1 unknown', '128 GiB', '64 GiB (50%)'])
+    expect(text(table.tBodies[0]!.rows[1]!)).toEqual(['db01', '', '16 vCPUs', '50% of host', '64 GiB', '50% of host'])
+    expect(within(table.tBodies[1]!).getByText('200% of host')).toHaveAttribute('title', 'More than the host has (overcommitted)')
+    expect(text(table.tBodies[2]!.rows[1]!)).toEqual(['nas', 'NAS0001', '8 cores', '', '32 GiB', ''])
+    expect(within(table.tBodies[3]!).getByRole('button', { name: 'orphan' })).toBeInTheDocument()
+    expect(screen.getByText('2 VM hosts · 4 VMs · 1 other physical server')).toBeInTheDocument()
+  })
+})
+
 describe('the users page', () => {
   it('creates a user, and grants them a host and a tag group', async () => {
     const created = { id: 'u2', userName: 'bob', email: 'bob@example.com', role: 'user', isDisabled: false, mustChangePassword: true, isLockedOut: false, createdAtUtc: '2026-01-01T00:00:00Z' }
@@ -797,6 +830,7 @@ describe('the workspace', () => {
       memoryMiB: null,
       serialNumber: null,
       isVirtualMachine: false,
+      hypervisorId: null,
       tags: [],
       services: [{ id: null, type: 'term', label: null, port: 99999, address: null, settings: { shell: '/bin/zsh', mode: 'safe', retries: 3, compress: true }, disabledTools: [] }],
       credentials: [
@@ -976,6 +1010,26 @@ describe('the workspace', () => {
     expect(bodyOf(fetch, 'PUT /api/hosts/h2')).toMatchObject({ name: 'db01', version: 1 })
     await user.click(screen.getByRole('button', { name: 'Reload the host' }))
     await waitFor(() => expect(loads).toBe(2))
+  })
+
+  it('records the host a virtual machine runs on, offering none that runs on it (§7.49)', async () => {
+    const fetch = signedIn({
+      'GET /api/hosts': [hosts[0], { ...hosts[1], isVirtualMachine: false }, host({ id: 'h3', name: 'guest', isVirtualMachine: true, hypervisorId: 'h2' })],
+      'PUT /api/hosts/h2': (init) => Response.json({ ...hosts[1], ...(JSON.parse(String(init?.body)) as object), version: 2 }),
+    })
+    const user = userEvent.setup()
+
+    render(<App importer={termImporter} />)
+    await user.click(await screen.findByRole('button', { name: /^db01,/ }))
+    expect(screen.getByRole('article', { name: 'db01' })).toHaveTextContent('Virtual machinesguest')
+    await user.click(screen.getByRole('button', { name: 'Edit' }))
+    await user.click(screen.getByRole('checkbox', { name: 'Virtual machine' }))
+    const runsOn = screen.getByRole('combobox', { name: 'Runs on' })
+    expect(within(runsOn).getAllByRole('option').map((o) => o.textContent)).toEqual(['Unknown', 'web01'])
+    await user.selectOptions(runsOn, 'web01')
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+
+    await waitFor(() => expect(bodyOf(fetch, 'PUT /api/hosts/h2')).toMatchObject({ isVirtualMachine: true, hypervisorId: 'h1' }))
   })
 })
 

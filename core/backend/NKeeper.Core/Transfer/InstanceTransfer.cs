@@ -49,7 +49,8 @@ public sealed record BundleHost(
     IReadOnlyList<BundleTag> Tags,
     IReadOnlyList<BundleService> Services,
     IReadOnlyList<BundleCredential> Credentials,
-    IReadOnlyList<BundleTrustedKey> TrustedKeys);
+    IReadOnlyList<BundleTrustedKey> TrustedKeys,
+    Guid? HypervisorId = null);
 
 public sealed record BundleTag(Guid Id, string Name, string Value);
 
@@ -218,7 +219,7 @@ public sealed class InstanceTransfer(CoreDbContext db, CredentialProtector prote
             }
         }
 
-        // Hosts first, then the jump hosts they name, since a jump host is another host in the file.
+        // Hosts first, then the jump hosts and hypervisors they name, since each is another host in the file.
         foreach (var h in data.Hosts)
         {
             db.Hosts.Add(Import(h, time.GetUtcNow()));
@@ -230,6 +231,11 @@ public sealed class InstanceTransfer(CoreDbContext db, CredentialProtector prote
             await db.Hosts.Where(x => x.Id == h.Id).ExecuteUpdateAsync(
                 set => set.SetProperty(x => x.JumpHostId, h.JumpHostId).SetProperty(x => x.JumpServiceId, h.JumpServiceId).SetProperty(x => x.JumpCredentialId, h.JumpCredentialId),
                 cancellationToken);
+        }
+
+        foreach (var h in data.Hosts.Where(h => h.HypervisorId is not null))
+        {
+            await db.Hosts.Where(x => x.Id == h.Id).ExecuteUpdateAsync(set => set.SetProperty(x => x.HypervisorId, h.HypervisorId), cancellationToken);
         }
 
         foreach (var g in data.Grants ?? [])
@@ -273,7 +279,8 @@ public sealed class InstanceTransfer(CoreDbContext db, CredentialProtector prote
         [.. h.Services.OrderBy(s => s.Position).Select(s => new BundleService(s.Id, s.Position, s.Type, s.Label, s.Port, s.Address, s.Settings, s.SettingsVersion, s.DisabledTools))],
         [.. h.Credentials.OrderBy(c => c.Position).Select(c => new BundleCredential(
             c.Id, c.Position, c.Label, c.Username, c.Domain, Reveal(c.Id, c.ProtectedPassword), Reveal(c.Id, c.ProtectedPrivateKey), c.Notes, c.ServiceIds))],
-        [.. h.TrustedKeys.Select(k => new BundleTrustedKey(k.Id, k.Kind, k.Address, k.Port, k.Algorithm, k.Fingerprint, k.TrustedAtUtc))]);
+        [.. h.TrustedKeys.Select(k => new BundleTrustedKey(k.Id, k.Kind, k.Address, k.Port, k.Algorithm, k.Fingerprint, k.TrustedAtUtc))],
+        h.HypervisorId);
 
     private Host Import(BundleHost h, DateTimeOffset now) => new()
     {

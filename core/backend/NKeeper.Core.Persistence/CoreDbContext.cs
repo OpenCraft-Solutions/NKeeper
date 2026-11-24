@@ -192,6 +192,9 @@ public sealed class CoreDbContext(DbContextOptions<CoreDbContext> options)
             host.HasOne<Host>().WithMany().HasForeignKey(h => h.JumpHostId).OnDelete(DeleteBehavior.SetNull);
             host.HasOne<HostService>().WithMany().HasForeignKey(h => h.JumpServiceId).OnDelete(DeleteBehavior.SetNull);
             host.HasOne<HostCredential>().WithMany().HasForeignKey(h => h.JumpCredentialId).OnDelete(DeleteBehavior.SetNull);
+
+            // Deleting the host a VM runs on leaves the VM with its host unknown (§7.49).
+            host.HasOne<Host>().WithMany().HasForeignKey(h => h.HypervisorId).OnDelete(DeleteBehavior.SetNull);
         });
 
         // SDK 1.13 (docs/architecture.md §7.39): what plugins keep through core.

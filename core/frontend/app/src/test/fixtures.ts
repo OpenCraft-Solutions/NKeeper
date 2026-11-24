@@ -69,6 +69,7 @@ export function host(overrides: Partial<Host> = {}): Host {
     memoryMiB: null,
     serialNumber: null,
     isVirtualMachine: false,
+    hypervisorId: null,
     tags: [],
     services: [],
     credentials: [],
