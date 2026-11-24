@@ -21,6 +21,9 @@ public static class AuditActions
     public const string HostCreate = "host.create";
     public const string HostUpdate = "host.update";
     public const string HostDelete = "host.delete";
+
+    /// <summary>Duplicate hosts combined into one (architecture.md §7.46).</summary>
+    public const string HostMerge = "host.merge";
     public const string CredentialDenied = "credential.denied";
     public const string CredentialUse = "credential.use";
 
