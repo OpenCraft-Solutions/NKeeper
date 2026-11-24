@@ -1304,6 +1304,14 @@ It holds no sessions, no audit log (the new server's starts with the import) and
 - **Preview** (`POST /api/transfer/import/preview`, the file and passphrase): decrypts and checks the file and says what it holds: how many users, hosts and credentials, and the plugins it used that this server doesn't have. Nothing changes.
 - **Import** (`POST /api/transfer/import`, with a confirmation): in one transaction, replaces this instance's users, hosts and plugin data with the file's, encrypting each secret again. It refuses a file from a newer core schema than this server's. Every session ends, the importer's included: they sign in again with their account from the old server. Audited as `transfer.import`, which is the new audit log's first event.
 
+### 7.47 The Inventory report
+
+1.x's inventory report, ported from `features/reports/inventoryCounts` and `InventoryReport`: how many hosts have each combination of values of up to three fields, from the hosts the user can see (`GET /api/hosts`). A report on the Reports page (§7.14), for everyone; frontend only.
+
+- **The fields:** any tag name in use (the operating system is the `os` tag, §7.26), and **service type**.
+- **The rows:** one per combination, in the fields' order. Values match case-insensitively, and a host with several values (two `role` tags, an SSH and an RDP service) counts under each, so rows can add up to more than the hosts. Hosts without a value fall in a trailing "No …" row. Each row lists its hosts, and selecting one shows it in the workspace.
+- The fields chosen are kept in the browser. The report downloads as CSV: a column per field, then the count and the hosts' names.
+
 ## 8. The native install
 
 `deploy/setup.sh` installs NKeeper on a Linux server, from a checkout of the repository, as root. It's an early version of the Phase 6 installer (v2-plan.md §8). NKeeper installs natively only (D8): systemd, nginx and PostgreSQL, no containers.
