@@ -466,6 +466,39 @@ describe('moving an instance', () => {
   })
 })
 
+describe('the duplicates report', () => {
+  it('combines the ticked hosts into the one kept, after asking', async () => {
+    const a = host({ id: 'a', name: 'app01', ipAddress: '10.0.0.5' })
+    const b = host({ id: 'b', name: 'app01-old', ipAddress: '10.0.0.5', services: [service()] })
+    let combined = false
+    const fetch = fakeApi({
+      'GET /api/auth/me': ADMIN,
+      'GET /api/plugins': [],
+      'GET /api/hosts': () => Response.json(combined ? [b] : [a, b]),
+      'GET /api/health': [],
+      'POST /api/hosts/b/merge': () => {
+        combined = true
+        return Response.json(b)
+      },
+    })
+    const user = userEvent.setup()
+
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: 'Reports' }))
+    await user.click(within(screen.getByRole('navigation', { name: 'Reports' })).getByRole('button', { name: /Duplicates/ }))
+    const group = await screen.findByRole('region', { name: 'Duplicates of app01-old' })
+    expect(within(group).getByText('Same IP address 10.0.0.5')).toBeInTheDocument()
+    // The one with more in it is offered to keep.
+    expect(within(group).getByRole('radio', { name: 'Keep app01-old' })).toBeChecked()
+    await user.click(within(group).getByRole('button', { name: 'Combine 1 into app01-old' }))
+    await user.click(within(group).getByRole('button', { name: 'Combine and delete it' }))
+
+    expect(await screen.findByText('Combined 1 host into app01-old.')).toBeInTheDocument()
+    expect(bodyOf(fetch, 'POST /api/hosts/b/merge')).toEqual({ sourceIds: ['a'] })
+    expect(await screen.findByText(/No hosts look like the same machine/)).toBeInTheDocument()
+  })
+})
+
 describe('the users page', () => {
   it('creates a user, and grants them a host and a tag group', async () => {
     const created = { id: 'u2', userName: 'bob', email: 'bob@example.com', role: 'user', isDisabled: false, mustChangePassword: true, isLockedOut: false, createdAtUtc: '2026-01-01T00:00:00Z' }
