@@ -210,8 +210,8 @@ internal sealed class StreamSessionRunner(HttpContext context, SessionSocket soc
     /// <summary>A terminal's size as it opens, from its start options' <c>columns</c> and <c>rows</c> (§7.51).</summary>
     private static (int Columns, int Rows)? TerminalSize(JsonElement? options) =>
         options is { ValueKind: JsonValueKind.Object } o
-            && o.TryGetProperty("columns", out var c) && c.TryGetInt32(out var columns) && columns is > 0 and <= 1000
-            && o.TryGetProperty("rows", out var r) && r.TryGetInt32(out var rows) && rows is > 0 and <= 1000
+            && o.TryGetProperty("columns", out var c) && c.ValueKind == JsonValueKind.Number && c.TryGetInt32(out var columns) && columns is > 0 and <= 1000
+            && o.TryGetProperty("rows", out var r) && r.ValueKind == JsonValueKind.Number && r.TryGetInt32(out var rows) && rows is > 0 and <= 1000
             ? (columns, rows)
             : null;
 
