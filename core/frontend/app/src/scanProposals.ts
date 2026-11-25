@@ -1,5 +1,5 @@
 import { newCredentialDraft, newServiceDraft, type Draft } from './hostDraft'
-import type { Host, ScanFindings, ServiceTypeInfo } from './types'
+import type { Host, ScanFindings, ScannedGuest, ServiceTypeInfo } from './types'
 
 /** The tag a scan records the operating system in, e.g. `os: Ubuntu 24.04.1 LTS`, as 1.x did. */
 export const OS_TAG = 'os'
@@ -13,6 +13,11 @@ export interface ProposedHost {
   ipAddress: string
   macAddress: string | null
   description: string
+  /** For a hypervisor's guest (§7.49): a virtual machine running on it, with what it's given. */
+  isVirtualMachine?: boolean
+  hypervisorId?: string | null
+  cpuCores?: number | null
+  memoryMiB?: number | null
 }
 
 /**
@@ -21,12 +26,14 @@ export interface ProposedHost {
  */
 export interface ScanProposal {
   key: string
-  group: 'Host' | 'Services' | 'Logins' | 'New hosts'
+  group: 'Host' | 'Services' | 'Logins' | 'Virtual machines' | 'New hosts'
   label: string
   detail: string
   checked: boolean
   apply?: (draft: Draft) => void
   newHost?: ProposedHost
+  /** A change to another host: a guest found on this hypervisor, linked as running on it (§7.49). */
+  other?: { host: Host; apply: (draft: Draft) => void }
 }
 
 const sameText = (a: string | null | undefined, b: string | null | undefined) => (a ?? '').toLowerCase() === (b ?? '').toLowerCase()
@@ -147,6 +154,8 @@ export function scanProposals(
     })
   }
 
+  proposals.push(...guestProposals(host, findings.guests ?? [], hosts, canCreateHosts))
+
   if (canCreateHosts) {
     const seen = new Set<string>()
     for (const neighbor of findings.neighbors ?? []) {
@@ -167,5 +176,82 @@ export function scanProposals(
     }
   }
 
+  return proposals
+}
+
+const shortName = (name: string | null) => (name ?? '').split('.')[0]!.toLowerCase()
+
+/**
+ * 1.x's hypervisor scan (§7.49): each guest is the host with one of its MAC addresses, else one of its addresses, else
+ * its name, and is proposed as running here (or on its cluster node), with the vCPUs and memory it's given. A guest
+ * no host matches is proposed as a new host, when it has an address. A guest the user can't change is left alone.
+ */
+function guestProposals(hypervisor: Host, guests: ScannedGuest[], hosts: Host[], canCreateHosts: boolean): ScanProposal[] {
+  const proposals: ScanProposal[] = []
+  const linked = new Set<string>()
+  for (const guest of guests) {
+    const node = guest.node ? hosts.find((h) => shortName(h.name) === shortName(guest.node!) || shortName(h.hostname) === shortName(guest.node!)) : hypervisor
+    if (!node) {
+      continue
+    }
+    const macs = (guest.macAddresses ?? []).map((m) => m.toUpperCase())
+    const ips = guest.ipAddresses ?? []
+    const match =
+      hosts.find((h) => h.macAddress !== null && macs.includes(h.macAddress)) ??
+      hosts.find((h) => h.ipAddress !== null && ips.includes(h.ipAddress)) ??
+      hosts.find((h) => sameText(h.name, guest.name) || (h.hostname !== null && shortName(h.hostname) === shortName(guest.name)))
+    const given = [guest.cpuCores ? `${guest.cpuCores} vCPU${guest.cpuCores === 1 ? '' : 's'}` : null, guest.memoryMiB ? formatMemory(guest.memoryMiB) : null].filter(Boolean).join(' · ')
+    if (match) {
+      if (match.id === node.id || linked.has(match.id) || !match.canManage) {
+        continue
+      }
+      linked.add(match.id)
+      const moves = match.hypervisorId !== node.id
+      const fills = (guest.cpuCores && guest.cpuCores !== match.cpuCores) || (guest.memoryMiB && guest.memoryMiB !== match.memoryMiB)
+      if (!moves && match.isVirtualMachine && !fills) {
+        continue
+      }
+      const elsewhere = match.hypervisorId && match.hypervisorId !== node.id ? hosts.find((h) => h.id === match.hypervisorId)?.name ?? 'another host' : null
+      proposals.push({
+        key: `guest-${match.id}`,
+        group: 'Virtual machines',
+        label: match.name === guest.name ? match.name : `${match.name} (${guest.name})`,
+        detail: [`runs on ${node.name}${elsewhere ? ` (now ${elsewhere})` : ''}`, given].filter(Boolean).join(' · '),
+        // Moving a VM that's recorded on another host waits for the user's tick.
+        checked: !elsewhere,
+        other: {
+          host: match,
+          apply: (d) => {
+            d.isVirtualMachine = true
+            d.hypervisorId = node.id
+            if (guest.cpuCores) {
+              d.cpuCores = String(guest.cpuCores)
+            }
+            if (guest.memoryMiB) {
+              d.memoryGiB = String(guest.memoryMiB / 1024)
+            }
+          },
+        },
+      })
+    } else if (canCreateHosts && ips[0]) {
+      proposals.push({
+        key: `guest-new-${guest.name}`,
+        group: 'New hosts',
+        label: guest.name,
+        detail: [`a VM on ${node.name} at ${ips[0]}`, given].filter(Boolean).join(' · '),
+        checked: false,
+        newHost: {
+          name: guest.name.slice(0, 200),
+          ipAddress: ips[0],
+          macAddress: macs[0] ?? null,
+          description: `Found by a scan of ${node.name}.`,
+          isVirtualMachine: true,
+          hypervisorId: node.id,
+          cpuCores: guest.cpuCores ?? null,
+          memoryMiB: guest.memoryMiB ?? null,
+        },
+      })
+    }
+  }
   return proposals
 }

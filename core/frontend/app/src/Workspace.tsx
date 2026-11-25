@@ -633,8 +633,9 @@ export function Workspace({
           catalog={catalog}
           canCreateHosts={canCreate}
           onClose={() => setScanning(null)}
-          onApplied={(updated, created) => {
-            setHosts((current) => [...(current ?? []).map((h) => (updated && h.id === updated.id ? updated : h)), ...created].sort((a, b) => a.name.localeCompare(b.name)))
+          onApplied={(updated, created, others = []) => {
+            const changed = new Map([...others, ...(updated ? [updated] : [])].map((h) => [h.id, h]))
+            setHosts((current) => [...(current ?? []).map((h) => changed.get(h.id) ?? h), ...created].sort((a, b) => a.name.localeCompare(b.name)))
             if (updated) {
               checkSaved(updated)
             }
