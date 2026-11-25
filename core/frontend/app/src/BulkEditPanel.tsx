@@ -110,12 +110,15 @@ export function BulkEditPanel({
   serviceTypes,
   onApplied,
   onClear,
+  onScan,
 }: {
   hosts: Host[]
   allHosts: Host[]
   serviceTypes: Map<string, ServiceTypeInfo>
   onApplied: (hosts: Host[]) => void
   onClear: () => void
+  /** 1.x's bulk scan; null when no loaded plugin scans any of them. */
+  onScan: (() => void) | null
 }) {
   const [tags, setTags] = useState<TagChange[]>([])
   const [services, setServices] = useState<ServiceChange[]>([])
@@ -186,6 +189,11 @@ export function BulkEditPanel({
           </p>
         </div>
         <div className={panel.actions}>
+          {onScan && (
+            <Button variant="secondary" size="sm" onClick={onScan}>
+              Scan…
+            </Button>
+          )}
           <Button variant="secondary" size="sm" onClick={onClear}>
             Clear selection
           </Button>
