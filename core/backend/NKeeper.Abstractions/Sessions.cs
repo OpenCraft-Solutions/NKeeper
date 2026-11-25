@@ -29,6 +29,13 @@ public sealed class SessionType(string id, string label, Type? handler)
 
     /// <summary>Whether it can reach a host through its jump host.</summary>
     public bool SupportsJumpHost { get; init; } = true;
+
+    /// <summary>
+    /// A terminal, which core records for the audit log (SDK 1.16, docs/architecture.md §7.51), as 1.x recorded SSH and
+    /// Telnet: the plugin's binary frames are what the terminal shows, and the browser's text frames
+    /// <c>{"type":"resize","columns":…,"rows":…}</c> its size. Only output is recorded, never what was typed.
+    /// </summary>
+    public bool RecordsTerminal { get; init; }
 }
 
 /// <summary>Opens a plugin's stream sessions. Resolved from the request's services, once per open.</summary>

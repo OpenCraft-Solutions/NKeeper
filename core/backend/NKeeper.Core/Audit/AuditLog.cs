@@ -36,6 +36,9 @@ public static class AuditActions
     public const string SessionOpen = "session.open";
     public const string SessionClose = "session.close";
 
+    /// <summary>An administrator watched a terminal session's recording (§7.51).</summary>
+    public const string RecordingView = "recording.view";
+
     /// <summary>An administrator asked root's helper to install or upgrade a catalogued plugin (architecture.md §9.1).</summary>
     public const string PluginInstallRequested = "plugin.install_requested";
 

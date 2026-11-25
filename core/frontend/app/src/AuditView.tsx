@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { api, ApiError } from '@nkeeper/sdk'
+import { RecordingsView } from './RecordingsView'
 import { Alert } from './ui/Alert'
 import { Button } from './ui/Button'
 import styles from './ui/Reports.module.css'
@@ -62,7 +63,37 @@ function query(filters: Filters, before?: number): string {
  * 1.x's audit log report (docs/architecture.md §7.44), for administrators: core's audit trail newest first, filtered
  * by text, category and days, a page at a time, and as CSV.
  */
+/** The audit log page: its events, and (§7.51) the terminal sessions' recordings. */
 export function AuditView({ onShowHost }: { onShowHost: (hostId: string) => void }) {
+  const [tab, setTab] = useState<'events' | 'recordings'>('events')
+  const tabs = (
+    <div role="group" aria-label="Show">
+      <Button size="sm" variant={tab === 'events' ? 'primary' : 'secondary'} aria-pressed={tab === 'events'} onClick={() => setTab('events')}>
+        Events
+      </Button>{' '}
+      <Button size="sm" variant={tab === 'recordings' ? 'primary' : 'secondary'} aria-pressed={tab === 'recordings'} onClick={() => setTab('recordings')}>
+        Recordings
+      </Button>
+    </div>
+  )
+  if (tab === 'recordings') {
+    return (
+      <>
+        <header className={styles.reportHeader}>
+          <div>
+            <h2 className={styles.reportTitle}>Audit log</h2>
+            <p className={styles.reportSummary}>What each SSH and Telnet session showed, newest first. Only what the terminal showed is recorded, never what was typed.</p>
+          </div>
+          <div className={styles.reportActions}>{tabs}</div>
+        </header>
+        <RecordingsView onShowHost={onShowHost} />
+      </>
+    )
+  }
+  return <AuditEvents onShowHost={onShowHost} tabs={tabs} />
+}
+
+function AuditEvents({ onShowHost, tabs }: { onShowHost: (hostId: string) => void; tabs: ReactNode }) {
   const [draft, setDraft] = useState<Filters>(EMPTY)
   const [filters, setFilters] = useState<Filters>(EMPTY)
   const [categories, setCategories] = useState<string[]>([])
@@ -130,6 +161,7 @@ export function AuditView({ onShowHost }: { onShowHost: (hostId: string) => void
           <p className={styles.reportSummary}>What happened on this server, and who did it, newest first.</p>
         </div>
         <div className={styles.reportActions}>
+          {tabs}
           <Button size="sm" variant="secondary" onClick={() => void download()}>
             Download CSV
           </Button>

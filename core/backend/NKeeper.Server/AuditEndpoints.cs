@@ -20,6 +20,9 @@ public sealed record AuditEventResponse(
 /// <param name="Next">Pass as <c>before</c> for the next (older) page; null on the last.</param>
 public sealed record AuditPageResponse(IReadOnlyList<AuditEventResponse> Events, long? Next);
 
+/// <summary>A terminal session's recording (§7.51), without its data.</summary>
+public sealed record RecordingResponse(Guid Id, Guid SessionId, string UserName, Guid? HostId, string HostName, string SessionType, DateTimeOffset StartedAtUtc, DateTimeOffset EndedAtUtc, long Size, bool Truncated);
+
 /// <summary>The audit log page (docs/architecture.md §7.44), ported from 1.x's <c>AuditController</c>. Administrators only.</summary>
 internal static class AuditEndpoints
 {
@@ -32,6 +35,36 @@ internal static class AuditEndpoints
     public static void MapAuditLog(this IEndpointRouteBuilder api)
     {
         var audit = api.MapGroup("/audit").RequireAuthorization(policy => policy.RequireRole(SystemRoles.Administrator));
+
+        // Terminal recordings (§7.51), newest first; `before` pages back by start time.
+        audit.MapGet("/recordings", async (DateTimeOffset? before, int? limit, CoreDbContext db, CancellationToken ct) =>
+        {
+            var take = Math.Clamp(limit ?? DefaultLimit, 1, MaxLimit);
+            var query = db.SessionRecordings.AsNoTracking();
+            if (before is { } b)
+            {
+                query = query.Where(r => r.StartedAtUtc < b);
+            }
+
+            return Results.Ok(await query.OrderByDescending(r => r.StartedAtUtc).Take(take)
+                .Select(r => new RecordingResponse(r.Id, r.SessionId, r.UserName, r.HostId, r.HostName, r.SessionType, r.StartedAtUtc, r.EndedAtUtc, r.Size, r.Truncated))
+                .ToListAsync(ct));
+        });
+
+        // The asciicast, as stored: gzipped, which the browser undoes. Watching one is audited, as it shows what someone saw.
+        audit.MapGet("/recordings/{id:guid}/cast", async (Guid id, CoreDbContext db, NKeeper.Core.Audit.IAuditLog log, HttpResponse response, CancellationToken ct) =>
+        {
+            var recording = await db.SessionRecordings.AsNoTracking().Where(r => r.Id == id).Select(r => new { r.Data, r.HostId, r.UserName, r.SessionType }).FirstOrDefaultAsync(ct);
+            if (recording is null)
+            {
+                return Results.NotFound();
+            }
+
+            await log.RecordAsync(new NKeeper.Core.Audit.AuditEntry(NKeeper.Core.Audit.AuditActions.RecordingView, recording.HostId?.ToString() ?? string.Empty, $"{recording.SessionType} session of {recording.UserName}, recording {id}"), ct);
+            response.Headers.ContentEncoding = "gzip";
+            response.Headers.CacheControl = "no-store";
+            return Results.Bytes(recording.Data, "application/x-asciicast");
+        });
 
         audit.MapGet("/events", async (HttpRequest request, CoreDbContext db, CancellationToken ct) =>
         {

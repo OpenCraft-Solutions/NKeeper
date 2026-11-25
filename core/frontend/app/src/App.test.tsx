@@ -408,6 +408,44 @@ describe('the audit log page', () => {
     expect(await screen.findByRole('article', { name: 'web01' })).toBeInTheDocument()
   })
 
+  it('lists the terminal sessions’ recordings, newest first, to play (§7.51)', async () => {
+    fakeApi({
+      'GET /api/auth/me': ADMIN,
+      'GET /api/plugins': [],
+      'GET /api/hosts': [host({ id: 'h1', name: 'web01' })],
+      'GET /api/health': [],
+      'GET /api/audit/categories': [],
+      'GET /api/audit/events': { events: [], next: null },
+      'GET /api/audit/recordings?limit=50': [
+        {
+          id: 'r1',
+          sessionId: 's1',
+          userName: 'bob',
+          hostId: 'h1',
+          hostName: 'web01',
+          sessionType: 'ssh',
+          startedAtUtc: '2026-11-25T10:00:00Z',
+          endedAtUtc: '2026-11-25T10:02:05Z',
+          size: 1200,
+          truncated: true,
+        },
+      ],
+    })
+    const user = userEvent.setup()
+
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: 'Reports' }))
+    await user.click(within(screen.getByRole('navigation', { name: 'Reports' })).getByRole('button', { name: /Audit log/ }))
+    await user.click(await screen.findByRole('button', { name: 'Recordings' }))
+
+    const table = await screen.findByRole('table', { name: 'Recordings' })
+    const row = within(table).getAllByRole('row')[1]!
+    expect(row).toHaveTextContent('bob')
+    expect(row).toHaveTextContent('2 min 5 s · cut short')
+    expect(within(row).getByRole('button', { name: 'Play bob’s session on web01' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Older recordings' })).not.toBeInTheDocument()
+  })
+
   it('isn’t listed for other users', async () => {
     fakeApi({ 'GET /api/auth/me': { ...ADMIN, roles: [] }, 'GET /api/plugins': [], 'GET /api/hosts': [], 'GET /api/health': [] })
     const user = userEvent.setup()

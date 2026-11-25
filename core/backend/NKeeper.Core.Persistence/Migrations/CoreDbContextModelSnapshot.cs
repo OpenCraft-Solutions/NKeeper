@@ -943,6 +943,75 @@ namespace NKeeper.Core.Persistence.Migrations
                     b.ToTable("plugin_settings", "core");
                 });
 
+            modelBuilder.Entity("NKeeper.Core.Persistence.SessionRecording", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<byte[]>("Data")
+                        .IsRequired()
+                        .HasColumnType("bytea")
+                        .HasColumnName("data");
+
+                    b.Property<DateTimeOffset>("EndedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("ended_at_utc");
+
+                    b.Property<Guid?>("HostId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("host_id");
+
+                    b.Property<string>("HostName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("host_name");
+
+                    b.Property<Guid>("SessionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("session_id");
+
+                    b.Property<string>("SessionType")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("session_type");
+
+                    b.Property<long>("Size")
+                        .HasColumnType("bigint")
+                        .HasColumnName("size");
+
+                    b.Property<DateTimeOffset>("StartedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("started_at_utc");
+
+                    b.Property<bool>("Truncated")
+                        .HasColumnType("boolean")
+                        .HasColumnName("truncated");
+
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.Property<string>("UserName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("user_name");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("HostId");
+
+                    b.HasIndex("StartedAtUtc");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("session_recordings", "core");
+                });
+
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<System.Guid>", b =>
                 {
                     b.HasOne("NKeeper.Core.Persistence.ApplicationRole", null)
@@ -1129,6 +1198,19 @@ namespace NKeeper.Core.Persistence.Migrations
                     b.HasOne("NKeeper.Core.Persistence.ApplicationUser", null)
                         .WithMany()
                         .HasForeignKey("UpdatedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+                });
+
+            modelBuilder.Entity("NKeeper.Core.Persistence.SessionRecording", b =>
+                {
+                    b.HasOne("NKeeper.Core.Persistence.Host", null)
+                        .WithMany()
+                        .HasForeignKey("HostId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("NKeeper.Core.Persistence.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.SetNull);
                 });
 
