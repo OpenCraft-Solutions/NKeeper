@@ -5,6 +5,7 @@ import { useDialogs } from './dialogContext'
 import { HostDetails } from './HostDetails'
 import { HostEditor } from './HostEditor'
 import { BulkEditPanel } from './BulkEditPanel'
+import { BulkScanDialog } from './BulkScanDialog'
 import { HostTree, type SelectMode } from './HostTree'
 import { ScanDialog } from './ScanDialog'
 import { groupHosts, matchesSearch, serviceName, shownOrder, tagNames } from './hosts'
@@ -77,6 +78,7 @@ export function Workspace({
   // Hosts picked to change together (§7.50), and the one a Shift+click extends from.
   const [picked, setPicked] = useState(new Set<string>())
   const [anchor, setAnchor] = useState<string | null>(null)
+  const [bulkScanning, setBulkScanning] = useState(false)
   const [pane, setPane] = useState<Pane>({ kind: 'details' })
   const [sessions, setSessions] = useState<SessionTab[]>([])
   const [activeTab, setActiveTab] = useState<string>('host')
@@ -523,6 +525,7 @@ export function Workspace({
                 setHosts((current) => (current ?? []).map((h) => byId.get(h.id) ?? h))
               }}
               onClear={() => pick(new Set())}
+              onScan={pickedHosts.some((h) => h.canManage && connectMenu(h, catalog, true).length > 0) ? () => setBulkScanning(true) : null}
             />
           ) : pane.kind === 'create' ? (
             <HostEditor
@@ -610,6 +613,18 @@ export function Workspace({
         <Dialog title={tool.label} onClose={() => setTool(null)} size="lg">
           <PluginBoundary pluginId={tool.pluginId}>{createElement(tool.view, { close: () => setTool(null), hostsChanged: loadHosts })}</PluginBoundary>
         </Dialog>
+      )}
+      {bulkScanning && pickedHosts.length > 1 && (
+        <BulkScanDialog
+          hosts={pickedHosts}
+          allHosts={hosts ?? []}
+          catalog={catalog}
+          onClose={() => setBulkScanning(false)}
+          onApplied={(updated) => {
+            const byId = new Map(updated.map((h) => [h.id, h]))
+            setHosts((current) => (current ?? []).map((h) => byId.get(h.id) ?? h))
+          }}
+        />
       )}
       {scanning && scanHost && (
         <ScanDialog

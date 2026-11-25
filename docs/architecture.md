@@ -1371,7 +1371,9 @@ The link is set by hand for now. 1.x's hypervisor scans also linked the VMs they
 
 **Applying them** is `POST /api/hosts/bulk`: the hosts, and the changes, applied to each in that order. Each host's result is checked as an edit of it in the host editor would be (§7.1–§7.5), so the same rules hold; a host it would break names itself in the error, and then no host changes. The user must be able to manage every host sent: one they can only use is refused (403), one they can't see is not found (404). The panel sends only the hosts the user can manage, and says how many it leaves out. Each changed host is audited as `host.update`, and open sessions are checked again (§7.10).
 
-Not yet: 1.x's bulk scan, and changing credentials' passwords and services in bulk.
+**Scanning them** (1.x's bulk scan), from the panel's **Scan…**, for the picked hosts the user can manage: each is scanned, one after another, with its first scanner (§7.26) that signs in with a saved credential, or a host-wide one (§7.41); a host with neither is skipped. What each scan found is shown under its host as the scan dialog shows it, the gaps it fills ticked, and the ones picked are applied as an edit of each host from the version scanned, so a host changed since is reported, not overwritten. A server key not trusted yet skips its host, unless the user asked to be asked, and then each key is offered with core's trust dialog (§7.7): a bulk scan never trusts a key by itself. Hosts for neighbours a scan saw are added one host's scan at a time.
+
+Not yet: changing credentials' passwords and services in bulk, and 1.x's one login for every host in a bulk scan.
 
 ## 8. The native install
 

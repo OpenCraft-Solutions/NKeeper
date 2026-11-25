@@ -1053,6 +1053,44 @@ describe('the workspace', () => {
     expect(screen.queryByRole('form', { name: 'Change the selected hosts' })).not.toBeInTheDocument()
   })
 
+  it('scans the picked hosts with their saved logins and applies what each found (1.x bulk scan)', async () => {
+    const plugin = terminalPlugin()
+    const both = [hosts[0], { ...hosts[1], services: [service({ id: 's2' })], credentials: [credential({ id: 'c2' })] }]
+    const fetch = signedIn({
+      'GET /api/hosts': both,
+      'GET /api/plugins': [
+        {
+          ...plugin,
+          hostActions: [...(plugin.hostActions ?? []), { id: 'term.scan', label: 'Scan', sessionType: null, endpoint: 'scan', serviceTypes: ['term'], credential: 'required', scan: true }],
+        },
+      ],
+      'POST /api/p/term/hosts/h1/scan': { macAddress: 'aa:bb:cc:dd:ee:ff', operatingSystem: 'Debian 12' },
+      'POST /api/p/term/hosts/h2/scan': () => problem(400, { code: 'host_key_unknown', detail: 'Not trusted.', presented: { hostId: 'h2', serviceId: 's2', algorithm: 'ssh-ed25519', fingerprint: 'abc' } }),
+      'PUT /api/hosts/h1': (init) => Response.json({ ...both[0], ...(JSON.parse(String(init?.body)) as object), version: 2 }),
+    })
+    const user = userEvent.setup()
+
+    render(<App importer={termImporter} />)
+    await user.click(await screen.findByRole('button', { name: /^web01,/ }))
+    await user.keyboard('{Control>}')
+    await user.click(screen.getByRole('button', { name: /^db01,/ }))
+    await user.keyboard('{/Control}')
+    await user.click(await screen.findByRole('button', { name: 'Scan…' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Scan 2 hosts' })
+    await user.click(within(dialog).getByRole('button', { name: 'Scan 2 hosts' }))
+
+    // db01's key isn't trusted, and nobody asked to be asked: it's skipped, never trusted.
+    const db = await within(dialog).findByRole('region', { name: 'db01' })
+    expect(within(db).getByText('Its server key isn’t trusted yet: skipped.')).toBeInTheDocument()
+    expect(fetch.mock.calls.some(([url]) => String(url).includes('/trusted-keys'))).toBe(false)
+    const web = within(dialog).getByRole('region', { name: 'web01' })
+    expect(within(web).getByRole('checkbox', { name: /MAC address/ })).toBeChecked()
+    await user.click(within(dialog).getByRole('button', { name: 'Apply' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Scan 2 hosts' })).not.toBeInTheDocument())
+    expect(bodyOf(fetch, 'PUT /api/hosts/h1')).toMatchObject({ macAddress: 'AA:BB:CC:DD:EE:FF', version: 1 })
+  })
+
   it('records the host a virtual machine runs on, offering none that runs on it (§7.49)', async () => {
     const fetch = signedIn({
       'GET /api/hosts': [hosts[0], { ...hosts[1], isVirtualMachine: false }, host({ id: 'h3', name: 'guest', isVirtualMachine: true, hypervisorId: 'h2' })],
