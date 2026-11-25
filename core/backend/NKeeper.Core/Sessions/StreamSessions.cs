@@ -134,6 +134,7 @@ internal sealed class StreamSessionRunner(HttpContext context, SessionSocket soc
         OpenSession? open = null;
         var audited = false;
         var hostName = string.Empty;
+        var size = (Columns: 80, Rows: 24);
         try
         {
             if (place is null)
@@ -144,6 +145,7 @@ internal sealed class StreamSessionRunner(HttpContext context, SessionSocket soc
             var start = await socket.ReceiveStartAsync(aborted);
             var (host, jumpHostId) = await AuthorizeAsync(start, user, aborted);
             hostName = host.Name;
+            size = TerminalSize(start.Options) ?? size;
             await socket.SendJsonAsync(new { type = "status", status = "connecting" }, aborted);
             var handle = await ResolveCredentialAsync(host, start, aborted);
 
@@ -182,7 +184,7 @@ internal sealed class StreamSessionRunner(HttpContext context, SessionSocket soc
             return;
         }
 
-        await RunOpenAsync(session, open, registry, hostName);
+        await RunOpenAsync(session, open, registry, hostName, size);
     }
 
     private static SessionStartException Revoked() =>
@@ -205,7 +207,15 @@ internal sealed class StreamSessionRunner(HttpContext context, SessionSocket soc
     }
 
     /// <summary>The plugin's data phase, until either side is done or core ends it.</summary>
-    private async Task RunOpenAsync(IStreamSession session, OpenSession open, SessionRegistry registry, string hostName)
+    /// <summary>A terminal's size as it opens, from its start options' <c>columns</c> and <c>rows</c> (§7.51).</summary>
+    private static (int Columns, int Rows)? TerminalSize(JsonElement? options) =>
+        options is { ValueKind: JsonValueKind.Object } o
+            && o.TryGetProperty("columns", out var c) && c.TryGetInt32(out var columns) && columns is > 0 and <= 1000
+            && o.TryGetProperty("rows", out var r) && r.TryGetInt32(out var rows) && rows is > 0 and <= 1000
+            ? (columns, rows)
+            : null;
+
+    private async Task RunOpenAsync(IStreamSession session, OpenSession open, SessionRegistry registry, string hostName, (int Columns, int Rows) size)
     {
         using var stop = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, open.Ended);
         using var channel = new SocketStreamChannel(socket);
@@ -215,7 +225,7 @@ internal sealed class StreamSessionRunner(HttpContext context, SessionSocket soc
         // A terminal is recorded for the audit log (§7.51): what it showed, never what was typed.
         var options = _services.GetRequiredService<Microsoft.Extensions.Options.IOptions<RecordingOptions>>().Value;
         using var recorder = sessionType.RecordsTerminal && options.MaxMegabytes > 0
-            ? new TerminalRecorder(80, 24, $"{sessionType.Label} {hostName}", options.MaxMegabytes * 1024L * 1024L, _services.GetRequiredService<TimeProvider>())
+            ? new TerminalRecorder(size.Columns, size.Rows, $"{sessionType.Label} {hostName}", options.MaxMegabytes * 1024L * 1024L, _services.GetRequiredService<TimeProvider>())
             : null;
         IStreamChannel pluginChannel = recorder is null ? channel : new RecordingStreamChannel(channel, recorder);
         try
