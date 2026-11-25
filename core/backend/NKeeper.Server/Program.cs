@@ -152,6 +152,7 @@ if (shell is not null)
 app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = StreamSessionEndpoints.KeepAliveInterval });
 app.UseNKeeperIdentity();
 app.UseMiddleware<NKeeper.Core.Access.HostScopeMiddleware>();
+app.UseMiddleware<NKeeper.Server.InstanceLockMiddleware>();
 
 // Liveness only: the process is up and serving requests.
 app.MapGet("/health/live", () => Results.Text("Healthy")).AllowAnonymous();

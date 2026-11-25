@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { api, ApiError } from '@nkeeper/sdk'
 import { Alert } from './ui/Alert'
 import { Button } from './ui/Button'
@@ -18,6 +18,13 @@ interface ImportPreview {
 
 const MIN_PASSPHRASE = 16
 
+/** `GET /api/transfer/status`: the lock after an export (§7.45). */
+interface TransferStatus {
+  locked: boolean
+  lockedAtUtc: string | null
+  lockedBy: string | null
+}
+
 function messageOf(error: unknown, fallback: string): string {
   if (error instanceof ApiError) {
     const errors = (error.problem as { errors?: Record<string, string[]> } | undefined)?.errors
@@ -31,6 +38,27 @@ function messageOf(error: unknown, fallback: string): string {
  * file encrypted with a passphrase, or import one into this fresh instance.
  */
 export function TransferPanel() {
+  const [status, setStatus] = useState<TransferStatus | null>(null)
+  const [unlocking, setUnlocking] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const reload = useCallback(() => {
+    api.get<TransferStatus>('/api/transfer/status').then(setStatus, () => setStatus(null))
+  }, [])
+  useEffect(reload, [reload])
+
+  async function unlock() {
+    setUnlocking(true)
+    setError(null)
+    try {
+      await api.post('/api/transfer/unlock')
+      reload()
+    } catch (e) {
+      setError(messageOf(e, 'It couldn’t be unlocked.'))
+    } finally {
+      setUnlocking(false)
+    }
+  }
+
   return (
     <section className={page.panel} aria-label="Move this instance">
       <div>
@@ -40,14 +68,28 @@ export function TransferPanel() {
           with the new server’s own key. Plugins aren’t in the file: install them on the new server from its catalog.
         </p>
       </div>
-      <Export />
+      {error ? <Alert>{error}</Alert> : null}
+      {status?.locked ? (
+        <Alert variant="warning">
+          <p>
+            Locked{status.lockedBy ? ` by ${status.lockedBy}` : ''}
+            {status.lockedAtUtc ? ` on ${new Date(status.lockedAtUtc).toLocaleString()}` : ''}, after an export: hosts and users can’t be changed here, so nothing is
+            changed that the new server would never get. Connecting to hosts still works.
+          </p>
+          <Button size="sm" variant="secondary" loading={unlocking} onClick={() => void unlock()}>
+            Unlock
+          </Button>
+        </Alert>
+      ) : null}
+      <Export onExported={reload} />
       <Import />
     </section>
   )
 }
 
-function Export() {
+function Export({ onExported }: { onExported: () => void }) {
   const [password, setPassword] = useState('')
+  const [lock, setLock] = useState(true)
   const [passphrase, setPassphrase] = useState('')
   const [confirmation, setConfirmation] = useState('')
   const [busy, setBusy] = useState(false)
@@ -59,7 +101,7 @@ function Export() {
     setError(null)
     setDone(false)
     try {
-      const blob = await api.post<Blob>('/api/transfer/export', { password, passphrase, passphraseConfirmation: confirmation }, { responseType: 'blob' })
+      const blob = await api.post<Blob>('/api/transfer/export', { password, passphrase, passphraseConfirmation: confirmation, lockAfterExport: lock }, { responseType: 'blob' })
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = url
@@ -68,6 +110,7 @@ function Export() {
       URL.revokeObjectURL(url)
       setPassword('')
       setDone(true)
+      onExported()
     } catch (e) {
       setError(messageOf(e, 'The export failed.'))
     } finally {
@@ -97,6 +140,10 @@ function Export() {
       </label>{' '}
       <label className={page.hint}>
         Passphrase again <input type="password" autoComplete="new-password" value={confirmation} onChange={(e) => setConfirmation(e.target.value)} />
+      </label>{' '}
+      <label className={page.hint}>
+        <input type="checkbox" checked={lock} onChange={(e) => setLock(e.target.checked)} /> Lock this instance afterwards, so hosts and users aren’t changed here by
+        mistake
       </label>{' '}
       <Button type="submit" size="sm" variant="secondary" loading={busy} disabled={!password || passphrase.length < MIN_PASSPHRASE || passphrase !== confirmation}>
         Export

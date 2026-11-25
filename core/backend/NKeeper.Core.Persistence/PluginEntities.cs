@@ -22,6 +22,22 @@ public sealed class PluginIntegrationBinding
 }
 
 /// <summary>A plugin's settings document and its schema version (§7.39).</summary>
+/// <summary>
+/// The instance's lock after an export to move it (docs/architecture.md §7.45, from 1.x): while the row exists, hosts and
+/// users can't be changed here, so nothing is changed that the new server would never get. Sessions still work.
+/// </summary>
+public sealed class InstanceLockRow
+{
+    /// <summary>Always 1: there's one lock.</summary>
+    public int Id { get; set; } = 1;
+
+    public DateTimeOffset LockedAtUtc { get; set; }
+
+    public Guid? LockedByUserId { get; set; }
+
+    public string LockedBy { get; set; } = string.Empty;
+}
+
 public sealed class PluginSettingsRow
 {
     public string PluginId { get; set; } = string.Empty;

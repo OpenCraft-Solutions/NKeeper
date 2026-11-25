@@ -840,6 +840,33 @@ namespace NKeeper.Core.Persistence.Migrations
                     b.ToTable("installed_plugins", "core");
                 });
 
+            modelBuilder.Entity("NKeeper.Core.Persistence.InstanceLockRow", b =>
+                {
+                    b.Property<int>("Id")
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("LockedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("locked_at_utc");
+
+                    b.Property<string>("LockedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("locked_by");
+
+                    b.Property<Guid?>("LockedByUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("locked_by_user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LockedByUserId");
+
+                    b.ToTable("instance_lock", "core");
+                });
+
             modelBuilder.Entity("NKeeper.Core.Persistence.PluginIntegrationBinding", b =>
                 {
                     b.Property<string>("PluginId")
@@ -1060,6 +1087,14 @@ namespace NKeeper.Core.Persistence.Migrations
                     b.HasOne("NKeeper.Core.Persistence.ApplicationUser", null)
                         .WithMany()
                         .HasForeignKey("TrustedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+                });
+
+            modelBuilder.Entity("NKeeper.Core.Persistence.InstanceLockRow", b =>
+                {
+                    b.HasOne("NKeeper.Core.Persistence.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("LockedByUserId")
                         .OnDelete(DeleteBehavior.SetNull);
                 });
 

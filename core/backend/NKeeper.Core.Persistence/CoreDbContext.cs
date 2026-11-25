@@ -92,6 +92,8 @@ public sealed class CoreDbContext(DbContextOptions<CoreDbContext> options)
 
     public DbSet<HostDataRow> HostData => Set<HostDataRow>();
 
+    public DbSet<InstanceLockRow> InstanceLock => Set<InstanceLockRow>();
+
     /// <summary>Configures Npgsql for the core context, with its migration history inside the core schema.</summary>
     public static DbContextOptions<CoreDbContext> CreateOptions(string connectionString)
     {
@@ -216,6 +218,14 @@ public sealed class CoreDbContext(DbContextOptions<CoreDbContext> options)
             settings.Property(s => s.PluginId).HasMaxLength(128);
             settings.Property(s => s.Data).HasColumnType("jsonb");
             settings.HasOne<ApplicationUser>().WithMany().HasForeignKey(s => s.UpdatedByUserId).OnDelete(DeleteBehavior.SetNull);
+        });
+        builder.Entity<InstanceLockRow>(row =>
+        {
+            row.ToTable("instance_lock");
+            row.HasKey(r => r.Id);
+            row.Property(r => r.Id).ValueGeneratedNever();
+            row.Property(r => r.LockedBy).HasMaxLength(256);
+            row.HasOne<ApplicationUser>().WithMany().HasForeignKey(r => r.LockedByUserId).OnDelete(DeleteBehavior.SetNull);
         });
         builder.Entity<HostDataRow>(data =>
         {

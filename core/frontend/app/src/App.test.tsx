@@ -422,12 +422,21 @@ const ADMIN_PASSWORD_FOR_TEST = 'Admin-Passw0rd-1'
 
 describe('moving an instance', () => {
   it('exports with the administrator’s password and a long passphrase, and checks a file before importing it', async () => {
+    let locked = false
     const fetch = fakeApi({
       'GET /api/auth/me': ADMIN,
       'GET /api/plugins': [],
       'GET /api/hosts': [],
       'GET /api/health': [],
-      'POST /api/transfer/export': () => new Response(new Blob(['NKEEPERB']), { status: 200 }),
+      'GET /api/transfer/status': () => Response.json(locked ? { locked: true, lockedAtUtc: '2026-11-25T10:00:00Z', lockedBy: 'admin' } : { locked: false, lockedAtUtc: null, lockedBy: null }),
+      'POST /api/transfer/unlock': () => {
+        locked = false
+        return new Response(null, { status: 204 })
+      },
+      'POST /api/transfer/export': () => {
+        locked = true
+        return new Response(new Blob(['NKEEPERB']), { status: 200 })
+      },
       'POST /api/transfer/import/preview': {
         exportedAtUtc: '2026-11-18T12:00:00Z',
         exportedBy: 'admin',
@@ -454,7 +463,17 @@ describe('moving an instance', () => {
     await user.type(within(exporting).getByLabelText('Passphrase again'), 'correct horse battery staple')
     await user.click(within(exporting).getByRole('button', { name: 'Export' }))
     expect(await within(exporting).findByText(/Exported\./)).toBeInTheDocument()
-    expect(bodyOf(fetch, 'POST /api/transfer/export')).toEqual({ password: ADMIN_PASSWORD_FOR_TEST, passphrase: 'correct horse battery staple', passphraseConfirmation: 'correct horse battery staple' })
+    expect(bodyOf(fetch, 'POST /api/transfer/export')).toEqual({
+      password: ADMIN_PASSWORD_FOR_TEST,
+      passphrase: 'correct horse battery staple',
+      passphraseConfirmation: 'correct horse battery staple',
+      lockAfterExport: true,
+    })
+    // Locked after the export (1.x), until unlocked.
+    const panel = screen.getByRole('region', { name: 'Move this instance' })
+    expect(await within(panel).findByText(/Locked by admin/)).toBeInTheDocument()
+    await user.click(within(panel).getByRole('button', { name: 'Unlock' }))
+    await waitFor(() => expect(within(panel).queryByText(/Locked by admin/)).not.toBeInTheDocument())
 
     const importing = screen.getByRole('form', { name: 'Import' })
     await user.upload(within(importing).getByLabelText('Export file'), new File(['NKEEPERB'], 'old.nkeeper'))
