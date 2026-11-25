@@ -153,5 +153,18 @@ export interface ScanFindings {
   ports?: { port: number; name?: string | null; serviceType?: string | null }[]
   users?: { username: string; fullName?: string | null }[]
   neighbors?: { ipAddress: string; macAddress?: string | null }[]
+  /** SDK 1.15: a hypervisor's virtual machines (§7.49). */
+  guests?: ScannedGuest[]
   notes?: string[]
+}
+
+/** A virtual machine a hypervisor's scan found (SDK 1.15). `node` names the cluster node it runs on; null for the scanned host. */
+export interface ScannedGuest {
+  name: string
+  state?: string | null
+  macAddresses?: string[] | null
+  ipAddresses?: string[] | null
+  cpuCores?: number | null
+  memoryMiB?: number | null
+  node?: string | null
 }

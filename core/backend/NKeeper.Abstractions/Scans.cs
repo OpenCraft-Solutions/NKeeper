@@ -38,6 +38,12 @@ public sealed record ScanFindings
     /// <summary>Machines in the host's neighbour (ARP/NDP) table, read without probing anything.</summary>
     public IReadOnlyList<ScannedNeighbor> Neighbors { get; init; } = [];
 
+    /// <summary>
+    /// For a hypervisor (SDK 1.15, docs/architecture.md §7.49): the virtual machines it runs, or a cluster's. The shell
+    /// proposes linking each to the host it matches, as running here, or adding a host for it.
+    /// </summary>
+    public IReadOnlyList<ScannedGuest> Guests { get; init; } = [];
+
     /// <summary>How values were found, and what couldn't be read.</summary>
     public IReadOnlyList<string> Notes { get; init; } = [];
 }
@@ -49,3 +55,20 @@ public sealed record ScannedPort(int Port, string? Name = null, string? ServiceT
 public sealed record ScannedUser(string Username, string? FullName = null);
 
 public sealed record ScannedNeighbor(string IpAddress, string? MacAddress = null);
+
+/// <summary>A virtual machine (or container) a hypervisor runs, as the hypervisor reports it (SDK 1.15).</summary>
+/// <param name="Name">The hypervisor's name for it.</param>
+/// <param name="State">The hypervisor's word for its state, such as <c>running</c>.</param>
+/// <param name="MacAddresses">Its network interfaces' MAC addresses, the surest way to tell which host it is.</param>
+/// <param name="IpAddresses">Addresses the hypervisor knows it has (a guest agent's, or a lease).</param>
+/// <param name="CpuCores">The vCPUs it's given.</param>
+/// <param name="MemoryMiB">The memory it's given.</param>
+/// <param name="Node">For a cluster: the name of the node it runs on; null for the scanned host itself.</param>
+public sealed record ScannedGuest(
+    string Name,
+    string? State = null,
+    IReadOnlyList<string>? MacAddresses = null,
+    IReadOnlyList<string>? IpAddresses = null,
+    int? CpuCores = null,
+    int? MemoryMiB = null,
+    string? Node = null);

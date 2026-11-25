@@ -13,7 +13,7 @@ import { Spinner } from './ui/Spinner'
 
 type Step = { kind: 'choose' } | { kind: 'running' } | { kind: 'results'; proposals: ScanProposal[]; picked: Set<string>; notes: string[] } | { kind: 'applying' }
 
-const GROUPS: ScanProposal['group'][] = ['Host', 'Services', 'Logins', 'New hosts']
+const GROUPS: ScanProposal['group'][] = ['Host', 'Services', 'Logins', 'Virtual machines', 'New hosts']
 
 /**
  * Tasks ▸ Scan (docs/architecture.md §7.26): runs a plugin's scan on one of the host's services, then shows what it
@@ -32,8 +32,8 @@ export function ScanDialog({
   catalog: Catalog
   canCreateHosts: boolean
   onClose: () => void
-  /** What was saved: the host, if it changed, and the hosts added. Called before closing, and after a partial failure. */
-  onApplied: (updated: Host | null, created: Host[]) => void
+  /** What was saved: the host, if it changed, the hosts added, and other hosts changed (its guests, §7.49). Called before closing, and after a partial failure. */
+  onApplied: (updated: Host | null, created: Host[], others?: Host[]) => void
 }) {
   const dialogs = useDialogs()
   const choices = connectMenu(host, catalog, true).flatMap((group) => group.entries.map((entry) => ({ group, entry })))
@@ -100,6 +100,7 @@ export function ScanDialog({
     setStep({ kind: 'applying' })
     let updated: Host | null = null
     const created: Host[] = []
+    const others: Host[] = []
     try {
       if (edits.length > 0) {
         // From the version the dialog opened with, so an edit made since is a conflict rather than lost.
@@ -112,11 +113,19 @@ export function ScanDialog({
           created.push(await api.post<Host>('/api/hosts', { ...p.newHost, tags: [], services: [], credentials: [] }))
         }
       }
-      onApplied(updated, created)
+      // Each guest found is an edit of its own host, from the version the dialog opened with.
+      for (const p of chosen) {
+        if (p.other) {
+          const draft = draftOf(p.other.host)
+          p.other.apply(draft)
+          others.push(await api.put<Host>(`/api/hosts/${p.other.host.id}`, requestOf(draft, p.other.host.version)))
+        }
+      }
+      onApplied(updated, created, others)
       onClose()
     } catch (failure) {
-      if (updated || created.length > 0) {
-        onApplied(updated, created)
+      if (updated || created.length > 0 || others.length > 0) {
+        onApplied(updated, created, others)
       }
       const conflict = failure instanceof ApiError && failure.status === 409 && failure.code === 'version_conflict'
       setError(conflict ? 'Someone else changed this host since the scan started. Close this, and scan again.' : failure instanceof ApiError ? failure.message : 'The changes could not be saved.')

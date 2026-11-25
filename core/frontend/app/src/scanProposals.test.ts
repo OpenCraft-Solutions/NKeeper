@@ -102,4 +102,49 @@ describe('scan proposals', () => {
     ])
     expect(scanProposals(h, findings, types, [h, other], false).some((p) => p.newHost)).toBe(false)
   })
+
+  it('links a hypervisor’s guests to the hosts they are, by MAC, address or name, and offers hosts for the rest (§7.49)', () => {
+    const kvm = host({ id: 'kvm', name: 'kvm01' })
+    const node2 = host({ id: 'n2', name: 'pve2', hostname: 'pve2.lab.example' })
+    const byMac = host({ id: 'a', name: 'web01', macAddress: 'AA:BB:CC:00:00:01' })
+    const byIp = host({ id: 'b', name: 'db01', ipAddress: '192.0.2.31' })
+    const byName = host({ id: 'c', name: 'mail', ipAddress: null, hostname: 'mail.lab.example' })
+    const elsewhere = host({ id: 'd', name: 'moved', isVirtualMachine: true, hypervisorId: 'n2' })
+    const done = host({ id: 'e', name: 'same', isVirtualMachine: true, hypervisorId: 'kvm', cpuCores: 2 })
+    const theirs = host({ id: 'f', name: 'theirs', canManage: false })
+    const all = [kvm, node2, byMac, byIp, byName, elsewhere, done, theirs]
+
+    const proposals = scanProposals(
+      kvm,
+      {
+        guests: [
+          { name: 'vm-web', macAddresses: ['aa:bb:cc:00:00:01'], cpuCores: 4, memoryMiB: 8192 },
+          { name: 'vm-db', ipAddresses: ['192.0.2.31'] },
+          { name: 'mail' },
+          { name: 'moved' },
+          { name: 'same', cpuCores: 2 },
+          { name: 'theirs' },
+          { name: 'new-vm', ipAddresses: ['192.0.2.77'], macAddresses: ['aa:bb:cc:00:00:09'], cpuCores: 1, memoryMiB: 1024, node: 'pve2' },
+          { name: 'no-address' },
+        ],
+      },
+      types,
+      all,
+      true,
+    )
+
+    expect(proposals.map((p) => [p.key, p.detail, p.checked])).toEqual([
+      ['guest-a', 'runs on kvm01 · 4 vCPUs · 8 GiB', true],
+      ['guest-b', 'runs on kvm01', true],
+      ['guest-c', 'runs on kvm01', true],
+      // Recorded on another hypervisor: moved only when ticked.
+      ['guest-d', 'runs on kvm01 (now pve2)', false],
+      ['guest-new-new-vm', 'a VM on pve2 at 192.0.2.77 · 1 vCPU · 1 GiB', false],
+    ])
+
+    const draft = draftOf(byMac)
+    proposals[0]!.other!.apply(draft)
+    expect(requestOf(draft, byMac.version)).toMatchObject({ isVirtualMachine: true, hypervisorId: 'kvm', cpuCores: 4, memoryMiB: 8192 })
+    expect(proposals.at(-1)!.newHost).toMatchObject({ name: 'new-vm', ipAddress: '192.0.2.77', macAddress: 'AA:BB:CC:00:00:09', isVirtualMachine: true, hypervisorId: 'n2' })
+  })
 })
