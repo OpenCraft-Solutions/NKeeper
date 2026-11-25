@@ -1357,6 +1357,22 @@ The link is set by hand for now. 1.x's hypervisor scans also linked the VMs they
 - then physical hosts that run no VMs, with their serial numbers, and VMs whose host isn't known.
 - It downloads as CSV, one row per host, VMs after their hypervisor; values a spreadsheet would run as a formula are kept as text.
 
+### 7.50 Changing several hosts at once
+
+1.x's bulk edit, ported from `HostManager.BulkUpdateAsync` and `BulkEditPanel`.
+
+**Picking hosts**, in the tree, as 1.x did: Ctrl/⌘+click adds a host or takes it out, Shift+click adds every host shown from the last one picked, Ctrl/⌘+A picks every host shown (folded groups' hosts aren't), and Escape goes back to the one host. With two or more picked, each shows a check, and the details pane becomes the bulk edit panel.
+
+**The changes**, each with how many of the picked hosts it changes as it's typed:
+- **tags:** add a tag, set one (replacing every value of its name), or remove one (one value, or every value of the name);
+- **runs on** (§7.49): leave it, clear it, or a host, which makes the picked hosts virtual machines running on it;
+- **services:** add one of a type, on a port or the type's default, with its default settings, to each host that hasn't the type on that port; or remove the type's services, on a port or all of them;
+- **credentials:** add an account, with a password, used with all of each host's services, to each host that hasn't it; or remove the account with a user name (in a domain, or any).
+
+**Applying them** is `POST /api/hosts/bulk`: the hosts, and the changes, applied to each in that order. Each host's result is checked as an edit of it in the host editor would be (§7.1–§7.5), so the same rules hold; a host it would break names itself in the error, and then no host changes. The user must be able to manage every host sent: one they can only use is refused (403), one they can't see is not found (404). The panel sends only the hosts the user can manage, and says how many it leaves out. Each changed host is audited as `host.update`, and open sessions are checked again (§7.10).
+
+Not yet: 1.x's bulk scan, and changing credentials' passwords and services in bulk.
+
 ## 8. The native install
 
 `deploy/setup.sh` installs NKeeper on a Linux server, from a checkout of the repository, as root. It's an early version of the Phase 6 installer (v2-plan.md §8). NKeeper installs natively only (D8): systemd, nginx and PostgreSQL, no containers.

@@ -94,3 +94,8 @@ export function healthSummary(host: Host, health: Map<string, ServiceHealth>): H
   const down = known.filter((h) => h.state === 'down').length
   return down === 0 ? 'up' : down === known.length ? 'down' : 'partial'
 }
+
+/** The hosts in the order the tree shows them, leaving out folded groups'. */
+export function shownOrder(groups: HostGroup[], grouped: boolean, collapsed: Set<string>): Host[] {
+  return groups.flatMap((group) => (grouped && collapsed.has(group.key) ? [] : group.hosts))
+}

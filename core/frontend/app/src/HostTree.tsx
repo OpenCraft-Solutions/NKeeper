@@ -1,4 +1,4 @@
-import type { CSSProperties } from 'react'
+import type { CSSProperties, KeyboardEvent } from 'react'
 import type { Catalog } from './catalog'
 import { healthSummary, hostAddress, type HealthSummary, type HostGroup } from './hosts'
 import type { Host, ServiceHealth } from './types'
@@ -11,9 +11,13 @@ const HEALTH_LABELS: Record<Exclude<HealthSummary, 'unknown'>, string> = {
   down: 'Not answering',
 }
 
+/** How a click picks hosts (1.x): one, one more or less (Ctrl/⌘), or every one from the last (Shift). */
+export type SelectMode = 'single' | 'toggle' | 'range'
+
 /**
  * The host tree (docs/architecture.md §7.14), as 1.x drew it: groups that fold, and per host its health, name,
- * address and first service. Selecting, double-clicking and right-clicking are the workspace's.
+ * address and first service. Selecting, double-clicking and right-clicking are the workspace's; so is picking several
+ * hosts to change together (§7.50), with Ctrl/⌘+click, Shift+click, Ctrl/⌘+A and Escape.
  */
 export function HostTree({
   groups,
@@ -23,8 +27,11 @@ export function HostTree({
   health,
   catalog,
   selectedId,
+  picked,
   menuHostId,
   onSelect,
+  onSelectAll,
+  onClearPicked,
   onActivate,
   onContextMenu,
 }: {
@@ -36,9 +43,13 @@ export function HostTree({
   health: Map<string, ServiceHealth>
   catalog: Catalog
   selectedId: string | null
+  /** The hosts picked to change together; a single host is a selection, not this. */
+  picked: Set<string>
   /** The host whose menu is open, highlighted while it is. */
   menuHostId: string | null
-  onSelect: (host: Host) => void
+  onSelect: (host: Host, mode: SelectMode) => void
+  onSelectAll: () => void
+  onClearPicked: () => void
   onActivate: (host: Host) => void
   onContextMenu: (host: Host, x: number, y: number) => void
 }) {
@@ -50,18 +61,25 @@ export function HostTree({
         <button
           type="button"
           data-host-id={host.id}
-          className={`${styles.host} ${host.id === menuHostId ? styles.menuOpen : ''}`}
+          className={`${styles.host} ${host.id === menuHostId ? styles.menuOpen : ''} ${picked.has(host.id) ? styles.bulk : ''}`}
           style={{ '--depth': depth } as CSSProperties}
-          aria-label={[host.name, hostAddress(host), summary === 'unknown' ? null : HEALTH_LABELS[summary]].filter(Boolean).join(', ')}
-          aria-current={host.id === selectedId ? 'true' : undefined}
+          aria-label={[host.name, hostAddress(host), summary === 'unknown' ? null : HEALTH_LABELS[summary], picked.has(host.id) ? 'selected' : null].filter(Boolean).join(', ')}
+          aria-current={host.id === selectedId && picked.size === 0 ? 'true' : undefined}
           aria-haspopup="menu"
-          onClick={() => onSelect(host)}
+          // Keep Shift+click from selecting the page's text.
+          onMouseDown={(event) => event.shiftKey && event.preventDefault()}
+          onClick={(event) => onSelect(host, event.shiftKey ? 'range' : event.ctrlKey || event.metaKey ? 'toggle' : 'single')}
           onDoubleClick={() => onActivate(host)}
           onContextMenu={(event) => {
             event.preventDefault()
             onContextMenu(host, event.clientX, event.clientY)
           }}
         >
+          {picked.has(host.id) && (
+            <svg className={styles.check} viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
+              <path d="M2.5 6.5 5 9l4.5-6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          )}
           {summary !== 'unknown' && (
             <span className={`${styles.health} ${styles[summary]}`} title={HEALTH_LABELS[summary]} role="img" aria-label={HEALTH_LABELS[summary]} />
           )}
@@ -81,7 +99,7 @@ export function HostTree({
   }
 
   return (
-    <ul className={styles.tree} aria-label="Hosts">
+    <ul className={styles.tree} aria-label="Hosts" onKeyDown={(event: KeyboardEvent) => keys(event, onSelectAll, onClearPicked)}>
       {grouped
         ? groups.map((group) => {
             const expanded = !collapsed.has(group.key)
@@ -101,4 +119,14 @@ export function HostTree({
         : groups.flatMap((group) => group.hosts.map((host) => hostRow(host, 0)))}
     </ul>
   )
+}
+
+/** 1.x's keys for picking hosts: Ctrl/⌘+A picks every host shown, Escape none. */
+function keys(event: KeyboardEvent, onSelectAll: () => void, onClearPicked: () => void) {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') {
+    event.preventDefault()
+    onSelectAll()
+  } else if (event.key === 'Escape') {
+    onClearPicked()
+  }
 }
