@@ -420,12 +420,19 @@ public sealed class StreamSessionTests(PostgresFixture postgres, SshServerFixtur
         {
             await session.SendAsync(new { type = "start", hostId = Id(host), serviceId = ServiceId(host), options = new { columns = 100, rows = 30 } });
             await session.ExpectAsync("connected");
+            // A resize with dimensions of the wrong kind isn't recorded, and doesn't break the session.
+            await session.SendAsync(new { type = "resize", columns = "120", rows = true });
+            await session.ExpectAsync("echo");
             await session.SendAsync(new { type = "resize", columns = 120, rows = 40 });
             await session.ExpectAsync("echo");
             await session.SendAsync(new { type = "secret", text = "not-recorded" });
             await session.ExpectAsync("echo");
             await session.SendBinaryAsync("héllo\r\n"u8.ToArray());
             await session.ReceiveBinaryAsync();
+
+            // The plugin ends it, as a shell exiting does: the browser still hears why, after the recording is saved.
+            await session.SendAsync(new { type = "bye" });
+            Assert.Equal("closed", (await session.ExpectAsync("closed")).GetProperty("reason").GetString());
         }
 
         await WaitForAsync(async () => (await admin.GetFromJsonAsync<JsonElement>("/api/audit/recordings", Token)).GetArrayLength() == 1);

@@ -917,6 +917,12 @@ public sealed class HelloSessionHandler(IConnectivity connectivity) : IStreamSes
         {
             while (await channel.ReceiveAsync(cancellationToken) is { } frame)
             {
+                if (frame.IsText && System.Text.Encoding.UTF8.GetString(frame.Data.Span).Contains("\"bye\"", StringComparison.Ordinal))
+                {
+                    // The session ends by itself, as a terminal whose shell exits does.
+                    return;
+                }
+
                 if (frame.IsText)
                 {
                     await channel.SendTextAsync($$"""{"type":"echo","host":{{System.Text.Json.JsonSerializer.Serialize(hostName)}},"text":{{System.Text.Json.JsonSerializer.Serialize(System.Text.Encoding.UTF8.GetString(frame.Data.Span))}}}""", cancellationToken);

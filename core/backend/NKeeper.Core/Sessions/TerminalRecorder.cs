@@ -154,8 +154,8 @@ internal sealed class RecordingStreamChannel(IStreamChannel inner, TerminalRecor
             var root = document.RootElement;
             return root.ValueKind == JsonValueKind.Object
                 && root.TryGetProperty("type", out var type) && type.ValueKind == JsonValueKind.String && type.GetString() == "resize"
-                && root.TryGetProperty("columns", out var c) && c.TryGetInt32(out var columns) && columns is > 0 and <= 1000
-                && root.TryGetProperty("rows", out var r) && r.TryGetInt32(out var rows) && rows is > 0 and <= 1000
+                && root.TryGetProperty("columns", out var c) && c.ValueKind == JsonValueKind.Number && c.TryGetInt32(out var columns) && columns is > 0 and <= 1000
+                && root.TryGetProperty("rows", out var r) && r.ValueKind == JsonValueKind.Number && r.TryGetInt32(out var rows) && rows is > 0 and <= 1000
                 ? (columns, rows)
                 : null;
         }
