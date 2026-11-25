@@ -27,7 +27,12 @@ public sealed class HelloPlugin : IPlugin
     public void Contribute(IPluginContributions contributions, PluginContext context)
     {
         // Opens on its own service type, so packages of this plugin under different IDs don't collide here either.
-        contributions.AddSessionType(new SessionType(context.Id, "Hello session", typeof(HelloSessionHandler)) { ServiceTypes = [context.Id] });
+        // A terminal core records (SDK 1.16) when its settings say so: its binary frames are what it shows.
+        contributions.AddSessionType(new SessionType(context.Id, "Hello session", typeof(HelloSessionHandler))
+        {
+            ServiceTypes = [context.Id],
+            RecordsTerminal = context.Configuration["RecordsTerminal"] == "true",
+        });
         contributions.AddHostAction(new HostAction($"{context.Id}.open", "Open", SessionType: context.Id) { Credential = HostActionCredential.None });
 
         // An integration (SDK 1.13): an outside system on this plugin's own service type.

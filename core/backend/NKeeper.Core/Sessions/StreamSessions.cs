@@ -133,6 +133,7 @@ internal sealed class StreamSessionRunner(HttpContext context, SessionSocket soc
         IStreamSession? session = null;
         OpenSession? open = null;
         var audited = false;
+        var hostName = string.Empty;
         try
         {
             if (place is null)
@@ -142,6 +143,7 @@ internal sealed class StreamSessionRunner(HttpContext context, SessionSocket soc
 
             var start = await socket.ReceiveStartAsync(aborted);
             var (host, jumpHostId) = await AuthorizeAsync(start, user, aborted);
+            hostName = host.Name;
             await socket.SendJsonAsync(new { type = "status", status = "connecting" }, aborted);
             var handle = await ResolveCredentialAsync(host, start, aborted);
 
@@ -180,7 +182,7 @@ internal sealed class StreamSessionRunner(HttpContext context, SessionSocket soc
             return;
         }
 
-        await RunOpenAsync(session, open, registry);
+        await RunOpenAsync(session, open, registry, hostName);
     }
 
     private static SessionStartException Revoked() =>
@@ -203,15 +205,22 @@ internal sealed class StreamSessionRunner(HttpContext context, SessionSocket soc
     }
 
     /// <summary>The plugin's data phase, until either side is done or core ends it.</summary>
-    private async Task RunOpenAsync(IStreamSession session, OpenSession open, SessionRegistry registry)
+    private async Task RunOpenAsync(IStreamSession session, OpenSession open, SessionRegistry registry, string hostName)
     {
         using var stop = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, open.Ended);
         using var channel = new SocketStreamChannel(socket);
         var pump = channel.PumpAsync();
         var reason = SessionEndReasons.Closed;
+
+        // A terminal is recorded for the audit log (§7.51): what it showed, never what was typed.
+        var options = _services.GetRequiredService<Microsoft.Extensions.Options.IOptions<RecordingOptions>>().Value;
+        using var recorder = sessionType.RecordsTerminal && options.MaxMegabytes > 0
+            ? new TerminalRecorder(80, 24, $"{sessionType.Label} {hostName}", options.MaxMegabytes * 1024L * 1024L, _services.GetRequiredService<TimeProvider>())
+            : null;
+        IStreamChannel pluginChannel = recorder is null ? channel : new RecordingStreamChannel(channel, recorder);
         try
         {
-            var run = session.RunAsync(channel, stop.Token);
+            var run = session.RunAsync(pluginChannel, stop.Token);
 
             // The browser closing, or core ending it, stops the plugin. One that doesn't stop when told is given
             // a few seconds, then left behind, so it can't hold the session open.
@@ -247,6 +256,11 @@ internal sealed class StreamSessionRunner(HttpContext context, SessionSocket soc
         }
 
         await AuditCloseAsync(open, reason);
+        if (recorder is not null)
+        {
+            await SaveRecordingAsync(recorder, open, hostName);
+        }
+
         try
         {
             // The pump, still reading, receives the browser's answer to our close. A browser that stops reading,
@@ -268,6 +282,48 @@ internal sealed class StreamSessionRunner(HttpContext context, SessionSocket soc
         }
 
         await pump;
+    }
+
+    /// <summary>Keeps what the terminal showed, and deletes recordings past their retention. A failure loses the recording, not the session's end.</summary>
+    private async Task SaveRecordingAsync(TerminalRecorder recorder, OpenSession open, string hostName)
+    {
+        if (!recorder.HasOutput)
+        {
+            return;
+        }
+
+        try
+        {
+            var db = _services.GetRequiredService<CoreDbContext>();
+            var time = _services.GetRequiredService<TimeProvider>();
+            var options = _services.GetRequiredService<Microsoft.Extensions.Options.IOptions<RecordingOptions>>().Value;
+            var recording = new SessionRecording
+            {
+                Id = Guid.NewGuid(),
+                SessionId = open.Id,
+                UserId = open.UserId,
+                UserName = context.User.Identity?.Name ?? string.Empty,
+                HostId = open.HostId,
+                HostName = hostName,
+                SessionType = sessionType.Id,
+                StartedAtUtc = recorder.StartedAtUtc,
+                EndedAtUtc = time.GetUtcNow(),
+                Size = recorder.Size,
+                Truncated = recorder.Truncated,
+                Data = recorder.Finish(),
+            };
+            db.SessionRecordings.Add(recording);
+            await db.SaveChangesAsync(CancellationToken.None);
+            if (options.RetentionDays > 0)
+            {
+                var before = time.GetUtcNow().AddDays(-options.RetentionDays);
+                await db.SessionRecordings.Where(r => r.StartedAtUtc < before).ExecuteDeleteAsync(CancellationToken.None);
+            }
+        }
+        catch (Exception ex) when (ex is DbUpdateException or InvalidOperationException or Npgsql.NpgsqlException)
+        {
+            _logger.LogError(ex, "The recording of session {SessionId} couldn't be saved", open.Id);
+        }
     }
 
     /// <summary>Whether <paramref name="task"/> finishes within <paramref name="limit"/>. If not, its failure is observed when it comes.</summary>
@@ -517,6 +573,7 @@ public static class StreamSessionServices
             .AddSingleton<SessionRegistry>()
             .AddScoped<SessionAccessCheck>()
             .AddScoped<IPluginSessions, PluginSessions>()
-            .AddHostedService<SessionSweeper>();
+            .AddHostedService<SessionSweeper>()
+            .AddOptions<RecordingOptions>().BindConfiguration(RecordingOptions.Section).Services;
     }
 }

@@ -26,6 +26,40 @@ public sealed class PluginIntegrationBinding
 /// The instance's lock after an export to move it (docs/architecture.md §7.45, from 1.x): while the row exists, hosts and
 /// users can't be changed here, so nothing is changed that the new server would never get. Sessions still work.
 /// </summary>
+/// <summary>
+/// What a terminal session showed (docs/architecture.md §7.51, from 1.x): an asciicast v2 file, gzipped. Kept for the
+/// audit log's retention of recordings, then deleted.
+/// </summary>
+public sealed class SessionRecording
+{
+    public Guid Id { get; set; }
+
+    /// <summary>The session's ID in the session registry.</summary>
+    public Guid SessionId { get; set; }
+
+    public Guid? UserId { get; set; }
+
+    public string UserName { get; set; } = string.Empty;
+
+    public Guid? HostId { get; set; }
+
+    public string HostName { get; set; } = string.Empty;
+
+    public string SessionType { get; set; } = string.Empty;
+
+    public DateTimeOffset StartedAtUtc { get; set; }
+
+    public DateTimeOffset EndedAtUtc { get; set; }
+
+    /// <summary>The asciicast's size before compression.</summary>
+    public long Size { get; set; }
+
+    /// <summary>It reached the size limit, so the rest of the session wasn't recorded.</summary>
+    public bool Truncated { get; set; }
+
+    public byte[] Data { get; set; } = [];
+}
+
 public sealed class InstanceLockRow
 {
     /// <summary>Always 1: there's one lock.</summary>

@@ -94,6 +94,8 @@ public sealed class CoreDbContext(DbContextOptions<CoreDbContext> options)
 
     public DbSet<InstanceLockRow> InstanceLock => Set<InstanceLockRow>();
 
+    public DbSet<SessionRecording> SessionRecordings => Set<SessionRecording>();
+
     /// <summary>Configures Npgsql for the core context, with its migration history inside the core schema.</summary>
     public static DbContextOptions<CoreDbContext> CreateOptions(string connectionString)
     {
@@ -218,6 +220,18 @@ public sealed class CoreDbContext(DbContextOptions<CoreDbContext> options)
             settings.Property(s => s.PluginId).HasMaxLength(128);
             settings.Property(s => s.Data).HasColumnType("jsonb");
             settings.HasOne<ApplicationUser>().WithMany().HasForeignKey(s => s.UpdatedByUserId).OnDelete(DeleteBehavior.SetNull);
+        });
+        builder.Entity<SessionRecording>(recording =>
+        {
+            recording.ToTable("session_recordings");
+            recording.HasKey(r => r.Id);
+            recording.Property(r => r.UserName).HasMaxLength(256);
+            recording.Property(r => r.HostName).HasMaxLength(Host.NameMaxLength);
+            recording.Property(r => r.SessionType).HasMaxLength(128);
+            recording.HasIndex(r => r.StartedAtUtc);
+            // A recording outlives its host and user, as the audit log does.
+            recording.HasOne<Host>().WithMany().HasForeignKey(r => r.HostId).OnDelete(DeleteBehavior.SetNull);
+            recording.HasOne<ApplicationUser>().WithMany().HasForeignKey(r => r.UserId).OnDelete(DeleteBehavior.SetNull);
         });
         builder.Entity<InstanceLockRow>(row =>
         {

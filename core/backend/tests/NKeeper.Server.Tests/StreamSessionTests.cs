@@ -406,6 +406,48 @@ public sealed class StreamSessionTests(PostgresFixture postgres, SshServerFixtur
         Assert.True(await condition(), "Timed out waiting.");
     }
 
+    [Fact]
+    public async Task A_terminal_session_is_recorded_its_output_and_size_not_what_else_was_sent_and_watching_it_is_audited()
+    {
+        var server = new ServerScenario(await postgres.CreateDatabaseAsync());
+        await using var _ = server;
+        server.Settings["Plugins:Settings:hello:RecordsTerminal"] = "true";
+        server.Install(TestPlugins.Package(server.DevelopmentKey));
+        var (admin, cookie) = await SignInAsync(server, ServerScenario.AdminUserName, ServerScenario.AdminPassword);
+        var host = await CreateHostAsync(admin);
+
+        await using (var session = await SessionClient.ConnectAsync(server, cookie))
+        {
+            await session.SendAsync(new { type = "start", hostId = Id(host), serviceId = ServiceId(host) });
+            await session.ExpectAsync("connected");
+            await session.SendAsync(new { type = "resize", columns = 120, rows = 40 });
+            await session.ExpectAsync("echo");
+            await session.SendAsync(new { type = "secret", text = "not-recorded" });
+            await session.ExpectAsync("echo");
+            await session.SendBinaryAsync("héllo\r\n"u8.ToArray());
+            await session.ReceiveBinaryAsync();
+        }
+
+        await WaitForAsync(async () => (await admin.GetFromJsonAsync<JsonElement>("/api/audit/recordings", Token)).GetArrayLength() == 1);
+        var recording = (await admin.GetFromJsonAsync<JsonElement>("/api/audit/recordings", Token))[0];
+        Assert.Equal((ServerScenario.AdminUserName, "ssh", "hello", false), (recording.GetProperty("userName").GetString(), recording.GetProperty("hostName").GetString(), recording.GetProperty("sessionType").GetString(), recording.GetProperty("truncated").GetBoolean()));
+
+        using var cast = await admin.GetAsync(new Uri($"/api/audit/recordings/{recording.GetProperty("id").GetGuid()}/cast", UriKind.Relative), Token);
+        Assert.Equal("gzip", Assert.Single(cast.Content.Headers.ContentEncoding));
+        await using var gzip = new System.IO.Compression.GZipStream(await cast.Content.ReadAsStreamAsync(Token), System.IO.Compression.CompressionMode.Decompress);
+        var lines = (await new StreamReader(gzip).ReadToEndAsync(Token)).Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        Assert.Equal(2, JsonDocument.Parse(lines[0]).RootElement.GetProperty("version").GetInt32());
+        var events = lines.Skip(1).Select(l => JsonDocument.Parse(l).RootElement).Select(e => (e[1].GetString(), e[2].GetString())).ToList();
+        Assert.Equal([("r", "120x40"), ("o", "héllo\r\n")], events);
+        Assert.DoesNotContain("not-recorded", string.Join('\n', lines), StringComparison.Ordinal);
+        Assert.Single(await AuditAsync(server, AuditActions.RecordingView));
+
+        // Only administrators see recordings.
+        await server.CreateUserAsync("bob", BobPassword);
+        var (bob, _) = await SignInAsync(server, "bob", BobPassword);
+        Assert.Equal(HttpStatusCode.Forbidden, (await bob.GetAsync(new Uri("/api/audit/recordings", UriKind.Relative), Token)).StatusCode);
+    }
+
     private async Task<ServerScenario> ServerAsync()
     {
         var server = new ServerScenario(await postgres.CreateDatabaseAsync());

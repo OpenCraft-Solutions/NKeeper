@@ -14,8 +14,9 @@
     "watch": "vite build --watch"
   },
   "dependencies": {
+    "@nkeeper/sdk": "*",
+    "@xterm/xterm": "^6.0.0",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8",
-    "@nkeeper/sdk": "*"
+    "react-dom": "^19.2.8"
   }
 }
