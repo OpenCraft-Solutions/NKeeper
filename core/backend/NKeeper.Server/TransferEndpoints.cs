@@ -1,13 +1,18 @@
 using System.Reflection;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 using NKeeper.Core.Audit;
 using NKeeper.Core.Persistence;
 using NKeeper.Core.Transfer;
 
 namespace NKeeper.Server;
 
-public sealed record TransferExportRequest(string? Password, string? Passphrase, string? PassphraseConfirmation);
+/// <param name="LockAfterExport">1.x's lock: no changes to hosts and users here afterwards, until unlocked.</param>
+public sealed record TransferExportRequest(string? Password, string? Passphrase, string? PassphraseConfirmation, bool LockAfterExport = false);
+
+/// <summary>Whether the instance is locked after an export (§7.45), since when and by whom.</summary>
+public sealed record TransferStatusResponse(bool Locked, DateTimeOffset? LockedAtUtc, string? LockedBy);
 
 /// <summary>Moving an instance to a new server (docs/architecture.md §7.45), ported from 1.x's <c>InstanceTransferController</c>. Administrators only.</summary>
 internal static class TransferEndpoints
@@ -19,7 +24,22 @@ internal static class TransferEndpoints
     {
         var transfer = api.MapGroup("/transfer").RequireAuthorization(policy => policy.RequireRole(SystemRoles.Administrator));
 
-        transfer.MapPost("/export", async (TransferExportRequest request, ClaimsPrincipal principal, UserManager<ApplicationUser> users, InstanceTransfer instance, IAuditLog audit, HttpResponse response, CancellationToken ct) =>
+        transfer.MapGet("/status", async (CoreDbContext db, CancellationToken ct) =>
+            await db.InstanceLock.AsNoTracking().FirstOrDefaultAsync(ct) is { } row
+                ? new TransferStatusResponse(true, row.LockedAtUtc, row.LockedBy)
+                : new TransferStatusResponse(false, null, null));
+
+        transfer.MapPost("/unlock", async (CoreDbContext db, IAuditLog audit, CancellationToken ct) =>
+        {
+            if (await db.InstanceLock.ExecuteDeleteAsync(ct) > 0)
+            {
+                await audit.RecordAsync(new AuditEntry(AuditActions.TransferUnlock, string.Empty, string.Empty), ct);
+            }
+
+            return Results.NoContent();
+        });
+
+        transfer.MapPost("/export", async (TransferExportRequest request, ClaimsPrincipal principal, UserManager<ApplicationUser> users, InstanceTransfer instance, CoreDbContext db, IAuditLog audit, HttpResponse response, CancellationToken ct) =>
         {
             var user = await users.GetUserAsync(principal);
             if (user is null || string.IsNullOrEmpty(request.Password) || !await users.CheckPasswordAsync(user, request.Password))
@@ -44,6 +64,13 @@ internal static class TransferEndpoints
                 using var bundle = new MemoryStream();
                 await BundleFormat.WriteAsync(bundle, header, passphrase, plaintext, ct);
                 await audit.RecordAsync(new AuditEntry(AuditActions.TransferExport, string.Empty, $"{bundle.Length} bytes"), ct);
+                if (request.LockAfterExport && !await db.InstanceLock.AnyAsync(ct))
+                {
+                    db.InstanceLock.Add(new InstanceLockRow { LockedAtUtc = DateTimeOffset.UtcNow, LockedByUserId = user.Id, LockedBy = user.UserName! });
+                    await db.SaveChangesAsync(ct);
+                    await audit.RecordAsync(new AuditEntry(AuditActions.TransferLock, string.Empty, "after the export"), ct);
+                }
+
                 response.Headers.CacheControl = "no-store";
                 return Results.File(bundle.ToArray(), "application/octet-stream", $"nkeeper-export-{DateTime.UtcNow:yyyy-MM-dd}.nkeeper");
             }

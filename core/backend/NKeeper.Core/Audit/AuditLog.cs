@@ -92,6 +92,12 @@ public static class AuditActions
 
     /// <summary>An administrator replaced a fresh instance's data with an export file's.</summary>
     public const string TransferImport = "transfer.import";
+
+    /// <summary>An export locked the instance against changes to hosts and users (§7.45).</summary>
+    public const string TransferLock = "transfer.lock";
+
+    /// <summary>An administrator unlocked it again.</summary>
+    public const string TransferUnlock = "transfer.unlock";
 }
 
 /// <summary>

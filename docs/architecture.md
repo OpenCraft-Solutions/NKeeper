@@ -1298,7 +1298,9 @@ inventoryTools: { 'network-scan': { label: 'Scan network', title: 'Find the mach
 
 It holds no sessions, no audit log (the new server's starts with the import) and no key ring.
 
-**Exporting** (`POST /api/transfer/export`): the administrator confirms with their own password and gives the passphrase twice. The file downloads, and the export is audited (`transfer.export`). Not yet: 1.x's lock after an export, which kept hosts, users and credentials from changing until the move was done or called off.
+**Exporting** (`POST /api/transfer/export`): the administrator confirms with their own password and gives the passphrase twice. The file downloads, and the export is audited (`transfer.export`).
+
+**The lock**, 1.x's, ticked by default when exporting: afterwards, until an administrator unlocks it on the same page, changes to hosts (their credentials included) and users, and imports, answer 409 `instance_locked`, so nothing is changed on the old server that the new one would never get. Reading still works, and so does connecting: typing a credential into core's prompt (§7.6) and trusting a server's key (§7.7) aren't refused. `GET /api/transfer/status` says whether it's locked, since when and by whom; `POST /api/transfer/unlock` unlocks it. Locking and unlocking are audited (`transfer.lock`, `transfer.unlock`). The lock is a row of its own (`instance_lock`), not in the file, so the new server starts unlocked.
 
 **Importing**, only into a fresh instance: no hosts, and no users but the one importing.
 - **Preview** (`POST /api/transfer/import/preview`, the file and passphrase): decrypts and checks the file and says what it holds: how many users, hosts and credentials, and the plugins it used that this server doesn't have. Nothing changes.

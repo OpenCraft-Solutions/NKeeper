@@ -130,6 +130,40 @@ public sealed class TransferTests(PostgresFixture postgres) : IClassFixture<Post
         Assert.Contains("format 1", refused.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task An_export_can_lock_hosts_and_users_against_changes_until_unlocked_while_connecting_still_works()
+    {
+        await using var server = new ServerScenario(await postgres.CreateDatabaseAsync());
+        server.Install(TestPlugins.Package(server.DevelopmentKey));
+        using var admin = await server.SignedInClientAsync();
+        var host = await CreateHostAsync(admin);
+        var id = host.GetProperty("id").GetGuid();
+        var serviceId = host.GetProperty("services")[0].GetProperty("id").GetGuid();
+
+        (await admin.SendWithTokenAsync(HttpMethod.Post, "/api/transfer/export", new { password = ServerScenario.AdminPassword, passphrase = Passphrase, passphraseConfirmation = Passphrase, lockAfterExport = true })).EnsureSuccessStatusCode();
+        var status = await admin.GetFromJsonAsync<JsonElement>("/api/transfer/status", Token);
+        Assert.True(status.GetProperty("locked").GetBoolean());
+        Assert.Equal("admin", status.GetProperty("lockedBy").GetString());
+
+        // Hosts and users can't change; reading and connecting can.
+        using var edit = await admin.SendWithTokenAsync(HttpMethod.Put, $"/api/hosts/{id}", new { name = "renamed", ipAddress = "127.0.0.1", version = host.GetProperty("version").GetUInt32() });
+        Assert.Equal(HttpStatusCode.Conflict, edit.StatusCode);
+        Assert.Equal("instance_locked", (await edit.Content.ReadFromJsonAsync<JsonElement>(Token)).GetProperty("code").GetString());
+        Assert.Equal(HttpStatusCode.Conflict, (await admin.SendWithTokenAsync(HttpMethod.Delete, $"/api/hosts/{id}")).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await admin.SendWithTokenAsync(HttpMethod.Post, "/api/users", new { userName = "carol", password = BobPassword })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await admin.GetAsync($"/api/hosts/{id}", Token)).StatusCode);
+        Assert.NotEqual(HttpStatusCode.Conflict, (await admin.SendWithTokenAsync(HttpMethod.Post, $"/api/hosts/{id}/services/{serviceId}/credential-prompt", new { username = "root", password = "typed" })).StatusCode);
+
+        (await admin.SendWithTokenAsync(HttpMethod.Post, "/api/transfer/unlock")).EnsureSuccessStatusCode();
+        Assert.False((await admin.GetFromJsonAsync<JsonElement>("/api/transfer/status", Token)).GetProperty("locked").GetBoolean());
+        (await admin.SendWithTokenAsync(HttpMethod.Put, $"/api/hosts/{id}", new { name = "renamed", ipAddress = "127.0.0.1", version = host.GetProperty("version").GetUInt32() })).EnsureSuccessStatusCode();
+
+        await using var db = new CoreDbContext(CoreDbContext.CreateOptions(server.ConnectionString));
+        Assert.Equal(
+            [AuditActions.TransferExport, AuditActions.TransferLock, AuditActions.TransferUnlock],
+            await db.AuditEvents.Where(e => e.Action.StartsWith("transfer.")).OrderBy(e => e.Id).Select(e => e.Action).ToListAsync(Token));
+    }
+
     private static async Task<JsonElement> CreateHostAsync(HttpClient admin)
     {
         using var response = await admin.SendWithTokenAsync(HttpMethod.Post, "/api/hosts", new
